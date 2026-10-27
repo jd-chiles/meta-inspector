@@ -1,0 +1,357 @@
+[
+  {
+    "id": "TASK-001",
+    "title": "Confirm catalog and Meta integration contracts",
+    "profile": "architect",
+    "difficulty": "medium",
+    "rationale": "The active form and provider API contract are unresolved; separate illustrative mode from verified mappings.",
+    "requirements": [
+      "REQ-001",
+      "REQ-003",
+      "REQ-010",
+      "REQ-011"
+    ],
+    "dependencies": [],
+    "files": [
+      "docs/integration",
+      "fixtures/README.md"
+    ],
+    "acceptance": [
+      "Record official Meta endpoint, model identifier, image payload/output schema and data-handling links with access dates.",
+      "Document the demo catalog mode and provider-confirmation gate; do not fabricate form fields.",
+      "Record credential availability without values; permit generic scaffold work while a live smoke is pending."
+    ],
+    "checkIDs": [
+      "docs"
+    ],
+    "risk": "medium",
+    "description": "Confirm catalog and Meta integration contracts. Record official Meta endpoint, model identifier, image payload/output schema and data-handling links with access dates. Document the demo catalog mode and provider-confirmation gate; do not fabricate form fields. Record credential availability without values; permit generic scaffold work while a live smoke is pending."
+  },
+  {
+    "id": "TASK-002",
+    "title": "Scaffold app and executable verification",
+    "profile": "implementer",
+    "difficulty": "medium",
+    "rationale": "Establish the single shared manifest/lockfile and CI commands before component work.",
+    "requirements": [
+      "REQ-009",
+      "REQ-012"
+    ],
+    "dependencies": [
+      "TASK-001"
+    ],
+    "files": [
+      "package.json",
+      "package-lock.json",
+      "next.config.ts",
+      "next-env.d.ts",
+      "tsconfig.json",
+      "eslint.config.mjs",
+      "vitest.config.ts",
+      "playwright.config.ts",
+      "src/app/layout.tsx",
+      "src/app/page.tsx",
+      "src/app/globals.css",
+      ".env.example",
+      ".github/workflows/ci.yml",
+      "scripts/ci-app.mjs"
+    ],
+    "acceptance": [
+      "Pin compatible dependencies and Node 22; add lint, typecheck, test:unit, test:e2e, test:live, build, dev and start scripts.",
+      "Make test:e2e start a production build server in fixture mode without a Meta key.",
+      "CI runs actual required scripts; no passWithNoTests, optional scripts or swallowed errors.",
+      "Keep API secrets out of client configuration and commit only .env.example names."
+    ],
+    "checkIDs": [
+      "docs",
+      "lint",
+      "typecheck",
+      "build"
+    ],
+    "risk": "medium",
+    "description": "Scaffold app and executable verification. Pin compatible dependencies and Node 22; add lint, typecheck, test:unit, test:e2e, test:live, build, dev and start scripts. Make test:e2e start a production build server in fixture mode without a Meta key. CI runs actual required scripts; no passWithNoTests, optional scripts or swallowed errors. Keep API secrets out of client configuration and commit only .env.example names."
+  },
+  {
+    "id": "TASK-003",
+    "title": "Implement catalog, evidence contracts and state reducer",
+    "profile": "implementer",
+    "difficulty": "medium",
+    "rationale": "Domain rules control evidence integrity, reviews and stale responses.",
+    "requirements": [
+      "REQ-001",
+      "REQ-004",
+      "REQ-005",
+      "REQ-006"
+    ],
+    "dependencies": [
+      "TASK-002"
+    ],
+    "files": [
+      "src/domain",
+      "src/data",
+      "tests/unit/domain"
+    ],
+    "acceptance": [
+      "Versioned illustrative catalog has 3–4 items and at least one required manual test.",
+      "Strict schemas reject malformed/extra/verdict fields and preserve required checks.",
+      "Reducer ignores stale attempts and invalidates review after image/item changes; tests cover races and rejection."
+    ],
+    "checkIDs": [
+      "typecheck",
+      "unit"
+    ],
+    "risk": "medium",
+    "description": "Implement catalog, evidence contracts and state reducer. Versioned illustrative catalog has 3–4 items and at least one required manual test. Strict schemas reject malformed/extra/verdict fields and preserve required checks. Reducer ignores stale attempts and invalidates review after image/item changes; tests cover races and rejection."
+  },
+  {
+    "id": "TASK-004",
+    "title": "Implement bounded media and Meta API path",
+    "profile": "backend",
+    "difficulty": "high",
+    "rationale": "Untrusted uploads, decoder resource limits and paid upstream inference cross trust boundaries.",
+    "requirements": [
+      "REQ-002",
+      "REQ-003",
+      "REQ-004",
+      "REQ-010"
+    ],
+    "dependencies": [
+      "TASK-003"
+    ],
+    "files": [
+      "src/app/api/analyze",
+      "src/server",
+      "fixtures/responses",
+      "tests/unit/api",
+      "tests/live"
+    ],
+    "acceptance": [
+      "Validate/decode/normalize image bytes with limits and metadata stripping; never fetch client URLs.",
+      "Implement real configured Meta adapter and explicit fixture adapter without silent fallback.",
+      "Enforce same-origin, timeout, cancellation, single-session inflight limits and safe errors.",
+      "Use mocked HTTP for deterministic boundary tests; test:live fails clearly without credentials and records actual provider success separately."
+    ],
+    "checkIDs": [
+      "typecheck",
+      "unit",
+      "live-smoke"
+    ],
+    "risk": "high",
+    "description": "Implement bounded media and Meta API path. Validate/decode/normalize image bytes with limits and metadata stripping; never fetch client URLs. Implement real configured Meta adapter and explicit fixture adapter without silent fallback. Enforce same-origin, timeout, cancellation, single-session inflight limits and safe errors. Use mocked HTTP for deterministic boundary tests; test:live fails clearly without credentials and records actual provider success separately."
+  },
+  {
+    "id": "TASK-005",
+    "title": "Build local storage and guided capture",
+    "profile": "frontend",
+    "difficulty": "medium",
+    "rationale": "Connect camera/file input with async persistence, replacement and deletion.",
+    "requirements": [
+      "REQ-002",
+      "REQ-006",
+      "REQ-007",
+      "REQ-009"
+    ],
+    "dependencies": [
+      "TASK-004"
+    ],
+    "files": [
+      "src/storage",
+      "src/features/walkthrough/capture",
+      "src/features/walkthrough/session",
+      "src/app/page.tsx",
+      "tests/unit/storage",
+      "tests/unit/capture"
+    ],
+    "acceptance": [
+      "Camera denial falls back to upload; preview/retake/cancel work at mobile width.",
+      "IndexedDB refresh recovery, schema errors and quota failures expose explicit states.",
+      "Delete and replace invalidate inflight responses and revoke media URLs; storage operations do not restore deleted records."
+    ],
+    "checkIDs": [
+      "typecheck",
+      "unit"
+    ],
+    "risk": "medium",
+    "description": "Build local storage and guided capture. Camera denial falls back to upload; preview/retake/cancel work at mobile width. IndexedDB refresh recovery, schema errors and quota failures expose explicit states. Delete and replace invalidate inflight responses and revoke media URLs; storage operations do not restore deleted records."
+  },
+  {
+    "id": "TASK-006",
+    "title": "Implement worker review and manual-check UI",
+    "profile": "frontend",
+    "difficulty": "medium",
+    "rationale": "Human control must remain independent of model suggestions and async state.",
+    "requirements": [
+      "REQ-004",
+      "REQ-005",
+      "REQ-006",
+      "REQ-009"
+    ],
+    "dependencies": [
+      "TASK-005"
+    ],
+    "files": [
+      "src/features/walkthrough/review",
+      "src/features/walkthrough/session",
+      "src/app/page.tsx",
+      "tests/unit/review"
+    ],
+    "acceptance": [
+      "Draft, unknowns, required checks and provenance remain visible together.",
+      "Accept/edit/reject create revisions; accepting text cannot mark a physical test performed.",
+      "Unresolved/rejected/loading/error states have keyboard-accessible recovery and mode labels."
+    ],
+    "checkIDs": [
+      "typecheck",
+      "unit"
+    ],
+    "risk": "medium",
+    "description": "Implement worker review and manual-check UI. Draft, unknowns, required checks and provenance remain visible together. Accept/edit/reject create revisions; accepting text cannot mark a physical test performed. Unresolved/rejected/loading/error states have keyboard-accessible recovery and mode labels."
+  },
+  {
+    "id": "TASK-007",
+    "title": "Implement safe review-only printable export",
+    "profile": "frontend",
+    "difficulty": "medium",
+    "rationale": "Export must enforce review policy and avoid HTML injection or false completion.",
+    "requirements": [
+      "REQ-005",
+      "REQ-006",
+      "REQ-008"
+    ],
+    "dependencies": [
+      "TASK-006"
+    ],
+    "files": [
+      "src/export",
+      "src/features/walkthrough/summary",
+      "src/app/page.tsx",
+      "tests/unit/export"
+    ],
+    "acceptance": [
+      "Export uses a stable snapshot, embeds normalized images, escapes text and repeats draft banner.",
+      "Exclude unapproved draft text while listing pending/rejected/failed items as unresolved.",
+      "Fixture/live and manual-check states remain visible; no HMIS approval or completed inspection claim."
+    ],
+    "checkIDs": [
+      "typecheck",
+      "unit"
+    ],
+    "risk": "medium",
+    "description": "Implement safe review-only printable export. Export uses a stable snapshot, embeds normalized images, escapes text and repeats draft banner. Exclude unapproved draft text while listing pending/rejected/failed items as unresolved. Fixture/live and manual-check states remain visible; no HMIS approval or completed inspection claim."
+  },
+  {
+    "id": "TASK-008",
+    "title": "Prepare rights-cleared fixtures and evaluation protocol",
+    "profile": "documentation",
+    "difficulty": "low",
+    "rationale": "Document a small reproducible mock set and measured outcomes without unsupported claims.",
+    "requirements": [
+      "REQ-001",
+      "REQ-011"
+    ],
+    "dependencies": [
+      "TASK-007"
+    ],
+    "files": [
+      "fixtures/media",
+      "fixtures/evaluation",
+      "fixtures/README.md",
+      "docs/evaluation",
+      "docs/DEMO.md"
+    ],
+    "acceptance": [
+      "Document provenance/license for mock inputs and separate development/evaluation sets.",
+      "Provide three required scenarios and blank measurement sheet with missing values marked unmeasured.",
+      "Demo script distinguishes qualitative feedback, fixture output and actual live inference."
+    ],
+    "checkIDs": [
+      "docs",
+      "unit"
+    ],
+    "risk": "low",
+    "description": "Prepare rights-cleared fixtures and evaluation protocol. Document provenance/license for mock inputs and separate development/evaluation sets. Provide three required scenarios and blank measurement sheet with missing values marked unmeasured. Demo script distinguishes qualitative feedback, fixture output and actual live inference."
+  },
+  {
+    "id": "TASK-009",
+    "title": "Exercise integrated mobile and failure scenarios",
+    "profile": "tests",
+    "difficulty": "medium",
+    "rationale": "API/state/storage/export boundaries need real browser proof beyond isolated tests.",
+    "requirements": [
+      "REQ-001",
+      "REQ-002",
+      "REQ-003",
+      "REQ-004",
+      "REQ-005",
+      "REQ-006",
+      "REQ-007",
+      "REQ-008",
+      "REQ-009",
+      "REQ-010",
+      "REQ-011",
+      "REQ-012"
+    ],
+    "dependencies": [
+      "TASK-008"
+    ],
+    "files": [
+      "tests/e2e",
+      "tests/unit/integration"
+    ],
+    "acceptance": [
+      "Browser tests cover 360px capture/upload, review, edit, rejection, manual checks and printable output.",
+      "Delay fixture responses to verify retake/delete races; cover storage failure/reload, corrupt image, timeout, invalid output and missing key.",
+      "Run CI without provider credentials using explicit fixtures; no skipped acceptance or zero-test passes."
+    ],
+    "checkIDs": [
+      "docs",
+      "lint",
+      "typecheck",
+      "unit",
+      "browser",
+      "build"
+    ],
+    "risk": "medium",
+    "description": "Exercise integrated mobile and failure scenarios. Browser tests cover 360px capture/upload, review, edit, rejection, manual checks and printable output. Delay fixture responses to verify retake/delete races; cover storage failure/reload, corrupt image, timeout, invalid output and missing key. Run CI without provider credentials using explicit fixtures; no skipped acceptance or zero-test passes."
+  },
+  {
+    "id": "TASK-010",
+    "title": "Record verification and release readiness gaps",
+    "profile": "documentation",
+    "difficulty": "low",
+    "rationale": "Final documentation must describe only observed checks and remaining activation gates.",
+    "requirements": [
+      "REQ-003",
+      "REQ-011",
+      "REQ-012"
+    ],
+    "dependencies": [
+      "TASK-009"
+    ],
+    "files": [
+      "README.md",
+      "docs/REVIEW_AND_CI.md",
+      "docs/integration",
+      "docs/evaluation",
+      "docs/sdd/features/habitability-walkthrough-mvp/05-change-log.md",
+      "docs/sdd/features/habitability-walkthrough-mvp/06-release.md",
+      "docs/sdd/features/habitability-walkthrough-mvp/07-retrospective.md"
+    ],
+    "acceptance": [
+      "Record exact commands, source revision, CI/live outcomes and independent review findings without invented success.",
+      "Document real vs illustrative form status, new vs reused work, setup and remaining limitations.",
+      "Mark Ready only after current required checks and independent reviews pass; publish/deploy remain separate."
+    ],
+    "checkIDs": [
+      "docs",
+      "lint",
+      "typecheck",
+      "unit",
+      "browser",
+      "build",
+      "live-smoke"
+    ],
+    "risk": "low",
+    "description": "Record verification and release readiness gaps. Record exact commands, source revision, CI/live outcomes and independent review findings without invented success. Document real vs illustrative form status, new vs reused work, setup and remaining limitations. Mark Ready only after current required checks and independent reviews pass; publish/deploy remain separate."
+  }
+]

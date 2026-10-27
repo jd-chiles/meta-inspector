@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: "true"
+      APP_ANALYSIS_MODE: fixture
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify SDD and task contracts
+        run: node scripts/verify-sdd.mjs
+      - name: Detect application and enforce check scripts
+        id: app
+        run: node scripts/ci-app.mjs
+      - name: Install locked dependencies
+        if: steps.app.outputs.enabled == 'true'
+        run: npm ci
+      - name: Lint
+        if: steps.app.outputs.enabled == 'true'
+        run: npm run lint
+      - name: Typecheck
+        if: steps.app.outputs.enabled == 'true'
+        run: npm run typecheck
+      - name: Unit and API boundary checks
+        if: steps.app.outputs.enabled == 'true'
+        run: npm run test:unit
+      - name: Production build
+        if: steps.app.outputs.enabled == 'true'
+        run: npm run build
+      - name: Install Chromium
+        if: steps.app.outputs.enabled == 'true'
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Browser acceptance
+        if: steps.app.outputs.enabled == 'true'
+        run: npm run test:e2e

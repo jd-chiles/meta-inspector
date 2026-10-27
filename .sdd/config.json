@@ -1,0 +1,117 @@
+{
+  "rigor": "standard",
+  "concurrency": 1,
+  "maxDepth": 2,
+  "maxAttempts": 3,
+  "routing": {
+    "mode": "difficulty",
+    "tiers": {
+      "low": {
+        "model": "inherit"
+      },
+      "medium": {
+        "model": "inherit"
+      },
+      "high": {
+        "model": "inherit"
+      }
+    }
+  },
+  "checks": {
+    "docs": {
+      "command": "node scripts/verify-sdd.mjs",
+      "requirements": [
+        "REQ-001",
+        "REQ-002",
+        "REQ-003",
+        "REQ-004",
+        "REQ-005",
+        "REQ-006",
+        "REQ-007",
+        "REQ-008",
+        "REQ-009",
+        "REQ-010",
+        "REQ-011",
+        "REQ-012"
+      ],
+      "timeoutMs": 30000,
+      "browser": false
+    },
+    "lint": {
+      "command": "npm run lint",
+      "requirements": [
+        "REQ-012"
+      ],
+      "timeoutMs": 120000,
+      "browser": false
+    },
+    "typecheck": {
+      "command": "npm run typecheck",
+      "requirements": [
+        "REQ-001",
+        "REQ-003",
+        "REQ-004",
+        "REQ-006",
+        "REQ-012"
+      ],
+      "timeoutMs": 120000,
+      "browser": false
+    },
+    "unit": {
+      "command": "npm run test:unit",
+      "requirements": [
+        "REQ-001",
+        "REQ-002",
+        "REQ-003",
+        "REQ-004",
+        "REQ-005",
+        "REQ-006",
+        "REQ-007",
+        "REQ-008",
+        "REQ-010",
+        "REQ-011"
+      ],
+      "timeoutMs": 120000,
+      "browser": false
+    },
+    "browser": {
+      "command": "npm run test:e2e",
+      "requirements": [
+        "REQ-001",
+        "REQ-002",
+        "REQ-003",
+        "REQ-004",
+        "REQ-005",
+        "REQ-006",
+        "REQ-007",
+        "REQ-008",
+        "REQ-009",
+        "REQ-010",
+        "REQ-011",
+        "REQ-012"
+      ],
+      "browser": true,
+      "timeoutMs": 240000
+    },
+    "build": {
+      "command": "npm run build",
+      "requirements": [
+        "REQ-003",
+        "REQ-009",
+        "REQ-012"
+      ],
+      "timeoutMs": 240000,
+      "browser": false
+    },
+    "live-smoke": {
+      "command": "npm run test:live",
+      "requirements": [
+        "REQ-003",
+        "REQ-010",
+        "REQ-011"
+      ],
+      "timeoutMs": 90000,
+      "browser": false
+    }
+  }
+}
