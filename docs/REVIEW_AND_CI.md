@@ -18,6 +18,8 @@ OpenCode SDD Autopilot builds the task graph and records its own lifecycle evide
 
 The public repository is [jd-chiles/meta-inspector](https://github.com/jd-chiles/meta-inspector), created at the project owner's request. The initial publication includes the CI workflow and review rules. GitHub Actions execution and account-level Codex automatic review are distinct activation steps; repository files do not switch on Codex's account settings.
 
+Initial publication commit: 91f65ba7dd257c059c328e9cacdbe728806685b4. [First hosted CI run](https://github.com/jd-chiles/meta-inspector/actions/runs/40432010484): succeeded. This run validates documentation structure; the app is not scaffolded, so no application or live Meta acceptance is claimed. Codex automatic-review activation remains pending.
+
 Repository activation and verification:
 
 1. Push these files through the normal Git workflow and observe a real CI run.
