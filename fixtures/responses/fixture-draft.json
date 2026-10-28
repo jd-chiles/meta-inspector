@@ -1,0 +1,20 @@
+{
+  "mode": "fixture",
+  "model": "muse-spark-1.3",
+  "fixtureNotice": "Fixture output — not live inference. Hand-written mock-unit draft for deterministic tests and fixture-mode UI.",
+  "draft": {
+    "observation": "The mock-unit faucet and basin look intact in this frame with a single faucet visible above the basin.",
+    "visibleEvidence": [
+      "Basin surface shows no visible cracks in this frame",
+      "Single faucet mounted at the rear of the basin"
+    ],
+    "unknowns": [
+      "Water flow and drainage cannot be told from the photo",
+      "Hot water temperature cannot be told from the photo"
+    ],
+    "suggestedManualChecks": [
+      "Run the taps, confirm hot water and clear steady flow and drainage",
+      "Watch the basin drain and check for steady flow"
+    ]
+  }
+}

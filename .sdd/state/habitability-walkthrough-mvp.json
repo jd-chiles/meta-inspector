@@ -2,14 +2,68 @@
   "schema_version": 1,
   "slug": "habitability-walkthrough-mvp",
   "title": "Habitability Walkthrough MVP",
-  "stage": "draft",
+  "stage": "verifying",
   "created_at": "2026-10-26T22:53:46.892Z",
-  "updated_at": "2026-10-26T22:53:46.892Z",
+  "updated_at": "2026-10-28T17:21:39.154Z",
   "history": [
     {
       "at": "2026-10-26T22:53:46.892Z",
       "from": null,
       "to": "draft"
+    },
+    {
+      "at": "2026-10-27T12:04:36.379Z",
+      "from": "draft",
+      "to": "specified",
+      "operation_id": "4cb4017d-3a09-463a-bb53-66ea199418ca"
+    },
+    {
+      "at": "2026-10-27T12:04:40.517Z",
+      "from": "specified",
+      "to": "planned",
+      "operation_id": "ec8fbfae-e939-44e9-a97e-690222f5f265"
+    },
+    {
+      "at": "2026-10-27T13:25:20.082Z",
+      "from": "planned",
+      "to": "implementing",
+      "operation_id": "9fb2b813-e380-4d21-a7fd-90264bfe0722"
+    },
+    {
+      "at": "2026-10-28T02:05:12.246Z",
+      "from": "implementing",
+      "to": "verifying",
+      "operation_id": "4f81dac6-74d2-4646-b3c8-ca4578c9e5c5"
+    },
+    {
+      "at": "2026-10-28T17:00:21.469Z",
+      "from": "verifying",
+      "to": "draft",
+      "reason": "Adopt src/app/walkthrough.css (frontend styling created by Kanban lane, imported by layout, verified correct by three code reviews) into the implementation baseline via a narrow audit-only ownership task, and baseline the nine preserved foreign PM/infra/docs files; correct 06-release.md Ready->Not ready per gate TASK-058 finding without claiming live ledger proof."
+    },
+    {
+      "at": "2026-10-28T17:02:45.651Z",
+      "from": "draft",
+      "to": "specified",
+      "operation_id": "07343606-dd08-4ff7-8d6f-a3e365ecd86e"
+    },
+    {
+      "at": "2026-10-28T17:04:20.395Z",
+      "from": "specified",
+      "to": "planned",
+      "operation_id": "15dfaacd-5b37-4b71-a214-a02452861172"
+    },
+    {
+      "at": "2026-10-28T17:15:52.184Z",
+      "from": "planned",
+      "to": "implementing",
+      "operation_id": "912903ae-7ff4-4996-b3f0-eb142c1e5789"
+    },
+    {
+      "at": "2026-10-28T17:21:39.154Z",
+      "from": "implementing",
+      "to": "verifying",
+      "operation_id": "b1496efd-feb2-4c43-b7b1-27622cfe2e28"
     }
   ]
 }

@@ -1,19 +1,60 @@
 # Demo and submission plan
 
+> Evidence classes used in this demo (say explicitly on camera):
+>
+> - **Qualitative feedback** — owner-reported case-manager conversations about
+>   caseloads, paperwork, and time burden. Exploratory only; no sample size,
+>   dates, quotations, or measured times are on record (`docs/RESEARCH.md`).
+>   Never present as measured research.
+> - **Fixture output** — deterministic hand-written drafts labeled
+>   `mode: "fixture"` (for example `fixtures/responses/fixture-draft.json`).
+>   Used when no key is configured or for a stable backup take. On-screen label
+>   and export banner always say fixture, never live.
+> - **Actual live inference** — a real `muse-spark-1.3` call over
+>   `https://api.meta.ai/v1` with rights-cleared mock-unit media, run via the
+>   server-only adapter with `APP_ANALYSIS_MODE=live`. Recorded separately with
+>   model, mode, request ID, and latency. As of 2026-10-27 no key is
+>   provisioned, so no live result exists; fixture success never counts as live.
+>
+> Every checklist surface in the demo carries:
+> `Demo checklist — not a verified Form 1083 mapping.`
+
+## Frozen demo route (frontend-announced 2026-10-28)
+
+- URL: http://127.0.0.1:3100/
+- Mode: fixture (mock output, not live inference; `APP_ANALYSIS_MODE=fixture`, no Meta key)
+- Catalog: `demo-habitability-walkthrough` version `0.1.0-demo.1` (demo mode, `DEMO_NOTICE` on every surface)
+- Take for this recording: **fixture take**. Mode line, read verbatim:
+  "This draft is fixture output — not live inference. The screen shows mode fixture."
+- Do not read the live-take line: no labeled live take of this route exists in
+  this lane. (A coordinator-side live smoke is recorded in
+  `docs/sdd/features/habitability-walkthrough-mvp/06-release.md`; it is a
+  server check, not a labeled demo take, and is cited here as a pointer only.)
+
 ## Three-minute demo story
 
 1. **Problem and user (0:00–0:25):** A navigator has a time-consuming evidence and tracking task. Explain the owner-reported case-manager feedback as qualitative, not measured research.
-2. **Capture (0:25–1:10):** Select a verified form item and take a self-shot mock-unit photo. Show the item-linked evidence and the actual Muse Spark call.
-3. **Reasoning boundary (1:10–1:55):** Display the neutral draft observation, what is visible, what remains unknown, and any manual check. Include an uncertainty case; never show an automated pass/fail verdict.
+2. **Capture (0:25–1:10):** Select a demo checklist item (not a verified form item) and take a self-shot mock-unit photo. Show the item-linked evidence, the demo-checklist label, and the current analysis mode (`fixture` or `live`). Name the mode aloud.
+3. **Reasoning boundary (1:10–1:55):** Display the neutral draft observation, what is visible, what remains unknown, and any manual check. Include an uncertainty case; never show an automated pass/fail verdict. State whether the draft on screen is fixture output or actual live inference.
 4. **Human review (1:55–2:30):** Navigator edits or rejects the draft, records a manual check, and reviews the evidence card.
-5. **Impact and limitations (2:30–3:00):** State what is measured (staff time, evidence coverage, corrections/rework), sample size, and known limits. Explicitly say placement timing is outside the project’s claim.
+5. **Impact and limitations (2:30–3:00):** State what is measured (staff time, evidence coverage, corrections/rework), sample size, and known limits. All unmeasured values stay `unmeasured` per `docs/evaluation/protocol.md`. Explicitly say placement timing is outside the project’s claim, the catalog is illustrative until a provider confirms the operative Form 1083 copy, and live inference is pending credentials unless a live call is shown and labeled.
 
-Use a stable prerecorded backup if the live API is unreliable, while clearly labeling it as recorded output. The submission should still show a working project and the model’s essential role.
+Use a stable prerecorded backup if the live API is unreliable. Label the backup
+on screen and in narration as recorded fixture output (`mode: "fixture"`), never
+as a live call. The submission should still show a working project and the model’s essential role.
+
+### Mode script (read the applicable line)
+
+- Fixture take: "This draft is fixture output — not live inference. The screen
+  shows mode fixture."
+- Live take: "This draft is actual live inference from Muse Spark over the Meta
+  API. The screen shows mode live with its request ID." Then show the separately
+  recorded model, mode, request ID, and latency — no keys or provider bodies.
 
 ## Rubric alignment
 
 - **Impact (30%):** Focus on task-level administrative friction, the specific user, and measured time/completeness/rework. User conversations are qualitative evidence only.
-- **Meta tooling (25%):** Make Muse Spark central to image-to-draft. Show a real model call and output. Add Transcribe or SAM only if implemented and visibly useful.
+- **Meta tooling (25%):** Make Muse Spark central to image-to-draft. Show a real model call and output. Add Transcribe or SAM only if implemented and visibly useful. If no key is available, show fixture output and state plainly that live inference is pending — do not imply a fixture take is a model call.
 - **Technical depth (20%):** Show source provenance, form-item mapping, uncertainty, structured-output validation, correction history, and manual-check boundary.
 - **Demo (25%):** One complete and reliable capture-to-review flow with a visible uncertainty case and human decision.
 

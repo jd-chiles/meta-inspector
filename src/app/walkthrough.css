@@ -1,0 +1,473 @@
+/* Walkthrough design system: calm, credible, fast gov-tech.
+   Mobile-first, light theme only, high-contrast palette, generous spacing.
+   Status is always carried by text + border shape, never color alone. */
+
+.wt {
+  --wt-ink: #1a1a1a;
+  --wt-muted: #3d4756;
+  --wt-paper: #ffffff;
+  --wt-wash: #eef3f8;
+  --wt-wash-strong: #dbe7f3;
+  --wt-line: #5b6b82;
+  --wt-line-soft: #b9c4d4;
+  --wt-primary: #0b5cad;
+  --wt-primary-dark: #084a8c;
+  --wt-primary-ink: #ffffff;
+  --wt-danger: #a4261c;
+  --wt-ok: #1c5c2e;
+  --wt-focus: #b45309;
+  --wt-radius: 0.625rem;
+  --wt-tap: 2.75rem;
+  --wt-sp-1: 0.375rem;
+  --wt-sp-2: 0.625rem;
+  --wt-sp-3: 1rem;
+  --wt-sp-4: 1.5rem;
+  --wt-sp-5: 2.25rem;
+  --wt-sp-6: 3rem;
+}
+
+/* ---------- shell ---------- */
+
+.wt-eyebrow {
+  margin: 0 0 var(--wt-sp-2);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--wt-primary-dark);
+}
+
+.wt-lede {
+  max-width: 44rem;
+  color: var(--wt-muted);
+  margin: var(--wt-sp-2) 0 0;
+}
+
+.wt-header-row {
+  display: grid;
+  gap: var(--wt-sp-2);
+  margin-top: var(--wt-sp-3);
+}
+
+.wt-header-row .mode-badge {
+  justify-self: start;
+}
+
+/* ---------- step progress ---------- */
+
+.wt-steps {
+  list-style: none;
+  margin: var(--wt-sp-4) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--wt-sp-2);
+}
+
+.wt-step {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--wt-sp-2);
+  align-items: start;
+  padding: var(--wt-sp-2) var(--wt-sp-3);
+  background: var(--wt-paper);
+  border: 0.125rem solid var(--wt-line-soft);
+  border-radius: var(--wt-radius);
+}
+
+.wt-step--done {
+  border-color: var(--wt-ok);
+  border-left-width: 0.375rem;
+}
+
+.wt-step--current {
+  border-color: var(--wt-primary);
+  border-left-width: 0.375rem;
+}
+
+.wt-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  height: 2rem;
+  padding-inline: 0.5rem;
+  font-weight: 800;
+  font-size: 0.95rem;
+  color: var(--wt-primary-ink);
+  background: var(--wt-primary);
+  border-radius: 999rem;
+}
+
+.wt-step--done .wt-step-num {
+  background: var(--wt-ok);
+}
+
+.wt-step-name {
+  margin: 0;
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.wt-step-name a {
+  color: inherit;
+}
+
+.wt-step-detail {
+  margin: 0.125rem 0 0;
+  font-size: 0.9rem;
+  color: var(--wt-muted);
+}
+
+/* ---------- sections & cards ---------- */
+
+.wt-section {
+  margin-top: var(--wt-sp-5);
+}
+
+.wt-section-title {
+  font-size: 1.25rem;
+  line-height: 1.35;
+  margin: 0 0 var(--wt-sp-1);
+}
+
+.wt-section-sub {
+  margin: 0 0 var(--wt-sp-3);
+  color: var(--wt-muted);
+  max-width: 44rem;
+}
+
+.wt-card {
+  background: var(--wt-paper);
+  border: 0.0625rem solid var(--wt-line);
+  border-radius: var(--wt-radius);
+  padding: var(--wt-sp-3) var(--wt-sp-3);
+  display: grid;
+  gap: var(--wt-sp-2);
+  width: 100%;
+  max-width: 100%;
+}
+
+.wt-item {
+  border-top: 0.25rem solid var(--wt-primary);
+}
+
+.wt-item-head {
+  display: grid;
+  gap: var(--wt-sp-1);
+}
+
+.wt-item-kicker {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--wt-primary-dark);
+}
+
+.wt-item-title {
+  margin: 0;
+  font-size: 1.3rem;
+  line-height: 1.3;
+}
+
+.wt-item-sub {
+  border-top: 0.0625rem solid var(--wt-line-soft);
+  padding-top: var(--wt-sp-3);
+  display: grid;
+  gap: var(--wt-sp-2);
+}
+
+.wt-subhead {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+/* ---------- item selector cards ---------- */
+
+.wt-pick-grid {
+  list-style: none;
+  margin: var(--wt-sp-3) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--wt-sp-2);
+}
+
+.wt-pick {
+  background: var(--wt-paper);
+  border: 0.0625rem solid var(--wt-line);
+  border-left-width: 0.375rem;
+  border-radius: var(--wt-radius);
+  padding: var(--wt-sp-2) var(--wt-sp-3);
+  display: grid;
+  gap: var(--wt-sp-1);
+}
+
+.wt-pick--empty { border-left-color: var(--wt-line-soft); border-left-style: solid; }
+.wt-pick--active { border-left-color: var(--wt-primary); border-left-style: solid; }
+.wt-pick--attention { border-left-color: var(--wt-danger); border-left-style: double; }
+.wt-pick--done { border-left-color: var(--wt-ok); border-left-style: solid; }
+
+.wt-pick-label {
+  margin: 0;
+  font-weight: 700;
+}
+
+.wt-pick-guidance {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--wt-muted);
+}
+
+.wt-pick-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--wt-sp-2);
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ---------- status chips (text + shape, never color alone) ---------- */
+
+.wt-chip {
+  display: inline-block;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  border: 0.125rem solid var(--wt-ink);
+  border-radius: 999rem;
+  background: var(--wt-paper);
+  color: var(--wt-ink);
+  white-space: nowrap;
+}
+
+.wt-chip--empty { border-style: dashed; }
+.wt-chip--active { border-style: solid; border-color: var(--wt-primary); color: var(--wt-primary-dark); }
+.wt-chip--attention { border-style: double; border-width: 0.25rem; border-color: var(--wt-danger); color: var(--wt-danger); }
+.wt-chip--done { border-style: solid; border-color: var(--wt-ok); color: var(--wt-ok); }
+
+/* ---------- buttons & inputs (44px+ tap targets) ---------- */
+
+.wt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--wt-sp-2);
+  align-items: center;
+}
+
+.wt-btn {
+  appearance: none;
+  font: inherit;
+  font-weight: 650;
+  min-height: var(--wt-tap);
+  padding: 0.625rem 1.1rem;
+  border-radius: 0.5rem;
+  border: 0.125rem solid var(--wt-primary);
+  background: var(--wt-paper);
+  color: var(--wt-primary-dark);
+  cursor: pointer;
+  flex: 1 1 11rem;
+  text-align: center;
+  text-decoration: none;
+  line-height: 1.4;
+}
+
+.wt-btn:hover {
+  background: var(--wt-wash);
+}
+
+.wt-btn:active {
+  background: var(--wt-wash-strong);
+}
+
+.wt-btn--primary {
+  background: var(--wt-primary);
+  border-color: var(--wt-primary);
+  color: var(--wt-primary-ink);
+}
+
+.wt-btn--primary:hover {
+  background: var(--wt-primary-dark);
+  border-color: var(--wt-primary-dark);
+}
+
+.wt-btn--danger {
+  background: var(--wt-danger);
+  border-color: var(--wt-danger);
+  color: #ffffff;
+}
+
+.wt-btn--danger:hover {
+  background: #7e1d16;
+  border-color: #7e1d16;
+}
+
+.wt-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.wt-field {
+  display: grid;
+  gap: var(--wt-sp-1);
+  width: 100%;
+  max-width: 100%;
+}
+
+.wt-label {
+  font-weight: 650;
+}
+
+.wt-input,
+.wt-textarea {
+  font: inherit;
+  width: 100%;
+  max-width: 100%;
+  min-height: var(--wt-tap);
+  padding: 0.625rem 0.75rem;
+  border: 0.125rem solid var(--wt-line);
+  border-radius: 0.5rem;
+  background: var(--wt-paper);
+  color: var(--wt-ink);
+}
+
+.wt-textarea {
+  min-height: 6rem;
+  resize: vertical;
+}
+
+/* ---------- notices ---------- */
+
+.wt-note {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--wt-muted);
+}
+
+.wt-alert {
+  margin: 0;
+  border: 0.125rem solid var(--wt-danger);
+  border-radius: 0.5rem;
+  padding: var(--wt-sp-2) var(--wt-sp-3);
+  background: #fdf1f0;
+  color: var(--wt-ink);
+  display: grid;
+  gap: var(--wt-sp-2);
+}
+
+.wt-statusline {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.wt-kv {
+  margin: 0;
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.92rem;
+}
+
+.wt-kv-row {
+  overflow-wrap: anywhere;
+}
+
+.wt-figure {
+  margin: 0;
+  display: grid;
+  gap: var(--wt-sp-1);
+}
+
+.wt-figure img {
+  width: 100%;
+  max-width: 100%;
+  border: 0.0625rem solid var(--wt-line);
+  border-radius: 0.375rem;
+}
+
+.wt-figcaption {
+  font-size: 0.88rem;
+  color: var(--wt-muted);
+}
+
+.wt-list {
+  margin: 0.25rem 0;
+  padding-inline-start: 1.4rem;
+}
+
+.wt-check {
+  display: grid;
+  gap: var(--wt-sp-1);
+  border-top: 0.0625rem solid var(--wt-line-soft);
+  padding-top: var(--wt-sp-2);
+}
+
+.wt-check:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.wt-divider {
+  border: 0;
+  border-top: 0.0625rem solid var(--wt-line-soft);
+  margin: var(--wt-sp-1) 0;
+}
+
+/* ---------- export ---------- */
+
+.wt-export-item {
+  break-inside: avoid;
+}
+
+/* ---------- wider screens ---------- */
+
+@media (min-width: 40rem) {
+  .wt-btn {
+    flex: 0 1 auto;
+  }
+
+  .wt-steps {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .wt-step {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 48rem) {
+  .wt-pick-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .wt-figure img {
+    max-width: 32rem;
+  }
+}
+
+/* ---------- motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .wt-btn,
+  .wt-input,
+  .wt-textarea {
+    transition: none !important;
+  }
+}
+
+/* ---------- print: review-only export is the printable artifact ---------- */
+
+@media print {
+  .wt-no-print {
+    display: none !important;
+  }
+
+  .wt-card,
+  .wt-pick,
+  .wt-step {
+    break-inside: avoid;
+  }
+
+  .wt-btn {
+    text-decoration: underline;
+  }
+}

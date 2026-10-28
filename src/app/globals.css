@@ -1,0 +1,195 @@
+/* Global scaffold: mobile-first, keyboard-visible, no horizontal scroll.
+   Walkthrough component styling lives in walkthrough.css (imported by layout). */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  color-scheme: light;
+  --ink: #1a1a1a;
+  --muted: #3d4756;
+  --paper: #ffffff;
+  --wash: #eef3f8;
+  --line: #5b6b82;
+  --accent: #0b5cad;
+  --banner-ink: #3f2d01;
+  --banner-paper: #fef3c7;
+  --focus: #b45309;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--paper);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.container {
+  width: 100%;
+  max-width: 64rem;
+  margin-inline: auto;
+  padding-inline: 1rem;
+}
+
+/* Skip link: visually hidden until keyboard focus. */
+.skip-link {
+  position: absolute;
+  left: 0.5rem;
+  top: -4rem;
+  z-index: 100;
+  padding: 0.5rem 1rem;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 0.25rem;
+  font-weight: 700;
+}
+
+.skip-link:focus-visible {
+  top: 0.5rem;
+}
+
+:focus-visible {
+  outline: 0.1875rem solid var(--focus);
+  outline-offset: 0.125rem;
+  border-radius: 0.125rem;
+}
+
+a {
+  color: var(--accent);
+  text-underline-offset: 0.15em;
+}
+
+a:hover {
+  color: #084a8c;
+}
+
+.site-header {
+  background: var(--wash);
+  border-bottom: 0.125rem solid var(--line);
+  padding-block: 1.5rem 1.75rem;
+}
+
+.site-header h1 {
+  margin: 0.5rem 0 0.25rem;
+  font-size: 1.75rem;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* Banners carry a text label plus a border so meaning never rests on color. */
+.demo-banner,
+.review-banner {
+  margin: 0;
+  padding: 0.625rem 0.875rem;
+  font-weight: 700;
+  color: var(--banner-ink);
+  background: var(--banner-paper);
+  border: 0.125rem solid var(--banner-ink);
+  border-radius: 0.375rem;
+}
+
+.mode-badge {
+  display: inline-block;
+  margin: 0.875rem 0 0;
+  padding: 0.375rem 0.75rem;
+  font-weight: 700;
+  border: 0.125rem solid var(--ink);
+  border-radius: 999rem;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.mode-badge--live {
+  border-style: double;
+  border-width: 0.25rem;
+}
+
+main {
+  padding-block: 1.5rem 2.5rem;
+}
+
+section + section {
+  margin-top: 1.75rem;
+}
+
+h2 {
+  font-size: 1.25rem;
+  line-height: 1.4;
+  margin: 0 0 0.5rem;
+}
+
+ul,
+ol {
+  margin: 0.5rem 0;
+  padding-inline-start: 1.5rem;
+}
+
+.site-footer {
+  border-top: 0.125rem solid var(--line);
+  padding-block: 1.25rem 1.75rem;
+  background: var(--wash);
+}
+
+@media (min-width: 48rem) {
+  .site-header h1 {
+    font-size: 2.25rem;
+  }
+
+  .container {
+    padding-inline: 1.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media print {
+  .skip-link {
+    display: none;
+  }
+
+  .container {
+    max-width: none;
+  }
+
+  .site-header,
+  .site-footer {
+    background: none;
+  }
+}

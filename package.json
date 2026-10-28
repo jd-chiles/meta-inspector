@@ -1,0 +1,37 @@
+{
+  "name": "habitability-walkthrough-companion",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Image-first prototype that helps housing navigators capture mock-unit evidence, draft neutral observations for worker review, and export a review-only summary. Fixture mode by default; live Meta inference is server-only and never required for local checks.",
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run",
+    "test:e2e": "npm run build && npx --no-install playwright test",
+    "test:live": "node tests/live/smoke.mjs"
+  },
+  "dependencies": {
+    "idb": "8.0.0",
+    "next": "15.1.6",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "zod": "3.23.8"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "3.1.0",
+    "@playwright/test": "1.49.1",
+    "@types/node": "22.10.2",
+    "@types/react": "19.0.0",
+    "@types/react-dom": "19.0.0",
+    "eslint": "9.17.0",
+    "eslint-config-next": "15.1.6",
+    "typescript": "5.7.2",
+    "vitest": "2.1.8"
+  }
+}
