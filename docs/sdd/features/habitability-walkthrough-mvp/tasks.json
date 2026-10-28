@@ -1,282 +1,116 @@
 [
   {
-    "id": "TASK-001",
-    "title": "Confirm catalog and Meta integration contracts",
-    "profile": "architect",
-    "difficulty": "medium",
-    "rationale": "The active form and provider API contract are unresolved; separate illustrative mode from verified mappings.",
-    "requirements": [
-      "REQ-001",
-      "REQ-003",
-      "REQ-010",
-      "REQ-011"
-    ],
-    "dependencies": [],
-    "files": [
-      "docs/integration",
-      "fixtures/README.md"
-    ],
     "acceptance": [
-      "Record official Meta endpoint, model identifier, image payload/output schema and data-handling links with access dates.",
-      "Document the demo catalog mode and provider-confirmation gate; do not fabricate form fields.",
-      "Record credential availability without values; permit generic scaffold work while a live smoke is pending."
+      "11 stable IDs with capture guidance and manual checks; mapping blocks optional and fail-closed while TBDs open; demo label retained on every surface.",
+      "Official wording left TBD/verbatim-labeled; no invented fields, tests, or sign-offs.",
+      "Verdict submitted via sdd_submit_result."
     ],
     "checkIDs": [
       "docs"
     ],
-    "risk": "medium",
-    "description": "Confirm catalog and Meta integration contracts. Record official Meta endpoint, model identifier, image payload/output schema and data-handling links with access dates. Document the demo catalog mode and provider-confirmation gate; do not fabricate form fields. Record credential availability without values; permit generic scaffold work while a live smoke is pending."
-  },
-  {
-    "id": "TASK-002",
-    "title": "Scaffold app and executable verification",
-    "profile": "implementer",
+    "dependencies": [],
+    "description": "Define the catalog v0.2 contract for exactly 11 confirmed items: stable IDs, capture guidance, manual checks, and optional mapping blocks that validation rejects while confirmation details are TBD. Data values follow in TASK-071.",
     "difficulty": "medium",
-    "rationale": "Establish the single shared manifest/lockfile and CI commands before component work.",
-    "requirements": [
-      "REQ-009",
-      "REQ-012"
-    ],
-    "dependencies": [
-      "TASK-001"
-    ],
     "files": [
-      "package.json",
-      "package-lock.json",
-      "next.config.ts",
-      "next-env.d.ts",
-      "tsconfig.json",
-      "eslint.config.mjs",
-      "vitest.config.ts",
-      "playwright.config.ts",
-      "src/app/layout.tsx",
-      "src/app/page.tsx",
-      "src/app/globals.css",
-      ".env.example",
-      ".github/workflows/ci.yml",
-      "scripts/ci-app.mjs"
+      "docs/sdd/features/habitability-walkthrough-mvp/02-design.md"
     ],
-    "acceptance": [
-      "Pin compatible dependencies and Node 22; add lint, typecheck, test:unit, test:e2e, test:live, build, dev and start scripts.",
-      "Make test:e2e start a production build server in fixture mode without a Meta key.",
-      "CI runs actual required scripts; no passWithNoTests, optional scripts or swallowed errors.",
-      "Keep API secrets out of client configuration and commit only .env.example names."
-    ],
-    "checkIDs": [
-      "docs",
-      "lint",
-      "typecheck",
-      "build"
-    ],
-    "risk": "medium",
-    "description": "Scaffold app and executable verification. Pin compatible dependencies and Node 22; add lint, typecheck, test:unit, test:e2e, test:live, build, dev and start scripts. Make test:e2e start a production build server in fixture mode without a Meta key. CI runs actual required scripts; no passWithNoTests, optional scripts or swallowed errors. Keep API secrets out of client configuration and commit only .env.example names."
-  },
-  {
-    "id": "TASK-003",
-    "title": "Implement catalog, evidence contracts and state reducer",
-    "profile": "implementer",
-    "difficulty": "medium",
-    "rationale": "Domain rules control evidence integrity, reviews and stale responses.",
-    "requirements": [
-      "REQ-001",
-      "REQ-004",
-      "REQ-005",
-      "REQ-006"
-    ],
-    "dependencies": [
-      "TASK-002"
-    ],
-    "files": [
-      "src/domain",
-      "src/data",
-      "tests/unit/domain"
-    ],
-    "acceptance": [
-      "Versioned illustrative catalog has 3–4 items and at least one required manual test.",
-      "Strict schemas reject malformed/extra/verdict fields and preserve required checks.",
-      "Reducer ignores stale attempts and invalidates review after image/item changes; tests cover races and rejection."
-    ],
-    "checkIDs": [
-      "typecheck",
-      "unit"
-    ],
-    "risk": "medium",
-    "description": "Implement catalog, evidence contracts and state reducer. Versioned illustrative catalog has 3–4 items and at least one required manual test. Strict schemas reject malformed/extra/verdict fields and preserve required checks. Reducer ignores stale attempts and invalidates review after image/item changes; tests cover races and rejection."
-  },
-  {
-    "id": "TASK-004",
-    "title": "Implement bounded media and Meta API path",
-    "profile": "backend",
-    "difficulty": "high",
-    "rationale": "Untrusted uploads, decoder resource limits and paid upstream inference cross trust boundaries.",
-    "requirements": [
-      "REQ-002",
-      "REQ-003",
-      "REQ-004",
-      "REQ-010"
-    ],
-    "dependencies": [
-      "TASK-003"
-    ],
-    "files": [
-      "src/app/api/analyze",
-      "src/server",
-      "fixtures/responses",
-      "tests/unit/api",
-      "tests/live"
-    ],
-    "acceptance": [
-      "Validate/decode/normalize image bytes with limits and metadata stripping; never fetch client URLs.",
-      "Implement real configured Meta adapter and explicit fixture adapter without silent fallback.",
-      "Enforce same-origin, timeout, cancellation, single-session inflight limits and safe errors.",
-      "Use mocked HTTP for deterministic boundary tests; test:live fails clearly without credentials and records actual provider success separately."
-    ],
-    "checkIDs": [
-      "typecheck",
-      "unit",
-      "live-smoke"
-    ],
-    "risk": "high",
-    "description": "Implement bounded media and Meta API path. Validate/decode/normalize image bytes with limits and metadata stripping; never fetch client URLs. Implement real configured Meta adapter and explicit fixture adapter without silent fallback. Enforce same-origin, timeout, cancellation, single-session inflight limits and safe errors. Use mocked HTTP for deterministic boundary tests; test:live fails clearly without credentials and records actual provider success separately."
-  },
-  {
-    "id": "TASK-005",
-    "title": "Build local storage and guided capture",
-    "profile": "frontend",
-    "difficulty": "medium",
-    "rationale": "Connect camera/file input with async persistence, replacement and deletion.",
-    "requirements": [
-      "REQ-002",
-      "REQ-006",
-      "REQ-007",
-      "REQ-009"
-    ],
-    "dependencies": [
-      "TASK-004"
-    ],
-    "files": [
-      "src/storage",
-      "src/features/walkthrough/capture",
-      "src/features/walkthrough/session",
-      "src/app/page.tsx",
-      "tests/unit/storage",
-      "tests/unit/capture"
-    ],
-    "acceptance": [
-      "Camera denial falls back to upload; preview/retake/cancel work at mobile width.",
-      "IndexedDB refresh recovery, schema errors and quota failures expose explicit states.",
-      "Delete and replace invalidate inflight responses and revoke media URLs; storage operations do not restore deleted records."
-    ],
-    "checkIDs": [
-      "typecheck",
-      "unit"
-    ],
-    "risk": "medium",
-    "description": "Build local storage and guided capture. Camera denial falls back to upload; preview/retake/cancel work at mobile width. IndexedDB refresh recovery, schema errors and quota failures expose explicit states. Delete and replace invalidate inflight responses and revoke media URLs; storage operations do not restore deleted records."
-  },
-  {
-    "id": "TASK-006",
-    "title": "Implement worker review and manual-check UI",
-    "profile": "frontend",
-    "difficulty": "medium",
-    "rationale": "Human control must remain independent of model suggestions and async state.",
-    "requirements": [
-      "REQ-004",
-      "REQ-005",
-      "REQ-006",
-      "REQ-009"
-    ],
-    "dependencies": [
-      "TASK-005"
-    ],
-    "files": [
-      "src/features/walkthrough/review",
-      "src/features/walkthrough/session",
-      "src/app/page.tsx",
-      "tests/unit/review"
-    ],
-    "acceptance": [
-      "Draft, unknowns, required checks and provenance remain visible together.",
-      "Accept/edit/reject create revisions; accepting text cannot mark a physical test performed.",
-      "Unresolved/rejected/loading/error states have keyboard-accessible recovery and mode labels."
-    ],
-    "checkIDs": [
-      "typecheck",
-      "unit"
-    ],
-    "risk": "medium",
-    "description": "Implement worker review and manual-check UI. Draft, unknowns, required checks and provenance remain visible together. Accept/edit/reject create revisions; accepting text cannot mark a physical test performed. Unresolved/rejected/loading/error states have keyboard-accessible recovery and mode labels."
-  },
-  {
-    "id": "TASK-007",
-    "title": "Implement safe review-only printable export",
-    "profile": "frontend",
-    "difficulty": "medium",
-    "rationale": "Export must enforce review policy and avoid HTML injection or false completion.",
-    "requirements": [
-      "REQ-005",
-      "REQ-006",
-      "REQ-008"
-    ],
-    "dependencies": [
-      "TASK-006"
-    ],
-    "files": [
-      "src/export",
-      "src/features/walkthrough/summary",
-      "src/app/page.tsx",
-      "tests/unit/export"
-    ],
-    "acceptance": [
-      "Export uses a stable snapshot, embeds normalized images, escapes text and repeats draft banner.",
-      "Exclude unapproved draft text while listing pending/rejected/failed items as unresolved.",
-      "Fixture/live and manual-check states remain visible; no HMIS approval or completed inspection claim."
-    ],
-    "checkIDs": [
-      "typecheck",
-      "unit"
-    ],
-    "risk": "medium",
-    "description": "Implement safe review-only printable export. Export uses a stable snapshot, embeds normalized images, escapes text and repeats draft banner. Exclude unapproved draft text while listing pending/rejected/failed items as unresolved. Fixture/live and manual-check states remain visible; no HMIS approval or completed inspection claim."
-  },
-  {
-    "id": "TASK-008",
-    "title": "Prepare rights-cleared fixtures and evaluation protocol",
-    "profile": "documentation",
-    "difficulty": "low",
-    "rationale": "Document a small reproducible mock set and measured outcomes without unsupported claims.",
+    "id": "TASK-069",
+    "profile": "architect",
+    "rationale": "Contract decision with provider-confirmation dependency; fail-closed TBD handling needs explicit design ownership.",
     "requirements": [
       "REQ-001",
       "REQ-011"
     ],
-    "dependencies": [
-      "TASK-007"
-    ],
-    "files": [
-      "fixtures/media",
-      "fixtures/evaluation",
-      "fixtures/README.md",
-      "docs/evaluation",
-      "docs/DEMO.md"
-    ],
-    "acceptance": [
-      "Document provenance/license for mock inputs and separate development/evaluation sets.",
-      "Provide three required scenarios and blank measurement sheet with missing values marked unmeasured.",
-      "Demo script distinguishes qualitative feedback, fixture output and actual live inference."
-    ],
-    "checkIDs": [
-      "docs",
-      "unit"
-    ],
-    "risk": "low",
-    "description": "Prepare rights-cleared fixtures and evaluation protocol. Document provenance/license for mock inputs and separate development/evaluation sets. Provide three required scenarios and blank measurement sheet with missing values marked unmeasured. Demo script distinguishes qualitative feedback, fixture output and actual live inference."
+    "risk": "medium",
+    "title": "Catalog contract v0.2 (11 items, TBD mapping blocks)"
   },
   {
-    "id": "TASK-009",
-    "title": "Exercise integrated mobile and failure scenarios",
-    "profile": "tests",
+    "acceptance": [
+      "Manifest valid; install path works or degrades with guidance.",
+      "Offline shell launches with saved progress; analyses queue as pending, never auto-verdict.",
+      "Service worker caches shell/assets only; no evidence, keys, payloads, or full-resolution media cached.",
+      "Verdict submitted via sdd_submit_result."
+    ],
+    "checkIDs": [
+      "typecheck",
+      "browser",
+      "build"
+    ],
+    "dependencies": [],
+    "description": "Build the installable PWA shell: manifest, icons, service worker with app-shell precache and offline fallback, install affordance, saved-progress restore, and the offline analysis queue with pending-only semantics and explicit reconnect sync.",
     "difficulty": "medium",
-    "rationale": "API/state/storage/export boundaries need real browser proof beyond isolated tests.",
+    "files": [
+      "public/manifest.webmanifest",
+      "public/sw.js",
+      "src/features/walkthrough/offline.ts"
+    ],
+    "id": "TASK-070",
+    "profile": "frontend",
+    "rationale": "Connected-component UI/platform work with moderate uncertainty; established Next.js PWA patterns, new offline states.",
+    "requirements": [
+      "REQ-007",
+      "REQ-009",
+      "REQ-013"
+    ],
+    "risk": "medium",
+    "title": "PWA shell: manifest, service worker, offline pending queue"
+  },
+  {
+    "acceptance": [
+      "11 items load with stable IDs and guidance; official wording TBD/verbatim-labeled.",
+      "Fixtures manifest current; all media rights-cleared with EXIF stripped.",
+      "No invented mapping details.",
+      "Verdict submitted via sdd_submit_result."
+    ],
+    "checkIDs": [
+      "typecheck",
+      "unit"
+    ],
+    "dependencies": [
+      "TASK-069"
+    ],
+    "description": "Expand catalog data to 11 items and add rights-cleared fixtures with manifest rows. Keep every unconfirmed detail TBD-labeled; preserve demo labeling until mapping details confirm.",
+    "difficulty": "medium",
+    "files": [
+      "src/data/catalog.demo.json",
+      "fixtures/README.md",
+      "fixtures/media/"
+    ],
+    "id": "TASK-071",
+    "profile": "implementer",
+    "rationale": "Data expansion following the TASK-069 contract; moderate uncertainty on fixture coverage.",
+    "requirements": [
+      "REQ-001",
+      "REQ-002",
+      "REQ-011"
+    ],
+    "risk": "medium",
+    "title": "Catalog data x11 plus rights-cleared fixtures"
+  },
+  {
+    "acceptance": [
+      "New behavioral tests fail without the feature; no weakened assertions.",
+      "11-item, PWA offline/reconnect, and PDF parity scenarios covered.",
+      "Verdict submitted via sdd_submit_result."
+    ],
+    "checkIDs": [
+      "unit",
+      "browser"
+    ],
+    "dependencies": [
+      "TASK-070",
+      "TASK-071"
+    ],
+    "description": "Extend unit and browser suites: 11-item catalog/capture/review flows, offline launch with saved progress, pending-queue and explicit reconnect sync, PDF/export parity, reconnect-race guards.",
+    "difficulty": "medium",
+    "files": [
+      "tests/unit/catalog-11.test.ts",
+      "tests/e2e/pwa-offline.spec.ts",
+      "tests/e2e/catalog-11.spec.ts"
+    ],
+    "id": "TASK-072",
+    "profile": "tests",
+    "rationale": "Connected test expansion across established patterns; moderate uncertainty on offline emulation.",
     "requirements": [
       "REQ-001",
       "REQ-002",
@@ -289,69 +123,172 @@
       "REQ-009",
       "REQ-010",
       "REQ-011",
-      "REQ-012"
-    ],
-    "dependencies": [
-      "TASK-008"
-    ],
-    "files": [
-      "tests/e2e",
-      "tests/unit/integration"
-    ],
-    "acceptance": [
-      "Browser tests cover 360px capture/upload, review, edit, rejection, manual checks and printable output.",
-      "Delay fixture responses to verify retake/delete races; cover storage failure/reload, corrupt image, timeout, invalid output and missing key.",
-      "Run CI without provider credentials using explicit fixtures; no skipped acceptance or zero-test passes."
-    ],
-    "checkIDs": [
-      "docs",
-      "lint",
-      "typecheck",
-      "unit",
-      "browser",
-      "build"
+      "REQ-012",
+      "REQ-013"
     ],
     "risk": "medium",
-    "description": "Exercise integrated mobile and failure scenarios. Browser tests cover 360px capture/upload, review, edit, rejection, manual checks and printable output. Delay fixture responses to verify retake/delete races; cover storage failure/reload, corrupt image, timeout, invalid output and missing key. Run CI without provider credentials using explicit fixtures; no skipped acceptance or zero-test passes."
+    "title": "Verification expansion (11-item, PWA offline, PDF)"
   },
   {
-    "id": "TASK-010",
-    "title": "Record verification and release readiness gaps",
-    "profile": "documentation",
+    "acceptance": [
+      "Demo claims match executed evidence only; no live/provider/pilot claims beyond proof.",
+      "README.md and IDEA.md point at the approved epoch-3 SDD revision and TASK-069-073 IDs; IDEA.md stays historical.",
+      "Kanban board and worker prompts listed as deferred owner-executed actions.",
+      "Verdict submitted via sdd_submit_result."
+    ],
+    "checkIDs": [
+      "docs"
+    ],
+    "dependencies": [
+      "TASK-069",
+      "TASK-070",
+      "TASK-071",
+      "TASK-072"
+    ],
+    "description": "Update the demo script and release notes to the rescoped plan; point README.md and IDEA.md at the approved epoch-3 revision and task IDs. Kanban board and worker task-prompt updates are owner-executed external actions recorded here as deferred items.",
     "difficulty": "low",
-    "rationale": "Final documentation must describe only observed checks and remaining activation gates.",
+    "files": [
+      "docs/DEMO.md",
+      "docs/sdd/features/habitability-walkthrough-mvp/06-release.md",
+      "README.md",
+      "IDEA.md"
+    ],
+    "id": "TASK-073",
+    "profile": "documentation",
+    "rationale": "Documentation-only updates following established records; no code risk.",
     "requirements": [
-      "REQ-003",
       "REQ-011",
       "REQ-012"
     ],
-    "dependencies": [
-      "TASK-009"
-    ],
-    "files": [
-      "README.md",
-      "docs/REVIEW_AND_CI.md",
-      "docs/integration",
-      "docs/evaluation",
-      "docs/sdd/features/habitability-walkthrough-mvp/05-change-log.md",
-      "docs/sdd/features/habitability-walkthrough-mvp/06-release.md",
-      "docs/sdd/features/habitability-walkthrough-mvp/07-retrospective.md"
-    ],
+    "risk": "low",
+    "title": "Demo script, release notes, README/IDEA pointers"
+  },
+  {
     "acceptance": [
-      "Record exact commands, source revision, CI/live outcomes and independent review findings without invented success.",
-      "Document real vs illustrative form status, new vs reused work, setup and remaining limitations.",
-      "Mark Ready only after current required checks and independent reviews pass; publish/deploy remain separate."
+      "Requirements and design reviewed against current tree.",
+      "Blocking ambiguity listed with file/line or explicit none.",
+      "Verdict submitted via sdd_submit_result."
     ],
     "checkIDs": [
-      "docs",
-      "lint",
-      "typecheck",
-      "unit",
-      "browser",
-      "build",
-      "live-smoke"
+      "docs"
+    ],
+    "dependencies": [],
+    "description": "Independently review 01-requirements.md (REQ-001-013 incl. 11-item scope, TBD handling, offline, PDF, PWA) and 02-design.md (PWA architecture, catalog v0.2, trust boundaries) on the epoch-3 tree. No edits, no shell.",
+    "difficulty": "low",
+    "files": [],
+    "id": "TASK-074",
+    "profile": "spec-reviewer",
+    "rationale": "Read-only review of rescoped documents against the current tree; no implementation risk.",
+    "requirements": [
+      "REQ-001",
+      "REQ-003",
+      "REQ-004",
+      "REQ-006",
+      "REQ-010",
+      "REQ-011",
+      "REQ-013"
     ],
     "risk": "low",
-    "description": "Record verification and release readiness gaps. Record exact commands, source revision, CI/live outcomes and independent review findings without invented success. Document real vs illustrative form status, new vs reused work, setup and remaining limitations. Mark Ready only after current required checks and independent reviews pass; publish/deploy remain separate."
+    "title": "Spec review of epoch-3 requirements and design"
+  },
+  {
+    "acceptance": [
+      "Plan and task graph verified against all thirteen requirements.",
+      "Graph acyclic with explicit ownership, estimates, deps, and acceptance.",
+      "Verdict submitted via sdd_submit_result."
+    ],
+    "checkIDs": [
+      "docs"
+    ],
+    "dependencies": [
+      "TASK-074"
+    ],
+    "description": "Independently verify 03-plan.md plus tasks.json TASK-069-073 against REQ-001-013, 02-design, 04-verification, and .sdd/config.json. Confirm reuse claims, fit flags, deferred items, and that no task authorizes commit/push/publish/deploy or product work before plan approval. No edits, no shell.",
+    "difficulty": "medium",
+    "files": [],
+    "id": "TASK-075",
+    "profile": "plan-reviewer",
+    "rationale": "Cross-artifact consistency review of the rescoped graph; no implementation.",
+    "requirements": [
+      "REQ-001",
+      "REQ-002",
+      "REQ-003",
+      "REQ-004",
+      "REQ-005",
+      "REQ-006",
+      "REQ-007",
+      "REQ-008",
+      "REQ-009",
+      "REQ-010",
+      "REQ-011",
+      "REQ-012",
+      "REQ-013"
+    ],
+    "risk": "medium",
+    "title": "Plan review of epoch-3 task graph"
+  },
+  {
+    "id": "TASK-076",
+    "title": "Spec re-review after confirmation-semantics fix",
+    "profile": "spec-reviewer",
+    "difficulty": "low",
+    "rationale": "Read-only re-review of the repaired contradiction plus two clarifications; no implementation risk.",
+    "requirements": [
+      "REQ-001",
+      "REQ-003",
+      "REQ-004",
+      "REQ-006",
+      "REQ-010",
+      "REQ-011",
+      "REQ-013"
+    ],
+    "dependencies": [],
+    "files": [],
+    "acceptance": [
+      "Attested-vs-details model verified consistent across 01/02",
+      "Blocking ambiguity listed or explicit none",
+      "Verdict submitted via sdd_submit_result"
+    ],
+    "checkIDs": [
+      "docs"
+    ],
+    "risk": "low",
+    "description": "Re-review 01/02 after the confirmation-semantics repair (attested existence vs OPEN details; verifier-keyed gate). Confirm TASK-071 is no longer over-constrained. No edits, no shell."
+  },
+  {
+    "id": "TASK-077",
+    "title": "Plan review of epoch-3 task graph (second attempt)",
+    "profile": "plan-reviewer",
+    "difficulty": "medium",
+    "rationale": "Cross-artifact consistency review of the rescoped graph; no implementation.",
+    "requirements": [
+      "REQ-001",
+      "REQ-002",
+      "REQ-003",
+      "REQ-004",
+      "REQ-005",
+      "REQ-006",
+      "REQ-007",
+      "REQ-008",
+      "REQ-009",
+      "REQ-010",
+      "REQ-011",
+      "REQ-012",
+      "REQ-013"
+    ],
+    "dependencies": [
+      "TASK-076"
+    ],
+    "files": [],
+    "acceptance": [
+      "Plan + graph verified against all thirteen requirements",
+      "Graph acyclic with ownership, estimates, deps, acceptance",
+      "Verdict submitted via sdd_submit_result"
+    ],
+    "checkIDs": [
+      "docs"
+    ],
+    "risk": "medium",
+    "description": "Verify 03-plan.md + tasks.json TASK-069-073 (+076) against REQ-001-013, 02-design, 04-verification, .sdd/config.json. Replaces dead TASK-075 (dep on failed 074). No edits, no shell."
   }
 ]

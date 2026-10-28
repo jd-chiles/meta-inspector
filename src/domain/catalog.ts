@@ -391,9 +391,9 @@ export function validateCatalog(value: unknown): ValidationResult<Catalog> {
   if (!Array.isArray(items)) {
     errors.push(`catalog: "items" must be an array`);
   } else {
-    if (items.length < 3 || items.length > 4) {
+    if (items.length !== 11) {
       errors.push(
-        `catalog: "items" must hold 3–4 items (found ${items.length})`,
+        `catalog: "items" must hold exactly 11 items (found ${items.length})`,
       );
     }
     const ids = new Set<string>();

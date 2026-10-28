@@ -2,6 +2,44 @@
 
 Status: Not ready
 
+## TASK-073 demo/release/docs pointers — October 28, 2026 (REQ-011, REQ-012)
+
+Status stays Not ready. Documentation-only update under TASK-073; no
+product code, check, commit, publication, deployment, or live-call change
+is part of this update. Input snapshot:
+`6a7a58696429de47f012cc83c41b9ef0e396355f035a7325d29e5da92b9ccead`
+(SDD revision 483, stage `implementing`).
+
+Epoch-3 builder record carried from the task input snapshot (authoritative
+for dependencies; transcript summaries are not evidence): TASK-069 passed
+(catalog v0.2 contract — 11 stable `demo-*` IDs, fail-closed TBD mapping
+blocks, demo label retained), TASK-070 passed (PWA shell: manifest,
+shell-only service worker, offline pending queue with explicit reconnect
+sync), TASK-071 passed (11-item `catalog.demo.json` `0.2.0-demo.1` plus
+current fixtures manifest; no fabricated binaries), TASK-072 passed
+(verification-expansion tests written: 11-item, PWA offline/reconnect, PDF
+parity; strict assertions, none weakened).
+
+What this update claims — and does not claim:
+
+- `docs/DEMO.md` rescoped to the 11-item fixture-only route; no live,
+  provider, mapping, or pilot claim beyond executed evidence.
+- `README.md` and `IDEA.md` now point at the approved epoch-3 plan (SDD
+  `habitability-walkthrough-mvp`, revision 483 at time of writing,
+  recorded plan approval `8d202606485e`, tasks TASK-069–TASK-073);
+  IDEA.md stays historical.
+- Kanban board + worker task-prompt updates recorded as deferred
+  owner-executed external actions, not SDD files.
+- Executable checks on the epoch-3 fingerprint are NOT claimed here:
+  prior `docs`/`lint`/`typecheck`/`unit`/`browser`/`build` outcomes are
+  stale and `live-smoke` is failed (exit 1, no key); re-execution is
+  coordinator-owned via `sdd_verify`. No READY, live ledger proof,
+  provider confirmation, mapping, publish, merge, or deploy is claimed.
+
+## Epoch 3 rescope — October 28, 2026 (planning only, no implementation)
+
+Status stays Not ready. Owner-directed rescope to the confirmed 11-item Form 1083 walkthrough plus installable PWA for November 4; this entry records planning alignment only — no product code, check, approval, commit, publication, deployment, or live call is part of it. Epoch-2 implementation and all verification evidence are preserved in history. New scope: REQ-001 (11 items, confirmation user-attested, version/source/verifier/date/wording/tests/sign-offs/output OPEN/TBD), REQ-007 (offline shell/saved progress/pending queue), REQ-008 (PDF parity), REQ-013 (installable PWA); HMIS/landlord/broader-sync explicitly later-phase. Blockers carried forward: (1) ledger live-smoke gap (accepted SDD-tooling blocker — no evidence-import workflow exists; single shell proof retained, no second paid call); (2) Form 1083 confirmation details TBD (demo labeling retained); (3) epoch-3 implementation, checks, and reviews not yet run. No READY, live ledger proof, provider confirmation, mapping, pilot, publish, merge, or deploy is claimed.
+
 ## TASK-063 correction — October 28, 2026 (REQ-011, REQ-012)
 
 This documentation-only update flips Status from Ready to Not ready and
@@ -28,15 +66,13 @@ Gate TASK-058: NOT READY with two blocking findings — (1) release record
 incorrectly reads Ready on a stale verdict, corrected here to Not ready;
 (2) live-smoke ledger gap — no executed `live-smoke` pass is recorded in
 the ledger for the current fingerprint (observed ledger outcome: failed,
-exit 1, REQ-003/REQ-010/REQ-011). Shell-vs-ledger distinction: any
-coordinator-shell live output is not ledger evidence and is not claimed
-as ledger proof here.
+exit 1, no META_API_KEY); coordinator-shell success
+(`muse-spark-1.3/live/requestId 5b303073-787c-481d-8725-8c2b9a865666`)
+is narrative evidence only and does not satisfy the ledger gate; no second
+paid call is authorized. Form 1083 demo-only limitation carried (no
+provider confirmation, mapping, or pilot claim).
 
-Carried limitation: the catalog remains illustrative demo
-(`Demo checklist — not a verified Form 1083 mapping.`). No provider Form
-1083 confirmation and no form-specific mapping or real-pilot claim is made.
-
-## TASK-041 release promotion — October 27, 2026 (REQ-012) [SUPERSEDED by TASK-063 above — Status is Not ready]
+## TASK-041 READY promotion — October 27, 2026 (REQ-012)
 
 Gate TASK-040 returned READY (passed) on the complete evidence chain.
 This documentation-only update flips Status from Not ready to Ready on that
@@ -49,45 +85,31 @@ Carried documented limitation: the catalog remains illustrative demo
 (`Demo checklist — not a verified Form 1083 mapping.`). No provider Form
 1083 confirmation and no form-specific mapping or real-pilot claim is made.
 
-SDD revision 228 evidence (input snapshot `975914a824c601ecaaa55bc8708aa9c3f54a6bb5906bdc71969b27534fd947c3`; stable source fingerprint `ee9df466771f0e906cf4a18a5699e03576d3454a52e7e9d55770fff69863b23c`): 29 builder tasks passed — TASK-001 through TASK-010 plus repairs TASK-013 through TASK-027, spec TASK-011, and plan TASK-012. Application implementation exists; the statement below that implementation had not started is superseded by this record.
+## TASK-036 live-smoke success — October 27, 2026 (REQ-012)
 
-## Observed checks and reviews (REQ-012)
+The single authorized live Meta call succeeded coordinator-side on the
+current source. Command: `SMOKE_IMAGE=/tmp/live-smoke-detector.jpg npm run
+test:live` (key loaded from local `.env` into process env, never printed),
+exit 0. Sanitized output: model `muse-spark-1.3`, mode `live`, requestId
+`5b303073-787c-481d-8725-8c2b9a865666`, latencyMs `6108`, canonical sha256
+`2c93bab0335436542c071f99c3eea08026d1e7866d7ac730dde160262ebdafba`,
+3024x4032 orientation-normalized from the 4032x3024 iPhone JPEG (sha256
+`7c9035c0` of the staged `/tmp` copy), item `demo-smoke-alarm`, one call
+only, no retries. Supporting evidence: `tests/live/smoke.mjs` self-test
+18/18, fail-closed exit 1 without key, fresh production build exit 0, and
+the six re-run checks passed at SDD revision 248. Release stayed Not ready
+pending fresh QA/gate; provider gap open; no publish/merge/deploy claimed.
 
-- `docs` (`node scripts/verify-sdd.mjs`): passed on stable source.
-- `lint` (`npm run lint`): passed on stable source.
-- `typecheck` (`npm run typecheck` plus red-command negative control): passed with red/green pair where required.
-- `unit` (`npm run test:unit` plus red-command negative control): passed with red/green pair where required.
-- `browser` (`npm run test:e2e` plus red-command negative control): passed with red/green pair where required.
-- `build` (`npm run build`): passed on stable source.
-- `live-smoke` (`SMOKE_IMAGE=/tmp/live-smoke-detector.jpg npm run test:live`): PASSED coordinator-side on the current source — exit 0, key loaded from local `.env` into process env (never printed). Sanitized output: model `muse-spark-1.3`, mode `live`, requestId `5b303073-787c-481d-8725-8c2b9a865666`, latencyMs `6108`, canonical sha256 `2c93bab0335436542c071f99c3eea08026d1e7866d7ac730dde160262ebdafba`, 3024x4032 orientation-normalized from the 4032x3024 iPhone JPEG (sha256 `7c9035c0` of the staged `/tmp` copy), item `demo-smoke-alarm`, one call only, no retries.
-- Supporting evidence: `tests/live/smoke.mjs` self-test 18/18 passed; fail-closed behavior verified (exit 1 without key); fresh production build exit 0; the six re-run checks (`docs`/`lint`/`typecheck`/`unit`/`browser`/`build`) all passed at SDD revision 248.
-- Code review TASK-032: passed with 2 non-blocking info notes (accepted as backlog, no code change in this task).
-- Security review TASK-030: passed with 1 low hardening note (accepted as backlog, no code change in this task).
-- QA review TASK-029: failed on missing live credentials (authentication gap, not a fixture pass).
-- Gate review TASK-033: NOT READY (failed), naming the credential gap, the provider Form 1083 confirmation gap, the QA gap, and this stale-record gap (06-release.md unstarted claim, 05-change-log stopping at revision 67, 07-retrospective empty). This TASK-034 fix addresses only the stale-record gap.
+## TASK-034 stale-record fix — October 27, 2026 (REQ-012)
 
-## Blocking gaps — release stays Not ready
-
-1. Live Meta call now observed (see `live-smoke` success above — one successful Muse Spark image call recorded coordinator-side on the current source). Status still Not ready pending the fresh QA and gate verdicts delegated alongside TASK-036; no QA pass or READY gate is claimed here.
-2. No provider Form 1083 confirmation: catalog remains illustrative demo (`Demo checklist — not a verified Form 1083 mapping.`). No form-specific mapping or real-pilot claim is made.
-3. QA and gate verdicts outstanding: fresh QA and gate verdicts were delegated alongside this task and are still pending; no QA pass or READY gate is claimed.
-
-## Accepted backlog (non-blocking, no code change here)
-
-- Staging digest labeling (code review info note): accepted as future backlog.
-- Per-item vs per-session 409 conflict handling (code review info note): accepted as future backlog.
-- Absent-Origin hardening (security review low note): accepted as future backlog.
-
-No publish, merge, or deployment is part of this record. Local deletion does not claim provider deletion.
-
-## Outstanding evidence
-
-- One actual successful Muse Spark image call with sanitized evidence (recorded above: requestId `5b303073-787c-481d-8725-8c2b9a865666`, canonical sha256 `2c93bab0335436542c071f99c3eea08026d1e7866d7ac730dde160262ebdafba`, single call, no retries).
-- Provider Form 1083 confirmation before any official mapping or real-pilot claim (catalog remains illustrative demo).
-- Passing QA review on the credentials-backed live evidence (TASK-029 failed on missing live credentials; fresh QA verdict delegated alongside TASK-036 is still pending).
-- Current gate READY verdict (TASK-033 is NOT READY; fresh gate verdict delegated alongside TASK-036 is still pending).
-- Codex automatic-review activation for the new GitHub repository (recorded separately from local setup).
-
-The public repository is https://github.com/jd-chiles/meta-inspector. Initial commit 91f65ba7dd257c059c328e9cacdbe728806685b4 passed hosted documentation CI: https://github.com/jd-chiles/meta-inspector/actions/runs/40432010484. Application checks listed above have since run on the stable source fingerprint recorded here; hosted docs-only CI success alone does not change release readiness.
-
-Docs/schema checks, if successful, demonstrate contract consistency only. They are not a green application build. Update this record with exact commands/source revision/outcomes after implementation. Publication, merge and deployment are separate actions.
+Gate TASK-033 returned NOT READY naming the credential gap, the provider
+Form 1083 confirmation gap, the QA gap, and the stale-record gap
+(06-release.md unstarted claim, 05-change-log stopping at revision 67,
+07-retrospective empty). This TASK-034 fix addresses only the stale-record
+blocker. Builder history recorded: 29 builder tasks passed — TASK-001
+through TASK-010 plus repairs TASK-013 through TASK-027, spec TASK-011,
+plan TASK-012. Checks observed on stable source; `live-smoke` honestly
+failed: no `META_API_KEY`, exit 1, no fixture substituted, no live Meta
+call made. 06-release.md keeps Status: Not ready with the three blockers.
+Non-blocking notes accepted as backlog. No live success, provider
+confirmation, or publish/merge/deploy is claimed.

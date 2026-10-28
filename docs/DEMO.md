@@ -19,11 +19,33 @@
 > Every checklist surface in the demo carries:
 > `Demo checklist — not a verified Form 1083 mapping.`
 
+## Epoch-3 scope (November 4 rescope — claims bounded to executed evidence)
+
+- Catalog: 11 demo items (`demo-habitability-walkthrough` version
+  `0.2.0-demo.1`): 4 carried illustrative items plus 7 reserved
+  placeholders (`demo-item-05`–`demo-item-11`) whose official wording,
+  physical tests, and sign-offs are TBD. Every surface keeps
+  `Demo checklist — not a verified Form 1083 mapping.` No operative
+  Form 1083 mapping is claimed (REQ-001; TASK-069, TASK-071).
+- PWA shell + offline pending queue + PDF parity are implemented
+  (TASK-070; TASK-072 test expansion) but the epoch-3 executable checks
+  (`docs`/`lint`/`typecheck`/`unit`/`browser`/`build`) have not been
+  re-run on the epoch-3 fingerprint — execution is coordinator-owned via
+  `sdd_verify`. The demo shows fixture behavior only; anything not yet
+  check-verified is narrated as pending, never as passed.
+- Live inference: no labeled live take exists in this lane. The only
+  recorded live evidence is the historical coordinator-side single smoke
+  call cited in `06-release.md` (a server check, not a demo take, and not
+  re-run here); the current `live-smoke` ledger outcome on this
+  fingerprint is failed (no key). Fixture success never counts as live.
+- Deferred (owner-executed, external to this repo pass): Kanban board and
+  worker task-prompt updates.
+
 ## Frozen demo route (frontend-announced 2026-10-28)
 
 - URL: http://127.0.0.1:3100/
 - Mode: fixture (mock output, not live inference; `APP_ANALYSIS_MODE=fixture`, no Meta key)
-- Catalog: `demo-habitability-walkthrough` version `0.1.0-demo.1` (demo mode, `DEMO_NOTICE` on every surface)
+- Catalog: `demo-habitability-walkthrough` version `0.2.0-demo.1` (demo mode, `DEMO_NOTICE` on every surface): 11 stable demo IDs — 4 carried illustrative items + 7 reserved placeholders (`demo-item-05`–`demo-item-11`, official wording/tests/sign-offs TBD)
 - Take for this recording: **fixture take**. Mode line, read verbatim:
   "This draft is fixture output — not live inference. The screen shows mode fixture."
 - Do not read the live-take line: no labeled live take of this route exists in
@@ -55,7 +77,7 @@ as a live call. The submission should still show a working project and the model
 
 - **Impact (30%):** Focus on task-level administrative friction, the specific user, and measured time/completeness/rework. User conversations are qualitative evidence only.
 - **Meta tooling (25%):** Make Muse Spark central to image-to-draft. Show a real model call and output. Add Transcribe or SAM only if implemented and visibly useful. If no key is available, show fixture output and state plainly that live inference is pending — do not imply a fixture take is a model call.
-- **Technical depth (20%):** Show source provenance, form-item mapping, uncertainty, structured-output validation, correction history, and manual-check boundary.
+- **Technical depth (20%):** Show source provenance, explicitly-unmapped demo-item status, uncertainty, structured-output validation, correction history, and manual-check boundary.
 - **Demo (25%):** One complete and reliable capture-to-review flow with a visible uncertainty case and human decision.
 
 ## Submission checklist from participant guide

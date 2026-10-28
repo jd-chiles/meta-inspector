@@ -9,7 +9,7 @@
     "suppliedBy": null,
     "verifiedBy": null,
     "verifiedAt": null,
-    "notes": "Illustrative demo catalog. Public-only source: LAHSA FY22-23 Form 1083 (footer 12-19-22, lahsa.org/item.ashx?id=6886, accessed 2026-10-28); selection docs/ITEM_SELECTION.md #4, #5, #8, #11a mapped to demo-* IDs. No provider has confirmed an operative Form 1083 copy, version, wording, or physical-test requirements. Missing confirmation never promotes a demo item (see docs/integration/FORM_1083_MAPPING.md §1.2)."
+    "notes": "Illustrative demo catalog. Public-only source: LAHSA FY22-23 Form 1083 (footer 12-19-22, lahsa.org/item.ashx?id=6886, accessed 2026-10-28); selection docs/ITEM_SELECTION.md #4, #5, #8, #11a mapped to demo-* IDs. Seven reserved placeholders demo-item-05..11 added 2026-10-28; official wording, physical tests, and sign-offs TBD. No provider has confirmed an operative Form 1083 copy, version, wording, or physical-test requirements. Missing confirmation never promotes a demo item (see docs/integration/FORM_1083_MAPPING.md §1.2)."
   },
   "items": [
     {
@@ -59,6 +59,97 @@
         {
           "id": "demo-smoke-co-mc1",
           "instruction": "Press the test button on each unit and confirm the alarm sounds. A photograph cannot establish that an alarm works.",
+          "requiresPhysicalTest": true,
+          "photoCannotEstablish": true
+        }
+      ]
+    },
+    {
+      "id": "demo-item-05",
+      "label": "Reserved placeholder 05 — official wording TBD (illustrative)",
+      "captureGuidance": "Photograph the relevant fixture or area in place, whole subject visible, no people or identifying views. Official Form 1083 wording TBD — this placeholder carries no verified mapping.",
+      "manualChecks": [
+        {
+          "id": "demo-item-05-mc1",
+          "instruction": "Perform the in-person check for this area per worker procedure and confirm by direct observation. A photograph cannot establish the physical condition. Official requirement TBD.",
+          "requiresPhysicalTest": true,
+          "photoCannotEstablish": true
+        }
+      ]
+    },
+    {
+      "id": "demo-item-06",
+      "label": "Reserved placeholder 06 — official wording TBD (illustrative)",
+      "captureGuidance": "Photograph the relevant fixture or area in place, whole subject visible, no people or identifying views. Official Form 1083 wording TBD — this placeholder carries no verified mapping.",
+      "manualChecks": [
+        {
+          "id": "demo-item-06-mc1",
+          "instruction": "Perform the in-person check for this area per worker procedure and confirm by direct observation. A photograph cannot establish the physical condition. Official requirement TBD.",
+          "requiresPhysicalTest": true,
+          "photoCannotEstablish": true
+        }
+      ]
+    },
+    {
+      "id": "demo-item-07",
+      "label": "Reserved placeholder 07 — official wording TBD (illustrative)",
+      "captureGuidance": "Photograph the relevant fixture or area in place, whole subject visible, no people or identifying views. Official Form 1083 wording TBD — this placeholder carries no verified mapping.",
+      "manualChecks": [
+        {
+          "id": "demo-item-07-mc1",
+          "instruction": "Perform the in-person check for this area per worker procedure and confirm by direct observation. A photograph cannot establish the physical condition. Official requirement TBD.",
+          "requiresPhysicalTest": true,
+          "photoCannotEstablish": true
+        }
+      ]
+    },
+    {
+      "id": "demo-item-08",
+      "label": "Reserved placeholder 08 — official wording TBD (illustrative)",
+      "captureGuidance": "Photograph the relevant fixture or area in place, whole subject visible, no people or identifying views. Official Form 1083 wording TBD — this placeholder carries no verified mapping.",
+      "manualChecks": [
+        {
+          "id": "demo-item-08-mc1",
+          "instruction": "Perform the in-person check for this area per worker procedure and confirm by direct observation. A photograph cannot establish the physical condition. Official requirement TBD.",
+          "requiresPhysicalTest": true,
+          "photoCannotEstablish": true
+        }
+      ]
+    },
+    {
+      "id": "demo-item-09",
+      "label": "Reserved placeholder 09 — official wording TBD (illustrative)",
+      "captureGuidance": "Photograph the relevant fixture or area in place, whole subject visible, no people or identifying views. Official Form 1083 wording TBD — this placeholder carries no verified mapping.",
+      "manualChecks": [
+        {
+          "id": "demo-item-09-mc1",
+          "instruction": "Perform the in-person check for this area per worker procedure and confirm by direct observation. A photograph cannot establish the physical condition. Official requirement TBD.",
+          "requiresPhysicalTest": true,
+          "photoCannotEstablish": true
+        }
+      ]
+    },
+    {
+      "id": "demo-item-10",
+      "label": "Reserved placeholder 10 — official wording TBD (illustrative)",
+      "captureGuidance": "Photograph the relevant fixture or area in place, whole subject visible, no people or identifying views. Official Form 1083 wording TBD — this placeholder carries no verified mapping.",
+      "manualChecks": [
+        {
+          "id": "demo-item-10-mc1",
+          "instruction": "Perform the in-person check for this area per worker procedure and confirm by direct observation. A photograph cannot establish the physical condition. Official requirement TBD.",
+          "requiresPhysicalTest": true,
+          "photoCannotEstablish": true
+        }
+      ]
+    },
+    {
+      "id": "demo-item-11",
+      "label": "Reserved placeholder 11 — official wording TBD (illustrative)",
+      "captureGuidance": "Photograph the relevant fixture or area in place, whole subject visible, no people or identifying views. Official Form 1083 wording TBD — this placeholder carries no verified mapping.",
+      "manualChecks": [
+        {
+          "id": "demo-item-11-mc1",
+          "instruction": "Perform the in-person check for this area per worker procedure and confirm by direct observation. A photograph cannot establish the physical condition. Official requirement TBD.",
           "requiresPhysicalTest": true,
           "photoCannotEstablish": true
         }

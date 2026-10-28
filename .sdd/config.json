@@ -32,7 +32,8 @@
         "REQ-009",
         "REQ-010",
         "REQ-011",
-        "REQ-012"
+        "REQ-012",
+        "REQ-013"
       ],
       "timeoutMs": 30000,
       "browser": false
@@ -52,7 +53,8 @@
         "REQ-003",
         "REQ-004",
         "REQ-006",
-        "REQ-012"
+        "REQ-012",
+        "REQ-013"
       ],
       "timeoutMs": 120000,
       "browser": false
@@ -69,7 +71,8 @@
         "REQ-007",
         "REQ-008",
         "REQ-010",
-        "REQ-011"
+        "REQ-011",
+        "REQ-013"
       ],
       "timeoutMs": 120000,
       "browser": false
@@ -88,7 +91,8 @@
         "REQ-009",
         "REQ-010",
         "REQ-011",
-        "REQ-012"
+        "REQ-012",
+        "REQ-013"
       ],
       "browser": true,
       "timeoutMs": 240000
@@ -98,7 +102,8 @@
       "requirements": [
         "REQ-003",
         "REQ-009",
-        "REQ-012"
+        "REQ-012",
+        "REQ-013"
       ],
       "timeoutMs": 240000,
       "browser": false

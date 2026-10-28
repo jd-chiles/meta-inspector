@@ -11,7 +11,7 @@ export default defineConfig({
     baseURL: "http://127.0.0.1:3100",
   },
   webServer: {
-    command: "npm run start -- --port 3100",
+    command: "npm run start -- --port 3100 -H 127.0.0.1",
     url: "http://127.0.0.1:3100",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

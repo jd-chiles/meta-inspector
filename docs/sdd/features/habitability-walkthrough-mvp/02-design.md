@@ -1,68 +1,58 @@
-# Design
+# Design — 11-item catalog + installable PWA (epoch 3)
 
-## Proposed architecture
-
-Use Next.js, TypeScript, React and CSS modules; Zod; IndexedDB; Vitest; Playwright. TASK-002 pins compatible stable dependency versions and a lockfile after consulting official documentation. This documentation change installs no app dependencies.
+Epochs 1–2 architecture is retained and extended. All existing modules are reused unchanged (see reuse table in 03-plan); only the catalog data, PWA shell, offline queue states, and PDF acceptance are new.
 
 ```mermaid
 flowchart LR
-  C[Versioned checklist] --> U[Capture and review UI]
-  U --> I[IndexedDB mock session]
+  C[Versioned 11-item checklist] --> U[Capture and review UI]
+  U --> I[IndexedDB session + saved progress]
   U --> A[Same-origin analyze route]
   A --> V[Image validation and normalization]
   V --> M[Server-only Meta adapter]
   M --> O[Strict output validation]
-  O --> U
-  U --> E[Reviewed printable summary]
+  O --> U --> E[Reviewed printable/PDF summary]
+  PWA[Manifest + SW app-shell cache] --> U
+  Q[Offline analysis queue: pending only] --> U
 ```
 
-## Proposed paths
+## Reused paths
+
+| Path | Responsibility (unchanged) |
+|---|---|
+| src/app/ | Shell, routes, layout (walkthrough.css adopted) |
+| src/features/walkthrough/ | Capture, review, summary, session manager |
+| src/domain/ | Catalog/evidence schemas, reducer, review rules |
+| src/data/catalog.demo.json | Catalog data file (v0.2.x, 11 items; unconfirmed wording labeled OPEN) |
+| src/storage/ | IndexedDB versioning/deletion (saved progress rides on it) |
+| src/server/meta/ | Provider adapter/config/validation/timeout |
+| src/server/media/ | Decode limits and normalization |
+| src/export/ | Safe printable summary (+ PDF acceptance via print CSS) |
+| fixtures/ | Rights-cleared media and response fixtures (11-item coverage) |
+| tests/unit/, tests/e2e/ | Boundary/state/API/browser tests (extended, not rewritten) |
+
+## New paths
 
 | Path | Responsibility |
 |---|---|
-| src/app/ | Shell, routes, layout |
-| src/features/walkthrough/ | Capture, review, summary |
-| src/domain/ | Catalog/evidence schemas, reducer, review rules |
-| src/data/catalog.demo.json | Clearly illustrative catalog |
-| src/storage/ | IndexedDB versioning/deletion |
-| src/server/meta/ | Provider adapter/config/validation/timeout |
-| src/server/media/ | Decode limits and normalization |
-| src/export/ | Safe printable summary |
-| fixtures/ | Rights-cleared media and response fixtures |
-| tests/unit/, tests/e2e/ | Boundary/state/API/browser tests |
+| public/manifest.webmanifest | PWA manifest: name, icons, display standalone, theme (REQ-013) |
+| public/icons/* | Install icons (maskable + any, rights-cleared) |
+| public/sw.js | Service worker: app-shell precache + offline fallback; caches shell/assets only, never evidence bytes, provider payloads, keys, or full-resolution media (REQ-007/013) |
+| src/features/walkthrough/offline.ts | Offline queue: analysis intents stored as pending with attempt identity; explicit sync on reconnect; UI pending states (REQ-007) |
 
-## Contracts and ownership
+## Catalog v0.2 contract (attested existence, OPEN details)
 
-Catalog has schemaVersion, catalogId, version, demo/provider-confirmed mode, source-confirmation metadata and 3–4 items. Items have stable ID, label, capture guidance and required manual checks. Only confirmed items have exact Form 1083 references.
+`catalogId` stays `demo-habitability-walkthrough` until mapping details confirm; version is `0.2.x` (prerelease `0.2.0-demo.1` accepted; later `0.2.x` patches keep IDs). Exactly 11 items with stable `demo-*` IDs and capture guidance; every item requires `photoCannotEstablish=true` AND `requiresPhysicalTest=true`.
 
-Session owns ID, schema version, timestamps, catalog snapshot and item records. Snapshot prevents catalog changes from reinterpreting old evidence. Item record owns media reference/digest/time, attempt, original model draft, worker revisions, disposition and manual-check responses.
+Confirmation uses the REQ-001 two-field model. The source-confirmation record reads `attested: true` (owner statement Oct 28, 2026) with `verifier: null`, `verifiedAt: null`, and all detail fields `OPEN`. The fail-closed gate keys on missing verifier/details — NOT on attested existence: validation rejects any operative mapping claim while `verifier`/detail fields are absent, even though the 11-item scope itself is attested. Display keeps the demo-checklist label on every surface until verifier + details confirm. This resolves the epoch-3 spec finding: attested existence and unconfirmed details coexist without contradiction, and TASK-071 implements exactly this gate.
 
-Strict AnalysisDraft: observation (1–600 characters); visibleEvidence, unknowns, suggestedManualChecks (each 0–5 strings, 200 characters per string). No verdict/confidence field. Display union of catalog checks and model suggestions; AI cannot clear required checks.
+## Offline and pending semantics
 
-Application-generated AnalysisEnvelope: analysisId, sessionId, itemId, catalogVersion, mediaId, mediaHash, model, mode, requestId, latencyMs, draft. IDs from model text are never trusted.
+Connectivity loss never synthesizes a draft. Queued analyses show `pending` with the staged photo and item; worker may edit/cancel/delete while offline. On reconnect, each queued item requires explicit analysis action (button or explicit retry); attempt counters resume without collision with pre-offline attempts. `stillCurrent`/generation guards from epoch 2 cover reconnect races identically to replace/cancel races.
 
-The success response also supplies normalizedMedia (image/jpeg bytes encoded as base64, width, height and digest), bounded to 2 MiB encoded image bytes. Client stores those canonical bytes with the server digest rather than attaching the digest to an older raw file. Raw capture previews are transient. Before persistence, client canvas re-encoding strips metadata; the server remains the authoritative validator/normalizer and returns its canonical representation. A response replaces local media and creates the draft in one transaction only if the attempt still matches. A changed canonical digest invalidates any earlier review. Persisted recovery covers normalized evidence; closing during a transient, unconfirmed capture may require recapture and the UI must say so.
+## PDF output
 
-## API and configuration
+No new renderer: the existing print stylesheet produces the PDF via browser print-to-PDF. New work is acceptance only — PDF carries the identical banner, unresolved policy, escaping, and data-URL-only media as HTML (verified by export-snapshot tests plus one browser print-CSS pass).
 
-POST /api/analyze accepts multipart image plus sessionId, itemId, catalogVersion, mediaId, analysisId. Resolve guidance from server catalog and reject version mismatch. Normalize bytes and compute digest before provider call. Commit response only if current client attempt matches.
+## Trust boundaries (unchanged, PWA adds none)
 
-Errors: {error: {code, message, retryable}, analysisId}. Codes/status: SETUP_REQUIRED/503; INVALID_MEDIA/400,413,415,422 as applicable; ITEM_MISMATCH/409; REQUEST_IN_PROGRESS/409; PROVIDER_RATE_LIMIT/429; PROVIDER_TIMEOUT/504; PROVIDER_UNAVAILABLE/502; INVALID_MODEL_OUTPUT/502. Retryable enables a user action, never automatic billed retries.
-
-Environment: META_API_KEY server-only; META_MODEL; META_API_BASE_URL checked against an official allowlist; APP_ANALYSIS_MODE=live|fixture. No NEXT_PUBLIC secrets. Exact Meta URL/payload/model ID are established in TASK-001 using official docs. Do not substitute OpenAI credentials or guess provider compatibility.
-
-## State, storage and races
-
-empty → captured → analyzing → draft → reviewed/rejected; error retains source photo. Replacement/item change increments revision and resets review. Manual-check completion is separate; accept cannot imply a physical test.
-
-Use AbortController AND attempt/revision matching plus deletion guards. Cancellation alone cannot prevent late writes. Commit only when session, item, media and attempt still match. Export reads a stable snapshot and never changes review state.
-
-IndexedDB stores normalized image blobs, not localStorage base64. Delete linked records transactionally; revoke object URLs. Version migrations preserve valid records or explicitly offer recovery/reset. Storage failure offers in-memory use with warning.
-
-## Trust boundaries and UX
-
-Use a maintained image decoder; bound bytes/dimensions before expensive processing, strip metadata and normalize orientation. Never fetch client URLs. Escape all model/worker text in UI/export. Server logs only safe IDs, timings and error codes; no raw media, prompts, keys or provider bodies. Local deletion cannot delete provider copies.
-
-Checklist shows progress. Item review displays photo, draft, unknowns, manual checks and edit/accept/reject together. Provide upload fallback, recovery and accessible controls. Keep fixture/live label prominent. Print includes embedded normalized media, escaped text and repeating review-only banner.
-
-Local storage avoids a production multi-tenant backend; printable HTML avoids a PDF engine. Public hosting, identity, production retention, full-form automation and offline sync need later design work.
+Service worker must not cache POST /api/analyze, IndexedDB evidence, provider payloads, keys, or full-resolution media. Installability changes no server boundary (REQ-010 holds). Offline queue stores only staged capture bytes already held in memory/IDB, never new exfiltration paths.

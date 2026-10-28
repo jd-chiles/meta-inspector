@@ -1,27 +1,27 @@
-# Habitability Walkthrough MVP
+# Habitability Walkthrough — 11-item Form 1083 + installable PWA (epoch 3 rescope)
 
-Feature: habitability-walkthrough-mvp · Baseline 1 · October 26, 2026
+Feature: habitability-walkthrough-mvp · Epoch 3 · October 28, 2026. Supersedes the 3–4-item demo MVP scope (epochs 1–2) without discarding its implementation or evidence, which are preserved in history.
 
 ## Requested outcome
 
-Prepare implementation-ready SDD documents for the user's installed OpenCode v2 SDD Autopilot plugin, plus Codex review guidance and GitHub CI. The later build will let housing navigators select an item, capture a mock-unit image, obtain a neutral Muse Spark draft, review it, record human checks, and export a review-only summary.
+Rescope the SDD to the confirmed full 11-item Form 1083 walkthrough plus a modern installable PWA for the November 4 hackathon deliverable. This is a documentation and planning pass first: revise requirements, design, plan, task graph, verification, brief, roadmap, demo plan, release notes, and catalog contract so they agree, with one approved SDD revision as the source of truth. No product implementation begins until the revised plan is reviewed and checkpointed.
 
-This package prepares a later implementation run. No plan approval, independent review verdict, application verification, publication or deployment is prefilled.
+## Confirmed scope (November 4)
 
-## Repository facts
+- All 11 confirmed Form 1083 checklist items with evidence capture.
+- Editable Muse Spark draft suggestions with explicit uncertainty.
+- Worker review with manual checks (photo-cannot-establish preserved).
+- Review-only printable/PDF output (same honesty banner, no verdict claims).
+- Installable PWA: manifest + icons + service worker, offline app-shell access, saved local progress; analysis shown as pending while offline, never auto-verdicted.
 
-The initial workspace has project notes but no application, manifest, tests, usable Git checkout or remote. Read docs/PRODUCT_BRIEF.md, docs/RESEARCH.md and docs/DECISIONS.md. Application paths below are proposed implementation targets.
+## Provider confirmation handling
 
-The installed plugin resolves to /home/hermes/lab/dsh/reference/opencode-v2-sdd-plugin. Its inspected contracts require eight numbered Markdown artifacts, REQ IDs, TASK checkboxes, executable checks, independent review and plugin-owned state. This package targets that Autopilot interface, not the distinct .opencode-sdd/spec.json interface in jd-chiles/opencode-sdd-v2.
+The user's provider confirmation is accepted as user-attested existence (attested=true, owner statement October 28, 2026 for the 11-item Form 1083 scope) with all confirmation details OPEN: exact form version, source document, verifier, verification date, official item wording, required physical tests and sign-offs, and provider-accepted output details are marked OPEN in 01-requirements. The LAHSA FY22–23 public listing remains a working reference only, never a confirmation. Demo-checklist labeling stays until mapping details are confirmed.
 
-## Scope and boundaries
+## Explicitly later phase (unless confirmed requirements + schedule justify)
 
-Core: 3–4 catalog items; capture/upload; real server-side Meta inference; validated neutral drafts; uncertainty; worker review; manual checks; provenance; local recovery and deletion; printable evidence summary; explicit fixtures; accessible mobile flow; CI/review.
+HMIS integration and accepted packet formatting, landlord-facing fix lists and deadlines, and broader offline synchronization (multi-device, background sync of analysis results).
 
-Stretch after core acceptance: optional Voice Transcribe narration, then SAM highlighting if useful. Exclude automated pass/fail, certification, eligibility, signatures, HMIS upload, landlord deadlines, scheduling, production identity, tenant data, continuous video and offline sync.
+## Boundaries carried forward
 
-The active provider Form 1083 version remains unresolved. Generic development may use a clearly illustrative demo catalog. Do not invent official wording, numbering or physical-test requirements. Only a documented provider-confirmed catalog may claim a mapping to its form version. A labeled illustrative demo can finish while form-specific claims and real pilots wait for confirmation.
-
-Measure task time, evidence coverage, corrections and rework, with sample sizes and errors. Case-manager conversations remain owner-reported qualitative evidence. Housing placement timelines are outside evaluation.
-
-Publishing, pushing and remote repository settings require a real repository and appropriate access. Preserve the plugin's independent reviews and normal approval gate.
+No pass/fail automation, no HMIS acceptance claims, no landlord delivery, no production readiness, no tenant data, no secrets in bundles/logs/exports, single paid live-call discipline, no publish/deploy/external-board changes during this documentation pass. IDEA.md stays historical and points to the current plan. README, Kanban board, and worker task prompts are updated to reference the approved epoch-3 revision and its task IDs (board/prompts by the owner — external changes are out of scope for this pass).

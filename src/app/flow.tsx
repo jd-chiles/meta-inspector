@@ -40,6 +40,30 @@ import {
   type ExportSnapshot,
 } from "../export/summary";
 import GuidedCapture from "../features/walkthrough/capture";
+import {
+  DeferredInstallPrompt,
+  clearQueuedForSession,
+  createQueuedIntent,
+  describeOfflineState,
+  describePendingItem,
+  detectInstallPlatform,
+  enqueueOfflineAnalysis,
+  getInstallAffordance,
+  isItemQueued,
+  isNavigatorOnline,
+  isStandaloneDisplay,
+  loadOfflineQueue,
+  manualInstallSteps,
+  pendingForSession,
+  registerAppServiceWorker,
+  removeQueuedForItem,
+  requestInstall,
+  saveOfflineQueue,
+  subscribeConnectivity,
+  type BeforeInstallPromptEventLike,
+  type InstallPlatform,
+  type OfflineQueue,
+} from "../features/walkthrough/offline";
 import WorkerReview from "../features/walkthrough/review";
 import ExportSummary from "../features/walkthrough/summary";
 import {
@@ -183,6 +207,59 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
   const [snap, setSnap] = useState<SessionManagerSnapshot | null>(null);
   const [localErrors, setLocalErrors] = useState<Record<string, FlowError>>({});
 
+  // Offline-first PWA wiring (REQ-007, REQ-009, REQ-013): a pending-only
+  // analysis queue, service-worker shell status, and an install affordance
+  // with manual-guidance fallback. The queue carries identities only
+  // (session/item/attempt/mediaId); bytes stay in IndexedDB under the
+  // session manager. Nothing here synthesizes a draft or implies a verdict
+  // while offline — reconnect requires an explicit per-item retry through
+  // the existing reanalyze control.
+  const [deferredPrompt] = useState(() => new DeferredInstallPrompt());
+  const [offlineQueue, setOfflineQueue] = useState<OfflineQueue>([]);
+  const queueRef = useRef<OfflineQueue>([]);
+  const [online, setOnline] = useState<boolean>(true);
+  const [swMessage, setSwMessage] = useState<string>(
+    "Checking the offline shell…",
+  );
+  const [installPromptAvailable, setInstallPromptAvailable] =
+    useState<boolean>(false);
+  const [installStandalone, setInstallStandalone] = useState<boolean>(false);
+  const [installPlatform, setInstallPlatform] =
+    useState<InstallPlatform>("unknown");
+  const [installAccepted, setInstallAccepted] = useState<boolean>(false);
+  const [queueNotice, setQueueNotice] = useState<string | null>(null);
+
+  function persistQueue(next: OfflineQueue): void {
+    queueRef.current = next;
+    setOfflineQueue(next);
+    saveOfflineQueue(next);
+  }
+
+  function currentSessionId(): string {
+    return manager.snapshot().state?.sessionId ?? SESSION_ID;
+  }
+
+  function enqueuePendingIntent(itemId: string): void {
+    const record = manager.item(itemId);
+    const intent = createQueuedIntent({
+      sessionId: currentSessionId(),
+      itemId,
+      attempt: record?.attempt ?? 0,
+      mediaId: record?.mediaId ?? null,
+      stagedAt: new Date().toISOString(),
+    });
+    persistQueue(enqueueOfflineAnalysis(queueRef.current, intent));
+  }
+
+  function dequeueItemIntent(itemId: string): void {
+    const next = removeQueuedForItem(
+      queueRef.current,
+      currentSessionId(),
+      itemId,
+    );
+    if (next.length !== queueRef.current.length) persistQueue(next);
+  }
+
   const catalogSnapshot = useMemo(
     () =>
       catalog
@@ -219,6 +296,67 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
       unsubscribe();
     };
   }, [manager, catalogSnapshot]);
+
+  // Connectivity transitions plus the persisted pending-only queue. The
+  // queue never auto-runs: every entry waits for an explicit per-item
+  // retry after reconnect.
+  useEffect(() => {
+    setOnline(isNavigatorOnline());
+    const loaded = loadOfflineQueue();
+    queueRef.current = loaded.queue;
+    setOfflineQueue(loaded.queue);
+    if (loaded.hadCorruptRows) {
+      setQueueNotice(
+        "A corrupt offline-queue entry was dropped and never applied. Photos already on screen are unaffected; retry any pending item explicitly.",
+      );
+    }
+    return subscribeConnectivity(setOnline);
+  }, []);
+
+  // App-shell service worker: caches shell/assets only, never evidence
+  // bytes, provider payloads, keys, or media.
+  useEffect(() => {
+    let cancelled = false;
+    registerAppServiceWorker().then((result) => {
+      if (cancelled) return;
+      if (result.ok) {
+        setSwMessage(
+          `Offline shell ready${result.scope ? ` (scope ${result.scope})` : ""}. The installed shell opens your saved local progress; analyses still need a connection and never run automatically.`,
+        );
+      } else {
+        setSwMessage(result.message);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Install affordance: capture the single-use prompt when the browser
+  // offers it; otherwise (and after a dismissal) degrade to manual steps.
+  useEffect(() => {
+    setInstallStandalone(isStandaloneDisplay());
+    setInstallPlatform(detectInstallPlatform());
+    const onBeforeInstallPrompt = (event: Event): void => {
+      event.preventDefault();
+      deferredPrompt.capture(event as unknown as BeforeInstallPromptEventLike);
+      setInstallPromptAvailable(true);
+    };
+    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+    };
+  }, [deferredPrompt]);
+
+  async function handleInstall(): Promise<void> {
+    const result = await requestInstall(deferredPrompt);
+    setInstallPromptAvailable(false);
+    if (result.outcome === "accepted") {
+      setInstallAccepted(true);
+    } else {
+      setInstallPlatform(result.platform);
+    }
+  }
 
   function clearLocalError(itemId: string): void {
     setLocalErrors((current) => {
@@ -285,6 +423,12 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
       if (result.code === "STALE_RESPONSE" || result.code === "CANCELLED") {
         return;
       }
+      if (result.code === "PROVIDER_UNAVAILABLE") {
+        // Offline transport failure: keep the photo and record a
+        // pending-only intent (no draft, no verdict). The worker retries
+        // explicitly via the item's reanalyze control after reconnect.
+        enqueuePendingIntent(itemId);
+      }
       // A failure the reducer stamped onto the item is already surfaced once
       // by WorkerReview (review-error-*) with its retry affordances; a local
       // alert would announce the same outcome twice. Only failures that
@@ -297,7 +441,9 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
         code: result.code,
         message: `${result.message} The current photo is kept.`,
       });
+      return;
     }
+    dequeueItemIntent(itemId);
   }
 
   async function handleCancel(itemId: string): Promise<void> {
@@ -308,6 +454,8 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
   async function handleRemove(itemId: string): Promise<void> {
     clearLocalError(itemId);
     setSnap(await manager.deleteItemEvidence(itemId));
+    // Deleted evidence must never be analyzed later by a stale queue entry.
+    dequeueItemIntent(itemId);
   }
 
   async function handleAccept(itemId: string): Promise<void> {
@@ -385,6 +533,9 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
         const result = await runAnalyze(itemId, file);
         setSnap(manager.snapshot());
         if (!result.ok) {
+          if (result.code === "PROVIDER_UNAVAILABLE") {
+            enqueuePendingIntent(itemId);
+          }
           if (
             result.code !== "STALE_RESPONSE" &&
             result.code !== "CANCELLED" &&
@@ -397,6 +548,8 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
               message: result.message,
             });
           }
+        } else {
+          dequeueItemIntent(itemId);
         }
         return;
       } catch {
@@ -411,6 +564,7 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
     if (!result.ok && !manager.item(itemId)?.error) {
       reportLocalError(itemId, { code: result.code, message: result.message });
     }
+    if (result.ok) dequeueItemIntent(itemId);
   }
 
   async function handleRetryLoad(): Promise<void> {
@@ -423,6 +577,9 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
     mediaBytesRef.current.clear();
     setMediaVersion((version) => version + 1);
     setLocalErrors({});
+    // A storage reset discards every staged photo, so no queued intent may
+    // outlive the evidence it points at.
+    persistQueue(clearQueuedForSession(queueRef.current, SESSION_ID));
     setSnap(await manager.resetStorage(SESSION_ID, catalogSnapshot));
   }
 
@@ -505,6 +662,24 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
   const exportUnresolved = exportSnapshot?.unresolved.length ?? itemCount;
   const unresolvedNoun = exportUnresolved === 1 ? "item" : "items";
 
+  // Pending-only offline queue depth for this session, and the install
+  // affordance (prompt when captured, manual guidance otherwise).
+  const pendingCount = state
+    ? pendingForSession(offlineQueue, state.sessionId).length
+    : 0;
+  const installAffordance = getInstallAffordance({
+    standalone: installStandalone,
+    deferredPromptAvailable: installPromptAvailable,
+    platform: installPlatform,
+  });
+  // Guidance steps stay available even when the helper resolves another
+  // mode: the install path must always degrade to manual steps, never to
+  // silence.
+  const installSteps =
+    installAffordance.mode === "guidance"
+      ? installAffordance.steps
+      : manualInstallSteps(installPlatform);
+
   if (!catalog || !catalogSnapshot) {
     return (
       <section aria-labelledby="flow-fatal-heading" className="wt-card">
@@ -567,6 +742,68 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
             as the local session is ready.
           </p>
         )}
+      </section>
+
+      <section aria-labelledby="offline-heading" className="wt-section">
+        <h2 id="offline-heading" className="wt-section-title">
+          Offline and install
+        </h2>
+        <p
+          role="status"
+          className="wt-statusline"
+          data-testid="offline-status"
+        >
+          {describeOfflineState({ online, pendingCount })}
+        </p>
+        {queueNotice && (
+          <p
+            role="note"
+            className="wt-note"
+            data-testid="offline-queue-notice"
+          >
+            {queueNotice}
+          </p>
+        )}
+        <p role="status" className="wt-statusline" data-testid="sw-status">
+          {swMessage}
+        </p>
+        <div data-testid="pwa-install">
+          {installStandalone || installAccepted ? (
+            <p
+              role="note"
+              className="wt-note"
+              data-testid="pwa-install-installed"
+            >
+              Installed: this walkthrough runs from your home screen with
+              saved local progress. Analyses still need a connection and run
+              only when you retry them explicitly.
+            </p>
+          ) : installAffordance.mode === "prompt" ? (
+            <div className="wt-actions wt-no-print">
+              <button
+                type="button"
+                className="wt-btn"
+                data-testid="pwa-install-button"
+                onClick={() => void handleInstall()}
+              >
+                Install the walkthrough app
+              </button>
+            </div>
+          ) : (
+            <div data-testid="pwa-install-guidance">
+              <p role="note" className="wt-note">
+                Install this walkthrough for offline launch — or keep using
+                it in the browser. When the browser offers no install button,
+                follow these steps:
+              </p>
+              <ol className="wt-list">
+                {installSteps.map((step) => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ol>
+            </div>
+          )}
+        </div>
       </section>
 
       {ready && state && (
@@ -639,7 +876,7 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
             Checklist
           </h2>
           <p className="wt-section-sub">
-            Four demo items. Each card shows what to photograph and its current
+            11 demo items. Each card shows what to photograph and its current
             state — open an item to capture and review it below.
           </p>
           <ol className="wt-pick-grid">
@@ -723,6 +960,15 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
                 >
                   <strong>Error [{flowError.code}]:</strong>{" "}
                   {flowError.message}
+                </p>
+              )}
+              {isItemQueued(offlineQueue, state.sessionId, catalogItem.id) && (
+                <p
+                  role="status"
+                  className="wt-statusline"
+                  data-testid={`offline-pending-${catalogItem.id}`}
+                >
+                  {describePendingItem(catalogItem.label)}
                 </p>
               )}
               <div className="wt-item-sub">

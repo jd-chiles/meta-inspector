@@ -1305,8 +1305,20 @@ describe("catalog and fixture honesty", () => {
     expect(isDemoCatalog(catalog)).toBe(true);
     expect(catalog.demoNotice).toBe(DEMO_NOTICE);
     expect(canClaimFormMapping(catalog)).toBe(false);
-    expect(catalog.items.length).toBeGreaterThanOrEqual(3);
-    expect(catalog.items.length).toBeLessThanOrEqual(4);
+    expect(catalog.items.length).toBe(11);
+    expect(catalog.items.map((item) => item.id)).toEqual([
+      "demo-interior-air",
+      "demo-water-supply",
+      "demo-lighting-electric",
+      "demo-smoke-co",
+      "demo-item-05",
+      "demo-item-06",
+      "demo-item-07",
+      "demo-item-08",
+      "demo-item-09",
+      "demo-item-10",
+      "demo-item-11",
+    ]);
     expect(getCatalogItem(catalog, "demo-water-supply")).not.toBeNull();
 
     // A fake confirmation (demo mode claiming verified) never promotes.

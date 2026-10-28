@@ -22,6 +22,8 @@ const allowedProfiles = new Set(["autopilot", "planning", "review", "explorer", 
   "requirements", "architect", "spec-reviewer", "plan-consultant", "plan-reviewer",
   "implementer", "frontend", "backend", "tests", "security-reviewer", "code-reviewer",
   "qa", "documentation", "gate-reviewer"]);
+const reviewerProfiles = new Set(["review", "spec-reviewer", "plan-reviewer",
+  "code-reviewer", "security-reviewer", "gate-reviewer"]);
 const fields = new Set(["id", "title", "description", "profile", "difficulty", "rationale",
   "requirements", "dependencies", "files", "acceptance", "risk", "checkIDs", "bugFix", "parent"]);
 const covered = new Set();
@@ -44,7 +46,7 @@ for (const task of tasks) {
   assert(typeof task.rationale === "string" && task.rationale.length >= 10, task.id + " needs rationale");
   assert(allowedProfiles.has(task.profile), task.id + " profile invalid");
   assert(["low", "medium", "high"].includes(task.difficulty), task.id + " difficulty invalid");
-  assert(Array.isArray(task.files) && task.files.length, task.id + " needs ownership");
+  assert(Array.isArray(task.files) && (task.files.length || reviewerProfiles.has(task.profile)), task.id + " needs ownership");
   assert(task.files.every((p) => typeof p === "string" && p && !p.startsWith("/") &&
     !p.includes("\\") && !p.split("/").includes("..")), task.id + " unsafe ownership");
   assert(task.requirements.length && task.acceptance.length && task.checkIDs.length, task.id + " lacks acceptance/check mapping");

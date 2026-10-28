@@ -120,11 +120,11 @@ function reviewedSession(): SessionState {
 }
 
 describe("versioned illustrative catalog (REQ-001)", () => {
-  it("ships 4 items with stable demo IDs, version, and demo notice", () => {
+  it("ships 11 items with stable demo IDs, version, and demo notice", () => {
     const result = validateCatalog(demoCatalogJson);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.items.length).toBe(4);
+    expect(result.value.items.length).toBe(11);
     expect(result.value.version).toBe("0.2.0-demo.1");
     expect(result.value.mode).toBe("demo");
     expect(result.value.demoNotice).toBe(DEMO_NOTICE);
@@ -134,6 +134,13 @@ describe("versioned illustrative catalog (REQ-001)", () => {
       "demo-water-supply",
       "demo-lighting-electric",
       "demo-smoke-co",
+      "demo-item-05",
+      "demo-item-06",
+      "demo-item-07",
+      "demo-item-08",
+      "demo-item-09",
+      "demo-item-10",
+      "demo-item-11",
     ]);
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of ids) {
@@ -182,15 +189,25 @@ describe("versioned illustrative catalog (REQ-001)", () => {
 
   it("rejects catalogs with wrong item counts or duplicate IDs", () => {
     const catalog = assertValidCatalog(demoCatalogJson);
-    const tooFew = validateCatalog({ ...catalog, items: catalog.items.slice(0, 1) });
+    const tooFew = validateCatalog({ ...catalog, items: catalog.items.slice(0, 10) });
     expect(tooFew.ok).toBe(false);
+    if (!tooFew.ok) {
+      expect(tooFew.errors.some((e) => e.includes("exactly 11 items"))).toBe(
+        true,
+      );
+    }
+    const tooMany = validateCatalog({
+      ...catalog,
+      items: [...catalog.items, { ...catalog.items[0] }],
+    });
+    expect(tooMany.ok).toBe(false);
     const doubled = validateCatalog({
       ...catalog,
       items: [...catalog.items, ...catalog.items],
     });
     expect(doubled.ok).toBe(false);
     if (!doubled.ok) {
-      expect(doubled.errors.some((e) => e.includes("3–4 items"))).toBe(true);
+      expect(doubled.errors.some((e) => e.includes("exactly 11 items"))).toBe(true);
     }
   });
 

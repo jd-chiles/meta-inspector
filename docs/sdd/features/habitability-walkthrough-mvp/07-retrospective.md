@@ -1,5 +1,9 @@
 # Retrospective
 
+## Epoch 3 rescope note — October 28, 2026 (planning only)
+
+No implementation ran in epoch 3; this note records scoping inputs for the November 4 plan. Prior outcomes below stand as written. New deltas: provider confirmation accepted as user-attested with all non-provided details OPEN/TBD (no invented wording/tests/sign-offs); catalog grows 3–4 → 11 items via fail-closed TBD contract; PWA (installable, offline shell, saved progress, pending queue) and PDF parity added as REQ-007/008/013 work; HMIS/landlord/broader-sync deferred to a later phase. Reuse is high (domain/session/UI/server/export/storage/tests); genuinely new work is the catalog contract + data, PWA shell/SW/offline states, verification expansion, and demo/release/docs pointers. Known frictions carried in: shared-checkout concurrent writer (resolved by parking the Kanban lane and verifying tree stability before evidence), tailscale `:3100` proxy vs Playwright webServer (loopback-only server workaround, no test weakening), ledger live-smoke gap (accepted tooling blocker — no evidence-import workflow exists in the installed plugin).
+
 ## Final outcome — October 27, 2026 (TASK-041, REQ-012)
 
 Gate TASK-040 returned READY (passed) on the complete evidence chain, and
@@ -27,9 +31,9 @@ This TASK-034 documentation fix closes only the stale-record gap
 (06-release.md unstarted claim, 05-change-log stopping at revision 67,
 07-retrospective empty); it does not promote readiness.
 
-Observed at revision 228: 29 builder tasks passed (TASK-001 through TASK-010
-plus repairs TASK-013 through TASK-027, spec TASK-011, plan TASK-012);
-`docs`/`lint`/`typecheck`/`unit`/`browser`/`build` passed on stable source
+Observed at revision 228: 29 builder tasks passed (TASK-001 through
+TASK-010 plus repairs TASK-013 through TASK-027, spec TASK-011, plan
+TASK-012); `docs`/`lint`/`typecheck`/`unit`/`browser`/`build` passed on stable source
 with red/green pairs where required; `live-smoke` honestly failed (no
 `META_API_KEY`, exit 1, no fixture substituted); code TASK-032 passed with 2
 non-blocking info notes; security TASK-030 passed with 1 low hardening note;

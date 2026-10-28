@@ -1,0 +1,16 @@
+<!-- Original rights-cleared maskable icon for the Habitability Walkthrough Companion.
+  Hand-authored geometric mark (house outline + review check) on a full-bleed
+  theme background (#0b5cad). Key artwork is confined to the central ~66% safe
+  zone so OS icon masks never clip meaningful content. No third-party assets,
+  fonts, or trademarks. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Habitability Walkthrough Companion maskable app icon">
+  <rect x="0" y="0" width="512" height="512" fill="#0b5cad"/>
+  <g transform="translate(86,86) scale(0.6640625)">
+    <!-- House outline -->
+    <path d="M256 118 L138 224 v150 a22 22 0 0 0 22 22 h192 a22 22 0 0 0 22-22 V224 Z" fill="none" stroke="#ffffff" stroke-width="30" stroke-linejoin="round" stroke-linecap="round"/>
+    <!-- Door opening -->
+    <path d="M224 396 v-74 h64 v74" fill="none" stroke="#ffffff" stroke-width="30" stroke-linejoin="round" stroke-linecap="round"/>
+    <!-- Review check -->
+    <path d="M208 288 l36 36 68-80" fill="none" stroke="#7fd08c" stroke-width="34" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+</svg>

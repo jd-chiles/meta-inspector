@@ -10,11 +10,13 @@ export const metadata: Metadata = {
   },
   description:
     "Image-first prototype that helps housing navigators capture mock-unit evidence, prepare reviewable drafts, and flag manual checks. Draft for worker review — not an approved inspection or HMIS submission.",
+  manifest: "/manifest.webmanifest",
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  themeColor: "#0b5cad",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

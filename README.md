@@ -21,7 +21,25 @@ This is a focused prototype for reducing friction in one administrative step. It
 
 ## Current state
 
-The concept and scope are documented. The exact Form 1083 version currently used by a participating provider is not confirmed. Before binding UI or AI output to form fields, inspect that copy with a navigator. Use only self-shot mock-unit images and fictional data in the hackathon demo.
+Epoch-3 rescope (November 4 target): 11-item demo checklist
+(`demo-habitability-walkthrough` version `0.2.0-demo.1` — 4 carried
+illustrative items + 7 reserved placeholders with official
+wording/tests/sign-offs TBD), installable PWA shell with offline pending
+queue, and review-only printable/PDF export. Every checklist surface keeps
+`Demo checklist — not a verified Form 1083 mapping.` The 11-item scope is
+user-attested (owner statement, October 28, 2026); all confirmation details
+remain OPEN — no operative Form 1083 mapping, provider confirmation, or
+pilot claim exists.
+
+Source of truth: SDD run `habitability-walkthrough-mvp` (revision 483 at
+time of writing, recorded plan approval `8d202606485e`), requirements
+REQ-001–REQ-013 in
+`docs/sdd/features/habitability-walkthrough-mvp/01-requirements.md`, plan
+tasks TASK-069–TASK-073 in `03-plan.md`/`tasks.json`. Epoch-3 builders
+TASK-069–TASK-072 are recorded passed; executable-check re-runs on the
+epoch-3 fingerprint are pending coordinator execution — fixture success
+never counts as live, and local deletion never claims provider deletion.
+Use only self-shot mock-unit images and fictional data in the hackathon demo.
 
 ## Reference material
 
