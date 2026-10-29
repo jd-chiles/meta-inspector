@@ -25,6 +25,7 @@
  */
 import {
   createSession,
+  ensureSessionShape,
   reduceSession,
   type ItemRecord,
   type ManualOutcome,
@@ -383,7 +384,7 @@ export class WalkthroughSessionManager {
       this.notify();
       return this.snapshot();
     }
-    this.session = loaded.state;
+    this.session = ensureSessionShape(loaded.state);
     this.setReadyAfterLoad();
     // A reload kills every inflight fetch, so a persisted "analyzing" item can
     // never complete and a persisted "captured" item (staged photo, analysis
@@ -1376,6 +1377,151 @@ export class WalkthroughSessionManager {
         code: "CHECK_NOT_RECORDED",
         message:
           "That check was not recorded. Use a known check, choose performed or not-performed, and include a worker note.",
+      };
+    }
+    this.session = next;
+    await this.persist();
+    return { ok: true, snapshot: this.snapshot() };
+  }
+
+  /**
+   * Record (create or edit) the worker deficiency for one item (REQ-005).
+   * Worker-only: the finding binds to the item's current photo and starts
+   * unflagged; a later photo change flags it needs-confirmation via the
+   * reducer, and photo deletion clears it. Re-recording re-binds to the
+   * current photo and clears any stale flag. Never populated from model
+   * output, never a verdict, never HMIS.
+   */
+  async recordDeficiency(
+    itemId: string,
+    input: {
+      issueDescription: string;
+      correctiveAction: string;
+      responsibleParty?: string | null;
+      targetDate?: string | null;
+    },
+  ): Promise<
+    | { ok: true; snapshot: SessionManagerSnapshot }
+    | { ok: false; code: string; message: string }
+  > {
+    if (!this.session) {
+      return {
+        ok: false,
+        code: "NO_SESSION",
+        message: "No local session is loaded yet. Reload and try again.",
+      };
+    }
+    const at = this.now();
+    const next = reduceSession(
+      this.session,
+      {
+        type: "record-deficiency",
+        itemId,
+        issueDescription: input.issueDescription,
+        correctiveAction: input.correctiveAction,
+        responsibleParty: input.responsibleParty ?? null,
+        targetDate: input.targetDate ?? null,
+        recordedAt: at,
+      },
+      at,
+    );
+    if (next === this.session) {
+      return {
+        ok: false,
+        code: "DEFICIENCY_NOT_RECORDED",
+        message:
+          "That finding was not recorded. Describe the issue and corrective action (up to 1000 characters each), keep optional owner/date valid, and capture a photo first.",
+      };
+    }
+    this.session = next;
+    await this.persist();
+    return { ok: true, snapshot: this.snapshot() };
+  }
+
+  /** Clear the worker deficiency for one item; no-op when none is recorded. */
+  async clearDeficiency(itemId: string): Promise<
+    | { ok: true; snapshot: SessionManagerSnapshot }
+    | { ok: false; code: string; message: string }
+  > {
+    if (!this.session) {
+      return {
+        ok: false,
+        code: "NO_SESSION",
+        message: "No local session is loaded yet. Reload and try again.",
+      };
+    }
+    const next = reduceSession(
+      this.session,
+      { type: "clear-deficiency", itemId },
+      this.now(),
+    );
+    if (next === this.session) {
+      return {
+        ok: false,
+        code: "NO_DEFICIENCY",
+        message: "There is no recorded finding on this item to clear.",
+      };
+    }
+    this.session = next;
+    await this.persist();
+    return { ok: true, snapshot: this.snapshot() };
+  }
+
+  /**
+   * Set session draft case notes (worker-only, REQ-008). Draft text only:
+   * never a verdict, never HMIS, never auto-exported as completed.
+   */
+  async setCaseNotes(notes: string): Promise<
+    | { ok: true; snapshot: SessionManagerSnapshot }
+    | { ok: false; code: string; message: string }
+  > {
+    if (!this.session) {
+      return {
+        ok: false,
+        code: "NO_SESSION",
+        message: "No local session is loaded yet. Reload and try again.",
+      };
+    }
+    const next = reduceSession(
+      this.session,
+      { type: "set-case-notes", notes },
+      this.now(),
+    );
+    if (next === this.session) {
+      return {
+        ok: false,
+        code: "NOTES_NOT_RECORDED",
+        message:
+          "Case notes were not saved. Enter 1–2000 characters of worker draft text.",
+      };
+    }
+    this.session = next;
+    await this.persist();
+    return { ok: true, snapshot: this.snapshot() };
+  }
+
+  /** Clear session draft case notes; no-op when none are set. */
+  async clearCaseNotes(): Promise<
+    | { ok: true; snapshot: SessionManagerSnapshot }
+    | { ok: false; code: string; message: string }
+  > {
+    if (!this.session) {
+      return {
+        ok: false,
+        code: "NO_SESSION",
+        message: "No local session is loaded yet. Reload and try again.",
+      };
+    }
+    const next = reduceSession(
+      this.session,
+      { type: "clear-case-notes" },
+      this.now(),
+    );
+    if (next === this.session) {
+      return {
+        ok: false,
+        code: "NO_NOTES",
+        message: "There are no case notes to clear.",
       };
     }
     this.session = next;

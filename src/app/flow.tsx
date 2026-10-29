@@ -228,6 +228,10 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
     useState<InstallPlatform>("unknown");
   const [installAccepted, setInstallAccepted] = useState<boolean>(false);
   const [queueNotice, setQueueNotice] = useState<string | null>(null);
+  const [caseNotesDraft, setCaseNotesDraft] = useState<string>("");
+  const [caseNotesEditing, setCaseNotesEditing] = useState<boolean>(false);
+  const [caseNotesError, setCaseNotesError] = useState<string | null>(null);
+  const [caseNotesNotice, setCaseNotesNotice] = useState<string | null>(null);
 
   function persistQueue(next: OfflineQueue): void {
     queueRef.current = next;
@@ -507,6 +511,75 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
     if (!result.ok) {
       reportLocalError(itemId, { code: result.code, message: result.message });
     }
+  }
+
+  async function handleRecordDeficiency(
+    itemId: string,
+    input: {
+      issueDescription: string;
+      correctiveAction: string;
+      responsibleParty?: string;
+      targetDate?: string;
+    },
+  ): Promise<void> {
+    clearLocalError(itemId);
+    const result = await manager.recordDeficiency(itemId, {
+      issueDescription: input.issueDescription,
+      correctiveAction: input.correctiveAction,
+      responsibleParty: input.responsibleParty ?? null,
+      targetDate: input.targetDate ?? null,
+    });
+    setSnap(manager.snapshot());
+    if (!result.ok) {
+      reportLocalError(itemId, { code: result.code, message: result.message });
+    }
+  }
+
+  async function handleClearDeficiency(itemId: string): Promise<void> {
+    clearLocalError(itemId);
+    const result = await manager.clearDeficiency(itemId);
+    setSnap(manager.snapshot());
+    if (!result.ok) {
+      reportLocalError(itemId, { code: result.code, message: result.message });
+    }
+  }
+
+  async function handleSaveCaseNotes(): Promise<void> {
+    setCaseNotesError(null);
+    setCaseNotesNotice(null);
+    const trimmed = caseNotesDraft.trim();
+    if (trimmed.length === 0) {
+      setCaseNotesError(
+        "Enter 1–2000 characters of worker draft text, or clear the notes.",
+      );
+      return;
+    }
+    if (trimmed.length > 2000) {
+      setCaseNotesError("Case notes must be at most 2000 characters.");
+      return;
+    }
+    const result = await manager.setCaseNotes(caseNotesDraft);
+    setSnap(manager.snapshot());
+    if (!result.ok) {
+      setCaseNotesError(result.message);
+      return;
+    }
+    setCaseNotesNotice("Case notes saved as a worker draft.");
+    setCaseNotesEditing(false);
+  }
+
+  async function handleClearCaseNotes(): Promise<void> {
+    setCaseNotesError(null);
+    const result = await manager.clearCaseNotes();
+    setSnap(manager.snapshot());
+    if (!result.ok) {
+      setCaseNotesNotice(null);
+      setCaseNotesError(result.message);
+      return;
+    }
+    setCaseNotesNotice("Case notes cleared.");
+    setCaseNotesDraft("");
+    setCaseNotesEditing(false);
   }
 
   async function handleReanalyze(itemId: string): Promise<void> {
@@ -1016,6 +1089,12 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
                       note,
                     )
                   }
+                  onRecordDeficiency={(input) =>
+                    void handleRecordDeficiency(catalogItem.id, input)
+                  }
+                  onClearDeficiency={() =>
+                    void handleClearDeficiency(catalogItem.id)
+                  }
                   onReanalyze={() => void handleReanalyze(catalogItem.id)}
                   onCancelAnalysis={() => void handleCancel(catalogItem.id)}
                   disabled={!ready}
@@ -1024,6 +1103,127 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
             </article>
           );
         })}
+
+      <div className="wt-section" data-testid="case-notes-section">
+        <h2 className="wt-section-title">Session case notes (optional draft)</h2>
+        <p className="wt-note" role="note">
+          Worker draft notes for this session only — typed by you, never
+          filled in from AI output, and never an inspection outcome.
+        </p>
+        {ready && state && state.caseNotes && !caseNotesEditing && (
+          <div data-testid="case-notes-display">
+            <p className="wt-statusline">{state.caseNotes}</p>
+          </div>
+        )}
+        {ready && state && !state.caseNotes && !caseNotesEditing && (
+          <p
+            className="wt-note"
+            role="note"
+            data-testid="case-notes-empty"
+          >
+            No case notes recorded yet. Add a short worker draft if needed.
+          </p>
+        )}
+        {(!ready || !state) && (
+          <p className="wt-note" role="status">
+            Case notes load with the local session.
+          </p>
+        )}
+        {caseNotesNotice && (
+          <p
+            className="wt-statusline"
+            role="status"
+            data-testid="case-notes-notice"
+          >
+            {caseNotesNotice}
+          </p>
+        )}
+        {ready && state && caseNotesEditing && (
+          <div className="wt-field">
+            <label htmlFor="case-notes-input" className="wt-label">
+              Case notes (your own words, up to 2000 characters):
+            </label>
+            <textarea
+              id="case-notes-input"
+              data-testid="case-notes-input"
+              value={caseNotesDraft}
+              onChange={(event) => setCaseNotesDraft(event.target.value)}
+              rows={4}
+              maxLength={2000}
+              className="wt-textarea"
+              placeholder="e.g. Occupant present; will recheck kitchen tap."
+            />
+            {caseNotesError && (
+              <p
+                className="wt-statusline"
+                role="alert"
+                data-testid="case-notes-error"
+              >
+                {caseNotesError}
+              </p>
+            )}
+            <div className="wt-actions wt-no-print">
+              <button
+                type="button"
+                className="wt-btn wt-btn--primary"
+                data-testid="case-notes-save"
+                onClick={() => void handleSaveCaseNotes()}
+              >
+                Save case notes
+              </button>
+              <button
+                type="button"
+                className="wt-btn"
+                data-testid="case-notes-cancel"
+                onClick={() => {
+                  setCaseNotesEditing(false);
+                  setCaseNotesError(null);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+        {ready && state && !caseNotesEditing && (
+          <div className="wt-field">
+            {caseNotesError && (
+              <p
+                className="wt-statusline"
+                role="alert"
+                data-testid="case-notes-error"
+              >
+                {caseNotesError}
+              </p>
+            )}
+            <div className="wt-actions wt-no-print">
+              <button
+                type="button"
+                className="wt-btn"
+                data-testid="case-notes-edit"
+                onClick={() => {
+                  setCaseNotesError(null);
+                  setCaseNotesNotice(null);
+                  setCaseNotesDraft(state.caseNotes ?? "");
+                  setCaseNotesEditing(true);
+                }}
+              >
+                {state.caseNotes ? "Edit case notes" : "Add case notes"}
+              </button>
+              {state.caseNotes && (
+                <button
+                  type="button"
+                  className="wt-btn"
+                  data-testid="case-notes-clear"
+                  onClick={() => void handleClearCaseNotes()}
+                >
+                  Clear case notes
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="wt-section">
         <h2 className="wt-section-title">Step 3 — Review-only export</h2>

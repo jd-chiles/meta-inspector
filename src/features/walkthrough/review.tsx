@@ -62,6 +62,16 @@ export interface WorkerReviewProps {
     outcome: ManualOutcome,
     note: string,
   ) => void;
+  /** Record (create or edit) the worker-only finding for this item. Worker
+   * text only — never populated from model output. */
+  onRecordDeficiency: (input: {
+    issueDescription: string;
+    correctiveAction: string;
+    responsibleParty?: string;
+    targetDate?: string;
+  }) => void;
+  /** Clear the recorded worker finding for this item. */
+  onClearDeficiency: () => void;
   /** Invalidate the current review/draft and request a fresh analysis. */
   onReanalyze: () => void;
   /** Abort inflight analysis; the photo is kept. Rendered while analyzing. */
@@ -158,6 +168,8 @@ export default function WorkerReview(props: WorkerReviewProps) {
     onAcceptEdited,
     onReject,
     onRecordManualCheck,
+    onRecordDeficiency,
+    onClearDeficiency,
     onReanalyze,
     onCancelAnalysis,
     disabled = false,
@@ -166,6 +178,10 @@ export default function WorkerReview(props: WorkerReviewProps) {
   const headingId = useId();
   const editId = useId();
   const rejectId = useId();
+  const deficiencyIssueId = useId();
+  const deficiencyActionId = useId();
+  const deficiencyPartyId = useId();
+  const deficiencyDateId = useId();
   const kind = reviewPanelKind(item);
   const requiredIds = catalogItem ? catalogItem.manualChecks.map((c) => c.id) : [];
   const unresolved = reviewUnresolvedIds(requiredIds, item);
@@ -182,6 +198,12 @@ export default function WorkerReview(props: WorkerReviewProps) {
   const [rejectError, setRejectError] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [checkError, setCheckError] = useState<string | null>(null);
+  const [deficiencyOpen, setDeficiencyOpen] = useState(false);
+  const [deficiencyIssue, setDeficiencyIssue] = useState("");
+  const [deficiencyAction, setDeficiencyAction] = useState("");
+  const [deficiencyParty, setDeficiencyParty] = useState("");
+  const [deficiencyDate, setDeficiencyDate] = useState("");
+  const [deficiencyError, setDeficiencyError] = useState<string | null>(null);
 
   const itemLabel = catalogItem ? catalogItem.label : item.itemId;
   const controlsDisabled = disabled || kind === "loading";
@@ -222,6 +244,74 @@ export default function WorkerReview(props: WorkerReviewProps) {
     }
     onRecordManualCheck(checkId, outcome, notes[checkId] ?? "");
   }
+
+  function openDeficiencyEditor(): void {
+    setDeficiencyError(null);
+    // Prefill only from the worker's own previously recorded finding.
+    // The AI draft is never copied here.
+    const current = item.deficiency;
+    setDeficiencyIssue(current?.issueDescription ?? "");
+    setDeficiencyAction(current?.correctiveAction ?? "");
+    setDeficiencyParty(current?.responsibleParty ?? "");
+    setDeficiencyDate(current?.targetDate ?? "");
+    setDeficiencyOpen(true);
+  }
+
+  function handleSaveDeficiency(): void {
+    setDeficiencyError(null);
+    const issue = deficiencyIssue.trim();
+    const action = deficiencyAction.trim();
+    const party = deficiencyParty.trim();
+    const date = deficiencyDate.trim();
+    if (issue.length === 0) {
+      setDeficiencyError(
+        "Describe the issue in your own words — this field is required.",
+      );
+      return;
+    }
+    if (issue.length > 1000) {
+      setDeficiencyError("The issue description must be at most 1000 characters.");
+      return;
+    }
+    if (action.length === 0) {
+      setDeficiencyError(
+        "Describe the corrective action in your own words — this field is required.",
+      );
+      return;
+    }
+    if (action.length > 1000) {
+      setDeficiencyError("The corrective action must be at most 1000 characters.");
+      return;
+    }
+    if (party.length > 200) {
+      setDeficiencyError("The responsible party must be at most 200 characters.");
+      return;
+    }
+    if (date.length > 0 && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      setDeficiencyError("The target date must use YYYY-MM-DD format, or be left empty.");
+      return;
+    }
+    if (date.length > 0 && Number.isNaN(Date.parse(`${date}T00:00:00.000Z`))) {
+      setDeficiencyError("That target date is not a real calendar date.");
+      return;
+    }
+    onRecordDeficiency({
+      issueDescription: deficiencyIssue,
+      correctiveAction: deficiencyAction,
+      ...(party.length > 0 ? { responsibleParty: party } : {}),
+      ...(date.length > 0 ? { targetDate: date } : {}),
+    });
+    setDeficiencyOpen(false);
+  }
+
+  function handleClearDeficiency(): void {
+    setDeficiencyError(null);
+    onClearDeficiency();
+    setDeficiencyOpen(false);
+  }
+
+  const deficiency = item.deficiency ?? null;
+  const deficiencyHasPhoto = item.mediaId !== null;
 
   return (
     <section
@@ -535,6 +625,180 @@ export default function WorkerReview(props: WorkerReviewProps) {
               ? `All ${requiredIds.length} required check(s) recorded as performed.`
               : `Unresolved required checks: ${unresolved.length} of ${requiredIds.length} (${unresolved.join(", ")}). Accepting draft text does not resolve these.`}
         </p>
+      </div>
+
+      {/* Worker-only finding (REQ-005). Never prefilled from the AI draft. */}
+      <div className="wt-card" data-testid={`review-deficiency-${item.itemId}`}>
+        <p className="wt-statusline">
+          <strong>Worker finding (optional).</strong> Recorded by you only —
+          nothing here is filled in from the AI draft, and this is not an
+          inspection outcome.
+        </p>
+        {!deficiency && (
+          <p
+            className="wt-note"
+            role="note"
+            data-testid={`review-deficiency-empty-${item.itemId}`}
+          >
+            No worker finding recorded for this item. Describe what you saw
+            and what should happen next, in your own words.
+          </p>
+        )}
+        {deficiency && (
+          <div
+            data-testid={`review-deficiency-display-${item.itemId}`}
+            role="status"
+          >
+            <p className="wt-statusline">
+              <strong>Issue:</strong> {deficiency.issueDescription}
+            </p>
+            <p className="wt-statusline">
+              <strong>Corrective action:</strong> {deficiency.correctiveAction}
+            </p>
+            {deficiency.responsibleParty && (
+              <p className="wt-statusline">
+                <strong>Responsible party:</strong> {deficiency.responsibleParty}
+              </p>
+            )}
+            {deficiency.targetDate && (
+              <p className="wt-statusline">
+                <strong>Target date:</strong> {deficiency.targetDate}
+              </p>
+            )}
+            <p className="wt-note">Recorded {deficiency.recordedAt}.</p>
+            {deficiency.needsConfirmation && (
+              <p
+                className="wt-statusline"
+                role="alert"
+                data-testid={`review-deficiency-stale-${item.itemId}`}
+              >
+                The photo changed after this finding was recorded — review and
+                save it again to confirm it still applies.
+              </p>
+            )}
+          </div>
+        )}
+        {!deficiencyHasPhoto && (
+          <p className="wt-note" role="note">
+            Capture a photo first — a finding is recorded against the current
+            photo.
+          </p>
+        )}
+        <div className="wt-actions wt-no-print">
+          <button
+            type="button"
+            className="wt-btn"
+            data-testid={`review-deficiency-open-${item.itemId}`}
+            disabled={controlsDisabled || !deficiencyHasPhoto}
+            onClick={() => {
+              if (deficiencyOpen) {
+                setDeficiencyError(null);
+                setDeficiencyOpen(false);
+              } else {
+                openDeficiencyEditor();
+              }
+            }}
+            aria-expanded={deficiencyOpen}
+          >
+            {deficiencyOpen
+              ? "Close finding editor"
+              : deficiency
+                ? "Edit finding"
+                : "Record a finding"}
+          </button>
+          {deficiency && (
+            <button
+              type="button"
+              className="wt-btn"
+              data-testid={`review-deficiency-clear-${item.itemId}`}
+              disabled={controlsDisabled}
+              onClick={handleClearDeficiency}
+            >
+              Clear finding
+            </button>
+          )}
+        </div>
+        {deficiencyOpen && (
+          <div className="wt-field">
+            <label htmlFor={deficiencyIssueId} className="wt-label">
+              Issue you observed (required, your own words):
+            </label>
+            <textarea
+              id={deficiencyIssueId}
+              data-testid={`review-deficiency-issue-${item.itemId}`}
+              value={deficiencyIssue}
+              onChange={(event) => setDeficiencyIssue(event.target.value)}
+              disabled={controlsDisabled}
+              rows={3}
+              maxLength={1000}
+              className="wt-textarea"
+              placeholder="e.g. Bathroom faucet drips continuously."
+            />
+            <label htmlFor={deficiencyActionId} className="wt-label">
+              Corrective action (required, your own words):
+            </label>
+            <textarea
+              id={deficiencyActionId}
+              data-testid={`review-deficiency-action-${item.itemId}`}
+              value={deficiencyAction}
+              onChange={(event) => setDeficiencyAction(event.target.value)}
+              disabled={controlsDisabled}
+              rows={3}
+              maxLength={1000}
+              className="wt-textarea"
+              placeholder="e.g. Asked occupant to report to maintenance; will recheck."
+            />
+            <label htmlFor={deficiencyPartyId} className="wt-label">
+              Responsible party (optional):
+            </label>
+            <input
+              id={deficiencyPartyId}
+              data-testid={`review-deficiency-party-${item.itemId}`}
+              type="text"
+              value={deficiencyParty}
+              onChange={(event) => setDeficiencyParty(event.target.value)}
+              disabled={controlsDisabled}
+              maxLength={200}
+              className="wt-input"
+              placeholder="e.g. Maintenance team"
+            />
+            <label htmlFor={deficiencyDateId} className="wt-label">
+              Target date (optional, YYYY-MM-DD):
+            </label>
+            <input
+              id={deficiencyDateId}
+              data-testid={`review-deficiency-date-${item.itemId}`}
+              type="text"
+              inputMode="numeric"
+              value={deficiencyDate}
+              onChange={(event) => setDeficiencyDate(event.target.value)}
+              disabled={controlsDisabled}
+              maxLength={10}
+              className="wt-input"
+              placeholder="YYYY-MM-DD"
+            />
+            {deficiencyError && (
+              <p
+                className="wt-statusline"
+                role="alert"
+                data-testid={`review-deficiency-error-${item.itemId}`}
+              >
+                {deficiencyError}
+              </p>
+            )}
+            <div className="wt-actions wt-no-print">
+              <button
+                type="button"
+                className="wt-btn wt-btn--primary"
+                data-testid={`review-deficiency-save-${item.itemId}`}
+                disabled={controlsDisabled}
+                onClick={handleSaveDeficiency}
+              >
+                Save finding
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Accept / edit / reject — only for an unreviewed draft. */}

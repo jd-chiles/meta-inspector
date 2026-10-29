@@ -84,6 +84,31 @@ export interface ManualCheckResponse {
   recordedAt: string;
 }
 
+/**
+ * Worker-only deficiency intent for one item (REQ-005/REQ-006/REQ-008).
+ * Recorded by the worker, never populated from model output: the draft
+ * validator rejects any "deficiency" key, and commit paths never copy
+ * envelope content here. Carries no verdict and no HMIS data — it is a
+ * draft note describing an issue and a corrective action, not an approved
+ * inspection outcome or submission.
+ */
+export interface WorkerDeficiency {
+  /** What the worker observed, 1–1000 characters. */
+  issueDescription: string;
+  /** Worker-entered next step, 1–1000 characters. Never a verdict. */
+  correctiveAction: string;
+  /** Optional owner of the follow-up, 1–200 characters when present. */
+  responsibleParty?: string;
+  /** Optional target date as YYYY-MM-DD when present. */
+  targetDate?: string;
+  /** Worker record time (parseable date string). */
+  recordedAt: string;
+  /** Media the finding was recorded against. Photo change flags staleness. */
+  mediaId: string;
+  /** True when the photo changed after recording — worker must re-confirm. */
+  needsConfirmation: boolean;
+}
+
 export interface AnalysisError {
   code: string;
   message: string;
@@ -112,6 +137,8 @@ export interface ItemRecord {
    * manual-check, reanalysis) so async writers can detect races. */
   revision: number;
   manualChecks: ManualCheckResponse[];
+  /** Optional worker deficiency intent. Null when none recorded/cleared. */
+  deficiency: WorkerDeficiency | null;
   error: AnalysisError | null;
   deleted: boolean;
 }
@@ -123,6 +150,8 @@ export interface SessionState {
   catalogVersion: string;
   currentItemId: string | null;
   items: Record<string, ItemRecord>;
+  /** Session-level worker draft notes. Null when never set or cleared. */
+  caseNotes: string | null;
   deleted: boolean;
   createdAt: string;
   updatedAt: string;
@@ -169,7 +198,19 @@ export type SessionAction =
       requiredCheckIds: string[];
     }
   | { type: "delete-item-evidence"; itemId: string }
-  | { type: "delete-session" };
+  | { type: "delete-session" }
+  | {
+      type: "record-deficiency";
+      itemId: string;
+      issueDescription: string;
+      correctiveAction: string;
+      responsibleParty?: string | null;
+      targetDate?: string | null;
+      recordedAt: string;
+    }
+  | { type: "clear-deficiency"; itemId: string }
+  | { type: "set-case-notes"; notes: string }
+  | { type: "clear-case-notes" };
 
 const DRAFT_KEYS = new Set([
   "observation",
@@ -224,6 +265,9 @@ const MAX_LIST_ITEMS = 5;
 const MAX_LIST_ITEM_LENGTH = 200;
 const MAX_REVISION_LENGTH = 2000;
 const MAX_NOTE_LENGTH = 500;
+const MAX_DEFICIENCY_TEXT_LENGTH = 1000;
+const MAX_RESPONSIBLE_PARTY_LENGTH = 200;
+const MAX_CASE_NOTES_LENGTH = 2000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -485,6 +529,189 @@ export function validateManualCheckResponse(
   };
 }
 
+const DEFICIENCY_KEYS = new Set([
+  "issueDescription",
+  "correctiveAction",
+  "responsibleParty",
+  "targetDate",
+  "recordedAt",
+  "mediaId",
+  "needsConfirmation",
+]);
+
+/**
+ * HMIS-shaped keys are never valid worker-deficiency content. The MVP has
+ * no HMIS integration (explicitly later phase): any such key is rejected
+ * rather than stored, so a deficiency record can never become an HMIS
+ * submission or carry tenant identifiers by accident.
+ */
+const DEFICIENCY_HMIS_KEYS = new Set([
+  "hmis",
+  "hmisId",
+  "hmisConsent",
+  "clientId",
+  "clientConsent",
+  "ssn",
+  "dateOfBirth",
+  "dob",
+  "landlordNotice",
+  "fixList",
+  "deadline",
+]);
+
+const TARGET_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * True only when YYYY-MM-DD names a real calendar day. `Date.parse` alone
+ * is insufficient here: it rolls "2026-02-30" over to March 2 instead of
+ * rejecting it, so the components must round-trip through UTC unchanged.
+ */
+function isRealCalendarDate(value: string): boolean {
+  const [year, month, day] = value.split("-").map(Number);
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day)
+  ) {
+    return false;
+  }
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  return (
+    probe.getUTCFullYear() === year &&
+    probe.getUTCMonth() === month - 1 &&
+    probe.getUTCDate() === day
+  );
+}
+
+/** Strictly validate a worker-recorded deficiency (REQ-005/REQ-008). */
+export function validateWorkerDeficiency(
+  value: unknown,
+): ValidationResult<WorkerDeficiency> {
+  const errors: string[] = [];
+  if (!isRecord(value)) {
+    return { ok: false, errors: ["deficiency: must be an object"] };
+  }
+  for (const key of Object.keys(value)) {
+    if (DRAFT_FORBIDDEN_KEYS.has(key)) {
+      errors.push(
+        `deficiency: forbidden field "${key}" (a deficiency is a worker note, never a verdict)`,
+      );
+    } else if (DEFICIENCY_HMIS_KEYS.has(key)) {
+      errors.push(
+        `deficiency: forbidden field "${key}" (no HMIS data in this phase)`,
+      );
+    } else if (!DEFICIENCY_KEYS.has(key)) {
+      errors.push(`deficiency: unexpected field "${key}"`);
+    }
+  }
+  const {
+    issueDescription,
+    correctiveAction,
+    responsibleParty,
+    targetDate,
+    recordedAt,
+    mediaId,
+    needsConfirmation,
+  } = value;
+  let parsedIssue: string | null = null;
+  if (typeof issueDescription !== "string" || issueDescription.trim().length === 0) {
+    errors.push(
+      `deficiency: "issueDescription" must be 1–${MAX_DEFICIENCY_TEXT_LENGTH} characters`,
+    );
+  } else if (issueDescription.length > MAX_DEFICIENCY_TEXT_LENGTH) {
+    errors.push(
+      `deficiency: "issueDescription" must be at most ${MAX_DEFICIENCY_TEXT_LENGTH} characters`,
+    );
+  } else {
+    parsedIssue = issueDescription;
+  }
+  let parsedAction: string | null = null;
+  if (typeof correctiveAction !== "string" || correctiveAction.trim().length === 0) {
+    errors.push(
+      `deficiency: "correctiveAction" must be 1–${MAX_DEFICIENCY_TEXT_LENGTH} characters`,
+    );
+  } else if (correctiveAction.length > MAX_DEFICIENCY_TEXT_LENGTH) {
+    errors.push(
+      `deficiency: "correctiveAction" must be at most ${MAX_DEFICIENCY_TEXT_LENGTH} characters`,
+    );
+  } else {
+    parsedAction = correctiveAction;
+  }
+  let parsedParty: string | undefined;
+  if (responsibleParty !== undefined && responsibleParty !== null) {
+    if (typeof responsibleParty !== "string" || responsibleParty.trim().length === 0) {
+      errors.push(
+        `deficiency: "responsibleParty" must be a non-empty string when present`,
+      );
+    } else if (responsibleParty.length > MAX_RESPONSIBLE_PARTY_LENGTH) {
+      errors.push(
+        `deficiency: "responsibleParty" must be at most ${MAX_RESPONSIBLE_PARTY_LENGTH} characters`,
+      );
+    } else {
+      parsedParty = responsibleParty;
+    }
+  }
+  let parsedTarget: string | undefined;
+  if (targetDate !== undefined && targetDate !== null) {
+    if (
+      typeof targetDate !== "string" ||
+      !TARGET_DATE_PATTERN.test(targetDate) ||
+      !isRealCalendarDate(targetDate)
+    ) {
+      errors.push(`deficiency: "targetDate" must be YYYY-MM-DD when present`);
+    } else {
+      parsedTarget = targetDate;
+    }
+  }
+  if (typeof recordedAt !== "string" || Number.isNaN(Date.parse(recordedAt))) {
+    errors.push(`deficiency: "recordedAt" must be a parseable date`);
+  }
+  if (!isNonEmptyString(mediaId)) {
+    errors.push(`deficiency: "mediaId" must be a non-empty string`);
+  }
+  if (typeof needsConfirmation !== "boolean") {
+    errors.push(`deficiency: "needsConfirmation" must be a boolean`);
+  }
+  if (
+    errors.length > 0 ||
+    parsedIssue === null ||
+    parsedAction === null
+  ) {
+    return { ok: false, errors };
+  }
+  return {
+    ok: true,
+    value: {
+      issueDescription: parsedIssue,
+      correctiveAction: parsedAction,
+      ...(parsedParty !== undefined ? { responsibleParty: parsedParty } : {}),
+      ...(parsedTarget !== undefined ? { targetDate: parsedTarget } : {}),
+      recordedAt: recordedAt as string,
+      mediaId: mediaId as string,
+      needsConfirmation: needsConfirmation as boolean,
+    },
+  };
+}
+
+/** Strictly validate session draft case notes (worker-only, REQ-008). */
+export function validateCaseNotes(value: unknown): ValidationResult<string> {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return {
+      ok: false,
+      errors: [`case-notes: must be 1–${MAX_CASE_NOTES_LENGTH} characters`],
+    };
+  }
+  if (value.length > MAX_CASE_NOTES_LENGTH) {
+    return {
+      ok: false,
+      errors: [
+        `case-notes: must be at most ${MAX_CASE_NOTES_LENGTH} characters`,
+      ],
+    };
+  }
+  return { ok: true, value };
+}
+
 /** A check counts as resolved only when the worker recorded it performed
  * with a note. "not-performed" stays unresolved by design (REQ-005): a
  * declined physical test is an open item, not a completed one. */
@@ -527,6 +754,7 @@ export function createSession(
     catalogVersion: snapshot.catalogVersion,
     currentItemId: snapshot.itemIds[0] ?? null,
     items,
+    caseNotes: null,
     deleted: false,
     createdAt,
     updatedAt: createdAt,
@@ -552,8 +780,45 @@ export function createItemRecord(
     dispositionAt: null,
     revision: 0,
     manualChecks: [],
+    deficiency: null,
     error: null,
     deleted: false,
+  };
+}
+
+/**
+ * Backwards-compatible defaults for rows persisted before deficiency and
+ * case-notes existed (schema v1 rows without the new fields). Returns the
+ * input reference when everything is already present so callers can tell
+ * "migrated" from "already current". New sessions always carry the fields;
+ * old sessions are normalized on load instead of forcing a reset (REQ-007).
+ */
+export function ensureSessionShape(state: SessionState): SessionState {
+  let changed = false;
+  if (!("caseNotes" in state) || (state.caseNotes !== null && typeof state.caseNotes !== "string")) {
+    changed = true;
+  }
+  const items: Record<string, ItemRecord> = { ...state.items };
+  for (const [itemId, item] of Object.entries(state.items)) {
+    if (!("deficiency" in item) || (item.deficiency !== null && typeof item.deficiency !== "object")) {
+      items[itemId] = { ...item, deficiency: null };
+      changed = true;
+    } else if (
+      item.deficiency !== null &&
+      typeof item.deficiency.needsConfirmation !== "boolean"
+    ) {
+      items[itemId] = {
+        ...item,
+        deficiency: { ...item.deficiency, needsConfirmation: false },
+      };
+      changed = true;
+    }
+  }
+  if (!changed) return state;
+  return {
+    ...state,
+    caseNotes: state.caseNotes ?? null,
+    items,
   };
 }
 
@@ -618,7 +883,16 @@ export function reduceSession(
       }
       // Replacement invalidates review and associated manual-check evidence
       // (REQ-005/REQ-006): new media means the old draft no longer describes
-      // current evidence.
+      // current evidence. A worker deficiency is preserved but flagged
+      // needs-confirmation when its media no longer matches: the finding may
+      // describe the old photo, so the worker must re-confirm it (no verdict
+      // is implied either way).
+      const carriedDeficiency =
+        item.deficiency !== undefined && item.deficiency !== null
+          ? item.deficiency.mediaId !== action.mediaId
+            ? { ...item.deficiency, needsConfirmation: true }
+            : item.deficiency
+          : null;
       return withItem(
         state,
         action.itemId,
@@ -636,6 +910,7 @@ export function reduceSession(
           dispositionAt: null,
           revision: item.revision + 1,
           manualChecks: [],
+          deficiency: carriedDeficiency,
           error: null,
           catalogVersion: state.catalogVersion,
         },
@@ -763,7 +1038,9 @@ export function reduceSession(
       const item = state.items[action.itemId];
       if (!item || item.deleted) return state;
       if (item.mediaId === null) return state;
-      // Reanalysis invalidates previous review and manual-check evidence.
+      // Reanalysis invalidates previous review and manual-check evidence but
+      // preserves a worker deficiency as-is (same media, so no new staleness;
+      // an already-stale flag stays until the worker re-records).
       return withItem(
         state,
         action.itemId,
@@ -778,6 +1055,7 @@ export function reduceSession(
           dispositionAt: null,
           revision: item.revision + 1,
           manualChecks: [],
+          deficiency: item.deficiency ?? null,
           error: null,
         },
         at,
@@ -881,6 +1159,8 @@ export function reduceSession(
       if (!item || item.deleted) return state;
       // Deletion cancels inflight work: the attempt is retired and the
       // deleted flag makes every late commit a no-op (REQ-006/REQ-007).
+      // The associated deficiency intent is cleared with the photo: keeping
+      // it would leave a finding bound to bytes that no longer exist.
       return withItem(
         state,
         action.itemId,
@@ -898,11 +1178,61 @@ export function reduceSession(
           dispositionAt: null,
           revision: item.revision + 1,
           manualChecks: [],
+          deficiency: null,
           error: null,
           deleted: true,
         },
         at,
       );
+    }
+    case "record-deficiency": {
+      const item = state.items[action.itemId];
+      if (!item || item.deleted) return state;
+      // Worker-only intent: a finding must bind to an existing photo, never
+      // to model output. Fresh records start unflagged against current media;
+      // re-recording the same item re-binds and clears a stale flag.
+      if (item.mediaId === null) return state;
+      const parsed = validateWorkerDeficiency({
+        issueDescription: action.issueDescription,
+        correctiveAction: action.correctiveAction,
+        ...(action.responsibleParty !== undefined && action.responsibleParty !== null
+          ? { responsibleParty: action.responsibleParty }
+          : {}),
+        ...(action.targetDate !== undefined && action.targetDate !== null
+          ? { targetDate: action.targetDate }
+          : {}),
+        recordedAt: action.recordedAt,
+        mediaId: item.mediaId,
+        needsConfirmation: false,
+      });
+      if (!parsed.ok) return state;
+      return withItem(
+        state,
+        action.itemId,
+        { ...item, deficiency: parsed.value, revision: item.revision + 1 },
+        at,
+      );
+    }
+    case "clear-deficiency": {
+      const item = state.items[action.itemId];
+      if (!item || item.deleted) return state;
+      if (item.deficiency === null || item.deficiency === undefined) return state;
+      return withItem(
+        state,
+        action.itemId,
+        { ...item, deficiency: null, revision: item.revision + 1 },
+        at,
+      );
+    }
+    case "set-case-notes": {
+      const parsed = validateCaseNotes(action.notes);
+      if (!parsed.ok) return state;
+      if ((state.caseNotes ?? null) === parsed.value) return state;
+      return touch({ ...state, caseNotes: parsed.value }, at);
+    }
+    case "clear-case-notes": {
+      if (state.caseNotes === null || state.caseNotes === undefined) return state;
+      return touch({ ...state, caseNotes: null }, at);
     }
     default: {
       return state;
