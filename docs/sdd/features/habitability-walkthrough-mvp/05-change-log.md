@@ -92,3 +92,7 @@ Voice-guided inspection agent: auto-opening AI Guide overlay with speech readout
 ## 2026-10-31
 
 Hands-free walkthrough rebuild (Paraspot/SnapInspect-style journey): one upfront walkthrough consent, film 4 rooms, AI batch auto-starts on the 4th saved clip and auto-opens the report; issues-first AI Report section surfaces deficient and evidence-less drafts with video timestamps. Per-room manual analysis remains as fallback. Auto-batch covered by a mock-live e2e; issue selection covered by unit test.
+
+## 2026-10-31
+
+CI repair: commit the previously missing modules, upgrade @playwright/test 1.49.1 to 1.64.1 and default e2e to full Chromium (headless shell cannot decode H.264), and fall back to the video seek position when requestVideoFrameCallback never fires for detached video. Guide moves from floating button to a fifth bottom-nav tab so it cannot cover content actions; Home offers Continue versus Start-new when progress exists.

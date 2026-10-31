@@ -10,9 +10,12 @@ export default defineConfig({
   timeout: 60_000,
   use: {
     baseURL: "http://127.0.0.1:3101",
+    // The upload/decode specs need real H.264 decoding, which the headless
+    // shell lacks. Default to the full Playwright-managed Chromium build;
+    // an explicit executable path still wins when provided.
     ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
       ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } }
-      : {}),
+      : { launchOptions: { channel: "chromium" } }),
   },
   webServer: {
     command: "npm run start -- --port 3101 -H 127.0.0.1",

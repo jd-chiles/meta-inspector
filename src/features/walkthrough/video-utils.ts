@@ -890,6 +890,13 @@ async function seekVideo(video: HTMLVideoElement, seconds: number, timeoutMs: nu
     };
     const onSeeked = () => {
       seeked = true;
+      if (frameMediaTime === undefined && video.readyState >= 2 && Number.isFinite(video.currentTime) && video.currentTime >= 0) {
+        // Newer headless Chromium never presents frames for a detached,
+        // paused video, so no frame callback arrives. The seek position is
+        // exact enough for local review stills; server-decoded frames back
+        // any model-cited evidence.
+        frameMediaTime = video.currentTime;
+      }
       finishWhenReady();
     };
     const onError = () => finish(() => reject(new Error("Could not seek to a review still timestamp.")));

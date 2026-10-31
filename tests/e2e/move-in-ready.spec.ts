@@ -684,7 +684,7 @@ async function readStoredWalkthroughState(page: Page, sessionId: string): Promis
 }
 
 test.describe("Move-in Ready mobile flow", () => {
-  test("360px shows the four navigation items and keeps default Capture usable without horizontal scroll", async ({ page }) => {
+  test("360px shows the five navigation items and keeps default Capture usable without horizontal scroll", async ({ page }) => {
     await openApp(page);
     await mkdir(path.join(process.cwd(), "artifacts/design-qa"), { recursive: true });
     await expect(page.getByRole("heading", { level: 1, name: "Inspection home" })).toBeVisible();
@@ -717,8 +717,8 @@ test.describe("Move-in Ready mobile flow", () => {
     await roomPicker.click();
 
     const mainNav = page.getByRole("navigation", { name: "Main navigation" });
-    await expect(mainNav.getByRole("button")).toHaveCount(4);
-    for (const label of ["Home", "Review", "Sign-Off", "Profile"]) {
+    await expect(mainNav.getByRole("button")).toHaveCount(5);
+    for (const label of ["Home", "Guide", "Review", "Sign-Off", "Profile"]) {
       await expect(mainNav.getByRole("button", { name: label, exact: true })).toBeVisible();
     }
     await expect(mainNav.getByRole("button", { name: "Capture", exact: true })).toHaveCount(0);

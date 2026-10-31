@@ -17,6 +17,7 @@ import {
   RefreshCw,
   ShieldCheck,
   Smartphone,
+  Sparkles,
   StickyNote,
   Trash2,
   Video,
@@ -664,6 +665,15 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   const nextUndecidedElement = MOVE_IN_READY_ELEMENTS.find(
     (element) => currentRecord?.decisions[element.id]?.status === "unreviewed",
   ) ?? null;
+  const hasInspectionProgress = Boolean(
+    currentRecord && (
+      currentRecord.pseudonym.trim() ||
+      currentRecord.fundingType !== "unknown" ||
+      Object.keys(currentRecord.clipIdentities).length > 0 ||
+      Object.keys(currentRecord.proposals).length > 0 ||
+      reviewCounts.resolved > 0 ||
+      currentRecord.signoff
+    ));
   const nextRoomToFilm = roomClips.find((room) => !room.captured) ?? null;
   const activeReviewIndex = activeElementId ? MOVE_IN_READY_ELEMENT_IDS.indexOf(activeElementId) : -1;
   const form1083Blocker = currentRecord ? form1083AdministrativeBlocker(currentRecord) : null;
@@ -2021,17 +2031,24 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                     : "The AI drafts from your room videos. You only confirm each requirement in person — nothing is decided for you."}
                 </p>
                 {record.fundingType !== "hud" && (
-                  <button
-                    className={`${styles.button} ${styles.wideButton}`}
-                    type="button"
-                    onClick={() => {
-                      if (guideModel && guideModel.nextAction.type !== "none") handleGuideAction(guideModel.nextAction);
-                      else if (!canCapture) { changeStep("capture"); setSetupExpanded(true); }
-                      else changeStep("review");
-                    }}
-                  >
-                    Continue <ArrowRight size={17} aria-hidden="true" />
-                  </button>
+                  <div className={styles.homeContinueRow}>
+                    <button
+                      className={`${styles.button} ${styles.wideButton}`}
+                      type="button"
+                      onClick={() => {
+                        if (guideModel && guideModel.nextAction.type !== "none") handleGuideAction(guideModel.nextAction);
+                        else if (!canCapture) { changeStep("capture"); setSetupExpanded(true); }
+                        else changeStep("review");
+                      }}
+                    >
+                      {hasInspectionProgress ? "Continue inspection" : "Continue"} <ArrowRight size={17} aria-hidden="true" />
+                    </button>
+                    {hasInspectionProgress && (
+                      <button className={styles.secondaryButton} type="button" onClick={() => void clearSession()}>
+                        Start new inspection
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -2891,6 +2908,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       <div className={styles.appFooter}>
         <nav className={styles.bottomNav} aria-label="Main navigation">
           <NavButton icon={<Home size={19} aria-hidden="true" />} label="Home" active={step === "home"} onClick={() => changeStep("home")} disabled={recordingInProgress} />
+          <NavButton icon={<Sparkles size={19} aria-hidden="true" />} label="Guide" active={assistantOpen} onClick={() => setAssistantOpen(true)} disabled={recordingInProgress} />
           <NavButton icon={<ClipboardCheck size={19} aria-hidden="true" />} label="Review" active={step === "review"} onClick={() => changeStep("review")} disabled={recordingInProgress} />
           <NavButton icon={<CheckCircle2 size={19} aria-hidden="true" />} label="Sign-Off" active={step === "signoff"} onClick={() => changeStep("signoff")} disabled={recordingInProgress} />
           <NavButton icon={<CircleHelp size={19} aria-hidden="true" />} label="Profile" active={step === "profile"} onClick={() => changeStep("profile")} disabled={recordingInProgress} />
@@ -2922,7 +2940,6 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
           else speakText(assistantNode.speak);
         }}
         onReplay={() => speakText(recordingInProgress ? ASSISTANT_FILMING_SCRIPTS[selectedRoomId][0] ?? assistantNode.speak : assistantNode.speak)}
-        onOpen={() => setAssistantOpen(true)}
         onClose={() => { cancelSpeech(); setAssistantOpen(false); }}
       />
     </div>

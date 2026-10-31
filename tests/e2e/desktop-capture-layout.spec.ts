@@ -8,15 +8,15 @@ test.use({
   viewport: { width: 1365, height: 900 },
 });
 
-test("desktop Capture uses four-tab navigation and places prompts beside the video", async ({ page }) => {
+test("desktop Capture uses five-tab navigation and places prompts beside the video", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
   await expect(page.getByTestId("analysis-mode")).toHaveText("Sample only");
   await expect(page.getByRole("heading", { level: 1, name: "Inspection home" })).toBeVisible();
 
   const navigation = page.getByRole("navigation", { name: "Main navigation" });
-  await expect(navigation.getByRole("button")).toHaveCount(4);
-  for (const label of ["Home", "Review", "Sign-Off", "Profile"]) {
+  await expect(navigation.getByRole("button")).toHaveCount(5);
+  for (const label of ["Home", "Guide", "Review", "Sign-Off", "Profile"]) {
     await expect(navigation.getByRole("button", { name: label, exact: true })).toBeVisible();
   }
   await expect(navigation).toHaveCSS("position", "sticky");

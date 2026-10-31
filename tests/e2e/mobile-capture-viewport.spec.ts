@@ -63,7 +63,7 @@ test("390x844 Capture fills the phone workspace without leaving a dead gap above
   expect(privacyBox!.y + privacyBox!.height).toBeLessThanOrEqual(layout.nav.top - 4);
   expect(layout.nav.top - (privacyBox!.y + privacyBox!.height), "the last Capture action should sit within 32px of navigation").toBeLessThanOrEqual(32);
   expect(layout.mainScrollHeight).toBeLessThanOrEqual(layout.mainClientHeight + 1);
-  await expect(navigation.getByRole("button")).toHaveCount(4);
+  await expect(navigation.getByRole("button")).toHaveCount(5);
   await expectNoDocumentOverflow(page, 390, 844);
   await writeFile(
     "artifacts/design-qa/capture-fit-390x844-layout.json",

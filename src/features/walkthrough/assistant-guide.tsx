@@ -13,7 +13,6 @@ interface AssistantGuideProps {
   onAction: (action: AssistantAction) => void;
   onVoiceToggle: () => void;
   onReplay: () => void;
-  onOpen: () => void;
   onClose: () => void;
 }
 
@@ -25,17 +24,9 @@ export default function AssistantGuide({
   onAction,
   onVoiceToggle,
   onReplay,
-  onOpen,
   onClose,
 }: AssistantGuideProps) {
-  if (!open) {
-    return (
-      <button type="button" className={styles.fab} data-testid="assistant-fab" onClick={onOpen} aria-label="Open the AI inspection guide">
-        <Sparkles size={19} aria-hidden="true" />
-        <span>AI Guide</span>
-      </button>
-    );
-  }
+  if (!open) return null;
   return (
     <section className={styles.panel} data-testid="assistant-guide" role="complementary" aria-label="AI inspection guide">
       <div className={styles.header}>
