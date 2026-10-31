@@ -100,3 +100,7 @@ CI repair: commit the previously missing modules, upgrade @playwright/test 1.49.
 ## 2026-10-31
 
 Mobile cutoff repair: requirement/AI-report grids and content stacks now constrain minimum track widths so no-wrap text can no longer force the page wider than the phone. E2E runs all mobile specs with real mobile rendering (isMobile) and asserts element-level viewport fit on Home, Capture, checklist, and the open assistant, proven by a negative control (reverted CSS fails the new assertion).
+
+## 2026-10-31
+
+Saved inspections: list/switch/start-new/delete from Home with per-inspection clips, drafts, decisions, and signatures. InspectionStore gains list(); VideoClipStore gains removeSession(); switching resets all per-inspection UI state and reloads clips from the session id. Starting new keeps prior work saved; deletion confirms and removes record plus clips. Covered by list/switch/delete e2e.

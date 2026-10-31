@@ -121,6 +121,8 @@ export interface InspectionStore {
   get(sessionId: string): Promise<MoveInReadyInspection | null>;
   put(record: MoveInReadyInspection): Promise<void>;
   delete(sessionId: string): Promise<void>;
+  /** Every saved inspection, newest first. Rows that fail validation are skipped, never returned. */
+  list(): Promise<MoveInReadyInspection[]>;
   isMemoryOnly(): boolean;
   close(): void;
 }
@@ -290,6 +292,38 @@ export function createInspectionStore(): InspectionStore {
         // Do not claim the persistent row was deleted when IndexedDB rejects
         // removal. Keep the memory copy too, so the active page still has the
         // user's data while it reports that reset did not complete.
+        throw normalizeStorageError(error);
+      }
+    },
+    async list() {
+      if (memoryOnly) {
+        const records: MoveInReadyInspection[] = [];
+        for (const stored of memoryRecords.values()) {
+          const validated = validateInspectionRecord(stored.record, stored.record.sessionId);
+          if (validated.ok) records.push(validated.record);
+        }
+        records.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+        return records;
+      }
+      try {
+        const rows = await (await database()).getAllFromIndex("inspections", "by-updated");
+        const records: MoveInReadyInspection[] = [];
+        for (const row of rows) {
+          const validated = validateInspectionRecord(row, String((row as MoveInReadyInspection).sessionId ?? ""));
+          if (validated.ok) records.push(validated.record);
+        }
+        records.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+        return records;
+      } catch (error) {
+        if (activateMemoryFallback(error)) {
+          const records: MoveInReadyInspection[] = [];
+          for (const stored of memoryRecords.values()) {
+            const validated = validateInspectionRecord(stored.record, stored.record.sessionId);
+            if (validated.ok) records.push(validated.record);
+          }
+          records.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+          return records;
+        }
         throw normalizeStorageError(error);
       }
     },

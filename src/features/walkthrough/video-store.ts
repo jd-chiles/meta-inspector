@@ -100,6 +100,8 @@ export interface VideoClipStore {
     stills: readonly StoredVideoStill[],
   ): Promise<boolean>;
   remove(sessionId: string, roomId: string): Promise<void>;
+  /** Delete every room clip saved under one inspection session. */
+  removeSession(sessionId: string): Promise<void>;
   close(): void;
 }
 
@@ -385,6 +387,47 @@ export function createVideoClipStore(): VideoClipStore {
           throw new VideoStoreError(
             "QUOTA_EXCEEDED",
             "Local storage is full. This walkthrough is now memory only, but the saved clip could not be removed from persistent local storage.",
+            true,
+          );
+        }
+        throw normalizeStorageError(error);
+      }
+    },
+
+    async removeSession(sessionId) {
+      const prefix = `${encodeURIComponent(sessionId)}::`;
+      if (memoryOnly && !persistentDatabaseWasOpened) {
+        if (typeof indexedDB === "undefined") {
+          for (const key of [...memoryClips.keys()]) {
+            if (key.startsWith(prefix)) memoryClips.delete(key);
+          }
+          return;
+        }
+        throw new VideoStoreError(
+          "UNAVAILABLE",
+          "Browser storage could not be accessed, so removal from this device could not be confirmed. Restore storage access and try again.",
+          true,
+        );
+      }
+      try {
+        const db = await database();
+        const transaction = db.transaction("clips", "readwrite");
+        try {
+          const keys = await transaction.store.index("by-session").getAllKeys(sessionId);
+          for (const key of keys) await transaction.store.delete(key);
+          await transaction.done;
+        } catch (error) {
+          try { transaction.abort(); } catch { /* already committed or aborted */ }
+          throw error;
+        }
+        for (const key of [...memoryClips.keys()]) {
+          if (key.startsWith(prefix)) memoryClips.delete(key);
+        }
+      } catch (error) {
+        if (activateMemoryFallback(error)) {
+          throw new VideoStoreError(
+            "QUOTA_EXCEEDED",
+            "Local storage is full. This walkthrough is now memory only, but the saved clips could not be removed from persistent local storage.",
             true,
           );
         }

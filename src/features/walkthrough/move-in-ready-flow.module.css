@@ -509,6 +509,21 @@
 .homeContent { gap: 14px; }
 .homeNextCard h2 { margin: 2px 0 6px; font-size: 1.35rem; letter-spacing: -0.01em; }
 .homeContinueRow { display: grid; gap: 8px; }
+.inspectionRow { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.inspectionRow > .homeRequirementRow { flex: 1; }
+.iconButton {
+  display: grid;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #812e28;
+  cursor: pointer;
+}
+.iconButton:hover { background: #f9e8e6; }
 .homeStages { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .homeStage { display: flex; align-items: center; gap: 10px; border: 1px solid #d9dfe6; border-radius: 10px; padding: 9px 12px; background: #fff; }
 .homeStageCurrent { border-color: #8fb5e3; background: #f2f7fe; }

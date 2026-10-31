@@ -16,7 +16,8 @@ test("home leads through film into the requirement-by-requirement checklist", as
   const home = page.getByTestId("inspection-home");
   await expect(page.getByRole("heading", { level: 1, name: "Inspection home" })).toBeVisible();
   await expectNoViewportOverflow(page, "Inspection home");
-  await expect(home.getByRole("listitem")).toHaveCount(16);
+  await expect(home.getByRole("list", { name: "Inspection progress" }).getByRole("listitem")).toHaveCount(5);
+  await expect(page.getByTestId("saved-inspections").getByRole("listitem")).toHaveCount(1);
   await expect(home.getByText("0 of 11 decided", { exact: false }).first()).toBeVisible();
 
   await home.getByRole("button", { name: "Continue", exact: false }).first().click();

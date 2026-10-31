@@ -314,6 +314,16 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   const [assistantOpen, setAssistantOpen] = useState(() =>
     typeof navigator !== "undefined" && (navigator as { webdriver?: boolean }).webdriver === true ? false : true);
   const [voiceOn, setVoiceOn] = useState(() => readVoiceEnabled());
+  const [inspections, setInspections] = useState<MoveInReadyInspection[]>([]);
+
+  const refreshInspectionList = useCallback(async (): Promise<void> => {
+    try {
+      const rows = await inspectionStoreRef.current?.list() ?? [];
+      setInspections(rows);
+    } catch {
+      // The list is a convenience; the active record already loaded.
+    }
+  }, []);
   const captureControlRef = useRef<{ startCapture: () => void } | null>(null);
   const spokenAssistantKeyRef = useRef<string | null>(null);
   const [drafts, setDrafts] = useState<Partial<Record<MoveInReadyElementId, DecisionDraft>>>({});
@@ -802,6 +812,10 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     previousStepRef.current = step;
     window.requestAnimationFrame(() => stepHeadingRef.current?.focus({ preventScroll: true }));
   }, [step]);
+
+  useEffect(() => {
+    if (step === "home" && !booting) void refreshInspectionList();
+  }, [step, booting, refreshInspectionList]);
 
   // Batch AI analysis driver: one explicit user action runs the same guarded
   // per-room analyzeRoom() for every filmed room, sequentially. Each room
@@ -1934,44 +1948,134 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     }
   }
 
+  /** Reset every per-inspection UI state after the record ref and id change. Clips reload from the session id. */
+  function resetSessionUi(next: MoveInReadyInspection): void {
+    setSetupExpanded(shouldExpandCaptureSetup(next));
+    setClips({});
+    setClipsReadySessionId(null);
+    setUnreadableClipRooms([]);
+    setSelectedRoomId(next.selectedRoomId);
+    setAnalysisStatus("idle");
+    setAnalysisError("");
+    setAnalysisNotice("");
+    setMockUnitAttestationKey(null);
+    setSendVideoConsentKey(null);
+    setBatchAttested(false);
+    setBatchSendConsent(false);
+    setBatchActive(false);
+    setBatchProgress(null);
+    setBatchFailedRooms([]);
+    setWalkthroughAttested(false);
+    setWalkthroughSendConsent(false);
+    batchQueueRef.current = [];
+    batchTotalRef.current = 0;
+    batchRunningRef.current = false;
+    batchAutoStartedRef.current = false;
+    setAnalysisExpanded(false);
+    setClipDetailsExpanded(false);
+    setDrafts({});
+    setReviewError("");
+    setEvidenceViews([]);
+    setActiveElementId(null);
+    setMobileReviewDetailOpen(false);
+    setShowAllReviewElements(false);
+    setReviewNoteOpen(false);
+    setReviewNoteDraft("");
+    setSignoffName("");
+    setSignoffAttested(false);
+    setExportError("");
+    setExportNotice("");
+    setProfileSection("unit");
+    spokenAssistantKeyRef.current = null;
+    cancelSpeech();
+  }
+
+  async function activateInspection(next: MoveInReadyInspection): Promise<void> {
+    recordRef.current = next;
+    setSessionId(next.sessionId);
+    setRecord(next);
+    try {
+      window.localStorage.setItem(ACTIVE_SESSION_KEY, next.sessionId);
+    } catch {
+      // Active id stays in memory for this page.
+    }
+    resetSessionUi(next);
+    setStep("home");
+    await refreshInspectionList();
+  }
+
+  async function switchInspection(sessionIdValue: string): Promise<void> {
+    if (!isSafeSessionId(sessionIdValue) || sessionIdValue === recordRef.current?.sessionId) return;
+    invalidateActiveAnalysis("Switched to another saved inspection.");
+    try {
+      const current = recordRef.current;
+      if (current) await inspectionStoreRef.current?.put({ ...current, updatedAt: new Date().toISOString() });
+      const target = await inspectionStoreRef.current?.get(sessionIdValue);
+      if (!target) {
+        setStorageWarning("That saved inspection is no longer on this device.");
+        await refreshInspectionList();
+        return;
+      }
+      await activateInspection(target);
+    } catch (error) {
+      setStorageWarning(safeClientError(error, "That saved inspection could not be opened."));
+    }
+  }
+
+  async function startNewInspection(): Promise<void> {
+    invalidateActiveAnalysis("Started a new inspection. The previous one stays saved.");
+    try {
+      const current = recordRef.current;
+      if (current) await inspectionStoreRef.current?.put({ ...current, updatedAt: new Date().toISOString() });
+      const fresh = createInitialInspectionRecord(makeId("walkthrough"));
+      await inspectionStoreRef.current?.put(fresh);
+      await activateInspection(fresh);
+      changeStep("capture");
+      setSetupExpanded(true);
+    } catch (error) {
+      setStorageWarning(safeClientError(error, "A new inspection could not be started."));
+    }
+  }
+
+  async function deleteInspection(sessionIdValue: string): Promise<void> {
+    if (!isSafeSessionId(sessionIdValue)) return;
+    const target = inspections.find((row) => row.sessionId === sessionIdValue);
+    const label = target?.pseudonym.trim() || "Untitled inspection";
+    if (!window.confirm(`Delete "${label}" and its local video clips, frames, drafts, decisions, and signatures from this browser? Downloaded files and provider-side processing are not deleted.`)) return;
+    invalidateActiveAnalysis("An inspection was deleted.");
+    try {
+      await videoStoreRef.current?.removeSession(sessionIdValue);
+      await inspectionStoreRef.current?.delete(sessionIdValue);
+      if (sessionIdValue === recordRef.current?.sessionId) {
+        const fresh = createInitialInspectionRecord(makeId("walkthrough"));
+        await inspectionStoreRef.current?.put(fresh);
+        await activateInspection(fresh);
+      } else {
+        await refreshInspectionList();
+      }
+    } catch (error) {
+      setStorageWarning(safeClientError(error, "Some local inspection data could not be removed."));
+    }
+  }
+
   async function clearSession(): Promise<void> {
     if (!recordRef.current || !window.confirm("Delete this walkthrough, its local video clips, frames, drafts, decisions, and signatures from this browser? Downloaded files and provider-side processing are not deleted.")) return;
     invalidateActiveAnalysis("The walkthrough was cleared.");
     const oldId = recordRef.current.sessionId;
     const newId = makeId("walkthrough");
     try {
-      const clipStore = videoStoreRef.current;
-      if (clipStore) await Promise.all(MOVE_IN_READY_ROOMS.map((room) => clipStore.remove(oldId, room.id)));
+      await videoStoreRef.current?.removeSession(oldId);
       await inspectionStoreRef.current?.delete(oldId);
       window.localStorage.setItem(ACTIVE_SESSION_KEY, newId);
       const fresh = createInitialInspectionRecord(newId);
       recordRef.current = fresh;
       setSessionId(newId);
       setRecord(fresh);
-      setSetupExpanded(true);
-      setClips({});
+      resetSessionUi(fresh);
       setStep("profile");
-      setSelectedRoomId("kitchen");
-      setAnalysisStatus("idle");
-      setAnalysisError("");
-      setMockUnitAttestationKey(null);
-      setSendVideoConsentKey(null);
-      setBatchAttested(false);
-      setBatchSendConsent(false);
-      setBatchActive(false);
-      setBatchProgress(null);
-      setBatchFailedRooms([]);
-      setWalkthroughAttested(false);
-      setWalkthroughSendConsent(false);
-      batchQueueRef.current = [];
-      batchTotalRef.current = 0;
-      batchRunningRef.current = false;
-      batchAutoStartedRef.current = false;
-      setAnalysisExpanded(false);
-      setSignoffName("");
-      setSignoffAttested(false);
       setAnalysisNotice("Local data for this walkthrough was removed. Downloads and provider processing are outside this device.");
       await inspectionStoreRef.current?.put(fresh);
+      await refreshInspectionList();
     } catch (error) {
       setStorageWarning(safeClientError(error, "Some local walkthrough data could not be removed."));
     }
@@ -2043,14 +2147,57 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                     >
                       {hasInspectionProgress ? "Continue inspection" : "Continue"} <ArrowRight size={17} aria-hidden="true" />
                     </button>
-                    {hasInspectionProgress && (
-                      <button className={styles.secondaryButton} type="button" onClick={() => void clearSession()}>
-                        Start new inspection
-                      </button>
-                    )}
+                    <button className={styles.secondaryButton} type="button" onClick={() => void startNewInspection()}>
+                      {hasInspectionProgress ? "Start new inspection" : "New inspection"}
+                    </button>
                   </div>
                 )}
               </div>
+
+              <section className={styles.card} aria-labelledby="home-inspections-heading" data-testid="saved-inspections">
+                <div className={styles.cardTitleRow}>
+                  <div>
+                    <h2 id="home-inspections-heading">Saved inspections</h2>
+                    <p className={styles.cardLead}>{inspections.length === 0 ? "This walkthrough saves here automatically." : `${inspections.length} saved on this device. Tap one to open it.`}</p>
+                  </div>
+                  <FolderOpen size={21} aria-hidden="true" />
+                </div>
+                {inspections.length > 0 && (
+                  <ul className={styles.homeRequirementList}>
+                    {inspections.map((item) => {
+                      const clipCount = MOVE_IN_READY_ROOMS.filter((room) => item.clipIdentities[room.id]).length;
+                      const decidedCount = MOVE_IN_READY_ELEMENTS.filter((element) => (item.decisions[element.id]?.status ?? "unreviewed") !== "unreviewed").length;
+                      const isActive = item.sessionId === record.sessionId;
+                      const updated = item.updatedAt.slice(0, 10);
+                      return (
+                        <li key={item.sessionId}>
+                          <div className={styles.inspectionRow}>
+                            <button
+                              type="button"
+                              className={styles.homeRequirementRow}
+                              aria-label={`Open inspection ${item.pseudonym.trim() || "Untitled inspection"}`}
+                              onClick={() => void switchInspection(item.sessionId)}
+                            >
+                              <span className={styles.homeRequirementCopy}>
+                                <strong>{item.pseudonym.trim() || "Untitled inspection"}{isActive ? " · Current" : ""}</strong>
+                                <small>{item.fundingType === "lahsa" ? "LAHSA" : item.fundingType === "hud" ? "HUD" : "No funding"} · {clipCount}/4 clips · {decidedCount}/11 decided{item.signoff ? " · Signed" : ""} · {updated}</small>
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.iconButton}
+                              aria-label={`Delete inspection ${item.pseudonym.trim() || "Untitled inspection"}`}
+                              onClick={() => void deleteInspection(item.sessionId)}
+                            >
+                              <Trash2 size={16} aria-hidden="true" />
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </section>
 
               {guideModel && (
                 <ol className={styles.homeStages} aria-label="Inspection progress">

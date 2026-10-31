@@ -47,7 +47,7 @@ test("home offers a fresh inspection when progress exists", async ({ page }) => 
   await page.goto("/");
   await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
   const home = page.getByTestId("inspection-home");
-  await expect(home.getByRole("button", { name: "Start new inspection", exact: true })).toHaveCount(0);
+  await expect(home.getByRole("button", { name: "New inspection", exact: true })).toBeVisible();
 
   await home.getByRole("button", { name: "Continue", exact: false }).first().click();
   const setupToggle = page.getByTestId("capture-setup-toggle");
@@ -58,8 +58,49 @@ test("home offers a fresh inspection when progress exists", async ({ page }) => 
   await page.getByRole("navigation", { name: "Main navigation" })
     .getByRole("button", { name: "Home", exact: true }).click();
   await expect(home.getByRole("button", { name: "Continue inspection", exact: false })).toBeVisible();
-  page.on("dialog", (dialog) => dialog.accept());
   await home.getByRole("button", { name: "Start new inspection", exact: true }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "Profile" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
   await expect(page.getByLabel("Unit pseudonym")).toHaveValue("");
+  await page.getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Home", exact: true }).click();
+  await expect(page.getByTestId("saved-inspections")).toContainText("Staged Fresh Start Unit");
+  await expect(page.getByTestId("saved-inspections")).toContainText("2 saved on this device");
+});
+
+test("saved inspections list, switch, and delete without losing the other", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
+  const home = page.getByTestId("inspection-home");
+
+  await home.getByRole("button", { name: "Continue", exact: false }).first().click();
+  const setupToggle = page.getByTestId("capture-setup-toggle");
+  if (await setupToggle.getAttribute("aria-expanded") !== "true") await setupToggle.click();
+  await page.getByLabel("Unit pseudonym").fill("Unit Alpha");
+  await page.getByLabel("Funding type").selectOption("lahsa");
+  await page.getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Home", exact: true }).click();
+
+  await home.getByRole("button", { name: "Start new inspection", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
+  const setupToggle2 = page.getByTestId("capture-setup-toggle");
+  if (await setupToggle2.getAttribute("aria-expanded") !== "true") await setupToggle2.click();
+  await page.getByLabel("Unit pseudonym").fill("Unit Bravo");
+  await page.getByLabel("Funding type").selectOption("lahsa");
+  await page.getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Home", exact: true }).click();
+
+  const saved = page.getByTestId("saved-inspections");
+  await expect(saved).toContainText("2 saved on this device");
+  await saved.getByRole("button", { name: "Open inspection Unit Alpha", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Profile", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Profile", exact: true }).click();
+  await expect(page.getByLabel("Unit pseudonym")).toHaveValue("Unit Alpha");
+
+  await page.getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Home", exact: true }).click();
+  page.on("dialog", (dialog) => dialog.accept());
+  await saved.getByRole("button", { name: "Delete inspection Unit Bravo", exact: true }).click();
+  await expect(saved).toContainText("1 saved on this device");
+  await expect(saved).not.toContainText("Unit Bravo");
+  await expect(saved).toContainText("Unit Alpha");
 });
