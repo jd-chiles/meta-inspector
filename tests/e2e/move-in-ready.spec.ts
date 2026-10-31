@@ -753,22 +753,19 @@ test.describe("Move-in Ready mobile flow", () => {
     expect(shellMetrics.mainOverflow).toBe("auto");
     expect(shellMetrics.documentScrollHeight).toBeLessThanOrEqual(shellMetrics.viewportHeight + 1);
     expect(shellMetrics.mainScrollHeight).toBeGreaterThanOrEqual(shellMetrics.mainClientHeight);
-    await expect(page.getByText("0 of 4 captured", { exact: true })).toBeVisible();
-    await expect(promptRows).toHaveCount(3);
-    await expect(page.getByRole("button", { name: "Mark captured: Run faucet; show water flow and drainage.", exact: true })).toHaveCount(0);
-    await page.getByRole("button", { name: "View all 4 prompts", exact: true }).click();
-    await expect(promptRows).toHaveCount(4);
-    const lastKitchenPrompt = capture.getByText("Show the smoke or CO detector and its indicator.", { exact: true });
-    await expect(lastKitchenPrompt).toBeVisible();
-    const promptTextMetrics = await lastKitchenPrompt.evaluate((element) => ({
+    await expect(page.getByText("Not filmed", { exact: true }).first()).toBeVisible();
+    await expect(promptRows).toHaveCount(1);
+    await expect(page.getByRole("button", { name: /Mark filmed: Film one continuous take/, exact: false })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /View all \d+ prompts/ })).toHaveCount(0);
+    const kitchenPrompt = capture.getByText("Film one continuous take: run the faucet showing flow and drainage, pan the sink, counters, and outlets with the fan running, open the entry and test its lock, then show the smoke or CO detector and its indicator.", { exact: true });
+    await expect(kitchenPrompt).toBeVisible();
+    const promptTextMetrics = await kitchenPrompt.evaluate((element) => ({
       isClipped: element.scrollHeight > element.clientHeight,
       fontSize: Number.parseFloat(getComputedStyle(element).fontSize),
     }));
     expect(promptTextMetrics.isClipped).toBe(false);
     expect(promptTextMetrics.fontSize).toBeGreaterThanOrEqual(10);
-    await page.getByRole("button", { name: "Show current prompts", exact: true }).click();
-    await expect(promptRows).toHaveCount(3);
-    await page.getByRole("heading", { name: "Live Filming Prompts" }).scrollIntoViewIfNeeded();
+    await page.getByRole("heading", { name: "Filming guide" }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: "artifacts/design-qa/capture-prompts-360.png" });
 
     const navigation = page.getByRole("navigation", { name: "Main navigation" });
@@ -961,12 +958,11 @@ test.describe("Move-in Ready mobile flow", () => {
     await expandAnalysisDetails(page);
     expect(await browserCanDecodeH264(page), "this E2E needs the bundled synthetic MP4 to decode in Chromium").toBe(true);
 
-    await expect(page.getByText("0 of 4 captured", { exact: true })).toBeVisible();
+    await expect(page.getByText("Not filmed", { exact: true }).first()).toBeVisible();
     const capture = page.getByTestId("walkthrough-video-capture");
-    const firstKitchenPrompt = capture.getByRole("listitem").filter({ hasText: "Run faucet; show water flow and drainage." });
-    await capture.getByRole("button", { name: "View all 4 prompts", exact: true }).click();
-    await expect(capture.getByRole("listitem")).toHaveCount(4);
-    await expect(firstKitchenPrompt).toBeVisible();
+    const kitchenPrompt = capture.getByRole("listitem").filter({ hasText: "Film one continuous take" });
+    await expect(capture.getByRole("listitem")).toHaveCount(1);
+    await expect(kitchenPrompt).toBeVisible();
 
     await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
       name: "prompt-kitchen-test-pattern.mp4",
@@ -981,23 +977,23 @@ test.describe("Move-in Ready mobile flow", () => {
     const stillsScroller = page.getByRole("region", { name: "Source stills from saved video" });
     await expect(stillsScroller.locator("img").first()).toBeVisible();
     await expect.poll(() => stillsScroller.evaluate((element) => getComputedStyle(element).overflowX)).toBe("auto");
-    await page.getByRole("button", { name: "Mark captured: Run faucet; show water flow and drainage.", exact: true }).click();
-    await expect(page.getByText("1 of 4 captured", { exact: true })).toBeVisible();
-    await expect(capture.getByRole("listitem").filter({ hasText: "Show sink, counters, outlets, and the running fan." })).toBeVisible();
+    await page.getByRole("button", { name: /Mark filmed: Film one continuous take/, exact: false }).click();
+    await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
+    await expect(kitchenPrompt.getByRole("button", { name: /Undo filmed: Film one continuous take/, exact: false })).toBeVisible();
 
     await selectRoom(page, "bathroom");
-    await expect(page.getByText("0 of 4 captured", { exact: true })).toBeVisible();
+    await expect(page.getByText("Not filmed", { exact: true }).first()).toBeVisible();
     await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
       name: "prompt-bathroom-test-pattern.mp4",
       mimeType: "video/mp4",
       buffer: videoBytes,
     });
     await expect(page.getByText(/Clip saved on this device\./)).toBeVisible({ timeout: 20_000 });
-    await page.getByRole("button", { name: "Mark captured: Run faucet or shower; show flow and drainage.", exact: true }).click();
-    await expect(page.getByText("1 of 4 captured", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: /Mark filmed: Film one continuous take/, exact: false }).click();
+    await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
 
     await selectRoom(page, "kitchen");
-    await expect(page.getByText("1 of 4 captured", { exact: true })).toBeVisible();
+    await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
     await page.waitForTimeout(1_100);
     await page.getByRole("button", { name: "Replace clip", exact: true }).click();
     await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
@@ -1006,13 +1002,13 @@ test.describe("Move-in Ready mobile flow", () => {
       buffer: videoBytes,
     });
     await expect(page.getByText(/Clip saved on this device\./)).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText("0 of 4 captured", { exact: true })).toBeVisible();
+    await expect(page.getByText("Not filmed", { exact: true }).first()).toBeVisible();
 
     await selectRoom(page, "bathroom");
-    await expect(page.getByText("1 of 4 captured", { exact: true })).toBeVisible();
+    await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
     await page.getByRole("button", { name: "Remove clip", exact: true }).click();
-    await expect(page.getByText("0 of 4 captured", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Mark captured: Run faucet or shower; show flow and drainage.", exact: true })).toHaveCount(0);
+    await expect(page.getByText("Not filmed", { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /Mark filmed: Film one continuous take/, exact: false })).toHaveCount(0);
   });
 
   test("HUD routes to HQS and blocks this Form 1083 capture and export path", async ({ page }) => {

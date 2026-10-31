@@ -27,10 +27,10 @@ test("desktop Capture uses three-tab navigation and places prompts beside the vi
 
   const capture = page.getByTestId("walkthrough-video-capture");
   await expect(page.getByRole("heading", { level: 1, name: "Video Capture" })).toBeVisible();
-  await expect(capture.getByRole("heading", { name: "Live Filming Prompts" })).toBeVisible();
+  await expect(capture.getByRole("heading", { name: "Filming guide" })).toBeVisible();
   await expect(capture.getByRole("button", { name: "Upload video", exact: true })).toBeVisible();
-  await expect(capture.getByText("Run faucet; show water flow and drainage.", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("0 of 4 captured", { exact: true })).toBeVisible();
+  await expect(capture.getByText("Film one continuous take: run the faucet showing flow and drainage, pan the sink, counters, and outlets with the fan running, open the entry and test its lock, then show the smoke or CO detector and its indicator.", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Not filmed", { exact: true }).first()).toBeVisible();
 
   const geometry = await capture.evaluate((root) => {
     const bounds = (element: Element | null) => {
@@ -58,9 +58,9 @@ test("desktop Capture uses three-tab navigation and places prompts beside the vi
   expect(geometry.prompts.right).toBeLessThanOrEqual(1365);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
-  await expect(capture.getByRole("listitem")).toHaveCount(4);
-  await expect(capture.getByText("Show sink, counters, outlets, and the running fan.", { exact: true })).toBeVisible();
-  await expect(capture.getByText("Show the smoke or CO detector and its indicator.", { exact: true })).toBeVisible();
+  await expect(capture.getByRole("listitem")).toHaveCount(1);
+  await expect(capture.getByText("One clip per room. Assess in person.", { exact: true })).toBeVisible();
+  await expect(capture.getByRole("button", { name: /View all \d+ prompts/ })).toHaveCount(0);
 
   await mkdir(path.join(process.cwd(), "artifacts/design-qa"), { recursive: true });
   await page.screenshot({ path: "artifacts/design-qa/capture-desktop-final-1365.png" });

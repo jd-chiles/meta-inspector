@@ -1,8 +1,10 @@
 .capture {
-  --video-ink: #172b46;
-  --video-muted: #5e6d7e;
-  --video-blue: #245da8;
-  --video-border: #d7e0ea;
+  --video-ink: #13253c;
+  --video-muted: #51637a;
+  --video-blue: #1b57a6;
+  --video-blue-deep: #13467f;
+  --video-border: #c9d5e3;
+  --video-ring: #8fb5e3;
   box-sizing: border-box;
   width: 100%;
   max-width: 46rem;
@@ -12,13 +14,14 @@
   border-radius: 1.25rem;
   background: #fff;
   color: var(--video-ink);
-  box-shadow: 0 0.4rem 1.5rem rgb(28 48 76 / 7%);
+  box-shadow: 0 1px 2px rgb(19 37 60 / 7%), 0 0.75rem 2rem rgb(19 37 60 / 10%);
+  -webkit-font-smoothing: antialiased;
 }
 
 .roomHeader { display: flex; align-items: flex-end; justify-content: space-between; gap: 0.7rem; margin-bottom: 0.55rem; }
 .roomHeadingCopy { display: grid; min-width: 0; gap: 1px; }
 .roomHeadingCopy > span { color: var(--video-muted); font-size: 0.62rem; font-weight: 800; letter-spacing: 0.08em; }
-.roomHeadingCopy h3 { margin: 0; color: var(--video-ink); font-size: 1.04rem; line-height: 1.2; }
+.roomHeadingCopy h3 { margin: 0; color: var(--video-ink); font-size: 1.04rem; font-weight: 800; line-height: 1.2; letter-spacing: -0.01em; }
 .roomHeaderActions { display: flex; flex: 0 0 auto; align-items: center; gap: 0.55rem; }
 .roomSaved { flex: 0 0 auto; color: var(--video-muted); font-size: 0.68rem; font-weight: 700; }
 .roomPickerToggle { display: none; min-height: 2.15rem; align-items: center; justify-content: center; gap: 0.25rem; border: 1px solid #c7d5e4; border-radius: 0.55rem; padding: 0.35rem 0.55rem; background: #fff; color: #1e4e82; font: inherit; font-size: 0.68rem; font-weight: 800; cursor: pointer; touch-action: manipulation; }
@@ -41,8 +44,8 @@
   cursor: pointer;
   touch-action: manipulation;
 }
-.roomStepCurrent { border-color: #2d68b4; background: #edf4fd; color: #173f6e; box-shadow: inset 0 0 0 1px #2d68b4; }
-.roomStepSaved { border-color: #a8d0b4; color: #256240; }
+.roomStepCurrent { border-color: #2d68b4; background: #e9f1fc; color: #143a6b; box-shadow: inset 0 0 0 1px #2d68b4, 0 1px 4px rgb(27 87 166 / 18%); }
+.roomStepSaved { border-color: #93c6a4; background: #f2faf4; color: #205c38; }
 .roomStepCurrent.roomStepSaved { border-color: #2d68b4; }
 .roomStepNumber { display: grid; flex: 0 0 1.15rem; width: 1.15rem; height: 1.15rem; place-items: center; border-radius: 50%; background: #edf2f8; font-size: 0.62rem; font-weight: 850; }
 .roomStepCurrent .roomStepNumber { background: #245da8; color: #fff; }
@@ -55,7 +58,8 @@
   margin: 0 0 1.1rem;
   padding: 0.95rem 1rem;
   border-radius: 0.85rem;
-  background: #f3f7fb;
+  background: #f1f5fa;
+  box-shadow: inset 0 0 0 1px #e0e8f1;
 }
 
 .promptHeading {
@@ -100,13 +104,13 @@
   border-radius: 0.65rem;
   padding-inline: 0.48rem;
   background: #fff;
-  box-shadow: inset 0 0 0 1px rgb(36 93 168 / 8%);
+  box-shadow: inset 0 0 0 1px #8fb5e3, 0 2px 8px rgb(27 87 166 / 14%);
 }
 .promptIcon { display: grid; width: 1.8rem; height: 1.8rem; place-items: center; border-radius: 50%; background: #eaf2fb; color: var(--video-blue); }
 .promptRow[data-current="true"] .promptIcon { background: #245da8; color: #fff; }
 .promptIcon svg { width: 1.1rem; height: 1.1rem; stroke-width: 1.8; }
 .promptRowCopy { min-width: 0; }
-.promptRowCopy p { margin: 0; color: #213750; font-size: 0.84rem; font-weight: 650; line-height: 1.3; }
+.promptRowCopy p { margin: 0; color: #1d3350; font-size: 0.84rem; font-weight: 700; line-height: 1.3; letter-spacing: -0.005em; }
 .promptRowCopy > span { display: block; margin-top: 0.15rem; color: #526b86; font-size: 0.67rem; font-weight: 750; letter-spacing: 0.025em; line-height: 1.2; text-transform: uppercase; }
 .promptRow[data-captured="true"] .promptRowCopy > span { color: #197346; }
 .promptRow[data-current="true"] .promptRowCopy > span { color: #245da8; }
@@ -169,9 +173,10 @@
   min-height: 0;
   overflow: hidden;
   place-items: center;
-  border: 1px solid #c8d3df;
+  border: 1px solid #0e1a2a;
   border-radius: 0.9rem;
-  background: #edf1f5;
+  background: #101923;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 7%), 0 4px 14px rgb(16 25 35 / 22%);
 }
 
 .video {
@@ -189,7 +194,7 @@
   gap: 0.4rem;
   width: 100%;
   padding: 1rem;
-  color: #243649;
+  color: #eef3f9;
   text-align: center;
 }
 
@@ -197,18 +202,20 @@
   margin: 0;
   color: inherit;
   font-size: 0.88rem;
-  font-weight: 650;
+  font-weight: 700;
+  letter-spacing: -0.005em;
 }
 
 .emptyPreview span {
-  color: #657386;
+  color: #9db0c6;
   font-size: 0.72rem;
 }
 
 .emptyIcon {
   width: 1.65rem;
   height: 1.65rem;
-  color: #537396;
+  color: #8fb5e3;
+  filter: drop-shadow(0 2px 8px rgb(0 0 0 / 45%));
 }
 
 .recordingBadge {
@@ -270,6 +277,16 @@
   border-radius: 50%;
   background: #fa5a5a;
   box-shadow: 0 0 0 0.2rem rgb(250 90 90 / 20%);
+  animation: recordingPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes recordingPulse {
+  0%, 100% { box-shadow: 0 0 0 0.2rem rgb(250 90 90 / 22%); }
+  50% { box-shadow: 0 0 0 0.34rem rgb(250 90 90 / 10%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recordingDot { animation: none; }
 }
 
 .recordingControls {
@@ -315,6 +332,7 @@
 .primaryButton {
   background: var(--video-blue);
   color: #fff;
+  box-shadow: 0 1px 2px rgb(16 40 70 / 28%), 0 4px 12px rgb(27 87 166 / 30%), inset 0 1px 0 rgb(255 255 255 / 16%);
 }
 
 .recordingButton {
@@ -339,6 +357,7 @@
   border-color: #b4c3d3;
   background: #fff;
   color: #234566;
+  box-shadow: 0 1px 2px rgb(19 37 60 / 8%);
 }
 
 .dangerButton {
@@ -349,6 +368,11 @@
 
 .primaryButton:hover:not(:disabled) {
   background: #174b8e;
+}
+
+.primaryButton:active:not(:disabled) {
+  background: var(--video-blue-deep);
+  box-shadow: 0 1px 2px rgb(16 40 70 / 28%), inset 0 1px 3px rgb(0 0 0 / 22%);
 }
 
 .secondaryButton:hover:not(:disabled),
@@ -389,21 +413,25 @@
 .status {
   background: #edf4fb;
   color: #234566;
+  box-shadow: inset 0 0 0 1px #c9dcf0;
 }
 
 .warning {
   background: #fff7e9;
   color: #71450a;
+  box-shadow: inset 0 0 0 1px #ecd3a3;
 }
 
 .error {
   background: #fff0f0;
   color: #852c2c;
+  box-shadow: inset 0 0 0 1px #f0c4c0;
 }
 
 .success {
   background: #edf8f0;
   color: #225a35;
+  box-shadow: inset 0 0 0 1px #bfe0c9;
 }
 
 .savedClipDisclosure { margin-top: 0.65rem; border-top: 1px solid var(--video-border); }

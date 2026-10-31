@@ -46,11 +46,11 @@ test("room prompt completion persists with a saved clip and stays room-specific"
   await page.getByLabel("Funding type").selectOption("lahsa");
   await goToCapture(page);
 
-  await expect(page.getByText("0 of 4 captured", { exact: true })).toBeVisible();
+  await expect(page.getByText("Not filmed", { exact: true }).first()).toBeVisible();
   const currentPrompt = page.locator('[data-testid="walkthrough-video-capture"] [aria-current="step"]');
   await expect(currentPrompt).toHaveCount(1);
-  await expect(currentPrompt).toContainText("Run faucet; show water flow and drainage.");
-  await expect(currentPrompt).toContainText("Current prompt");
+  await expect(currentPrompt).toContainText("Film one continuous take");
+  await expect(currentPrompt).toContainText("Film this take");
   await expect(currentPrompt).toHaveCSS("border-top-color", "rgb(143, 181, 227)");
   await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
     name: "prompt-kitchen-test-pattern.mp4",
@@ -58,38 +58,36 @@ test("room prompt completion persists with a saved clip and stays room-specific"
     buffer: videoBytes,
   });
   await expect(page.getByText(/Clip saved on this device\./)).toBeVisible({ timeout: 20_000 });
-  await page.getByRole("button", { name: "Mark captured: Run faucet; show water flow and drainage.", exact: true }).click();
-  await expect(page.getByText("1 of 4 captured", { exact: true })).toBeVisible();
-  await expect(currentPrompt).toHaveCount(1);
-  await expect(currentPrompt).toContainText("Show sink, counters, outlets, and the running fan.");
+  await page.getByRole("button", { name: /Mark filmed: Film one continuous take/, exact: false }).click();
+  await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
+  await expect(page.locator('[data-testid="walkthrough-video-capture"] [aria-current="step"]')).toHaveCount(0);
 
   await page.reload();
   await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
-  await expect(page.getByText("1 of 4 captured", { exact: true })).toBeVisible();
-  const capturedKitchenPrompt = page.getByRole("listitem").filter({ hasText: "Run faucet; show water flow and drainage." });
-  await expect(capturedKitchenPrompt.getByRole("button", { name: "Undo captured: Run faucet; show water flow and drainage.", exact: true })).toBeVisible();
-  await expect(page.locator('[data-testid="walkthrough-video-capture"] [aria-current="step"]')).toContainText("Show sink, counters, outlets, and the running fan.");
+  await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
+  const filmedKitchenPrompt = page.getByRole("listitem").filter({ hasText: "Film one continuous take" });
+  await expect(filmedKitchenPrompt.getByRole("button", { name: /Undo filmed: Film one continuous take/, exact: false })).toBeVisible();
 
   await selectRoom(page, "bathroom");
-  await expect(page.getByText("0 of 4 captured", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Mark captured: Run faucet or shower; show flow and drainage.", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Not filmed", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: /Mark filmed: Film one continuous take/, exact: false })).toHaveCount(0);
   await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
     name: "prompt-bathroom-test-pattern.mp4",
     mimeType: "video/mp4",
     buffer: videoBytes,
   });
   await expect(page.getByText(/Clip saved on this device\./)).toBeVisible({ timeout: 20_000 });
-  await page.getByRole("button", { name: "Mark captured: Run faucet or shower; show flow and drainage.", exact: true }).click();
-  await expect(page.getByText("1 of 4 captured", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /Mark filmed: Film one continuous take/, exact: false }).click();
+  await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
 
   await page.reload();
   await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
-  await expect(page.getByText("1 of 4 captured", { exact: true })).toBeVisible();
+  await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
   await selectRoom(page, "kitchen");
-  await expect(page.getByText("1 of 4 captured", { exact: true })).toBeVisible();
+  await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
 });
 
-test("replacing a room clip clears captured prompt marks with an honest notice", async ({ page }) => {
+test("replacing a room clip clears the filmed mark", async ({ page }) => {
   test.setTimeout(90_000);
   const videoBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern.mp4"));
   await page.goto("/");
@@ -102,7 +100,7 @@ test("replacing a room clip clears captured prompt marks with an honest notice",
   await page.getByLabel("Funding type").selectOption("lahsa");
   await goToCapture(page);
 
-  await expect(page.getByText("Film all steps in one take.", { exact: true })).toBeVisible();
+  await expect(page.getByText("One clip per room. Assess in person.", { exact: true })).toBeVisible();
 
   await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
     name: "prompt-replace-first.mp4",
@@ -110,9 +108,8 @@ test("replacing a room clip clears captured prompt marks with an honest notice",
     buffer: videoBytes,
   });
   await expect(page.getByText(/Clip saved on this device\./)).toBeVisible({ timeout: 20_000 });
-  await page.getByRole("button", { name: "Mark captured: Run faucet; show water flow and drainage.", exact: true }).click();
-  await expect(page.getByText("1 of 4 captured", { exact: true })).toBeVisible();
-  await expect(page.getByText("Replacing it clears captured marks", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: /Mark filmed: Film one continuous take/, exact: false }).click();
+  await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
 
   await page.getByRole("button", { name: "Replace clip", exact: true }).click();
   await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
@@ -121,8 +118,7 @@ test("replacing a room clip clears captured prompt marks with an honest notice",
     buffer: videoBytes,
   });
   await expect(page.getByText(/Clip saved on this device\./)).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText("0 of 4 captured", { exact: true })).toBeVisible();
-  await expect(page.getByRole("status").filter({ hasText: "Captured filming-prompt marks for this room were cleared" })).toBeVisible();
+  await expect(page.getByText("Not filmed", { exact: true }).first()).toBeVisible();
   const currentPrompt = page.locator('[data-testid="walkthrough-video-capture"] [aria-current="step"]');
-  await expect(currentPrompt).toContainText("Run faucet; show water flow and drainage.");
+  await expect(currentPrompt).toContainText("Film one continuous take");
 });

@@ -91,41 +91,25 @@ export interface WalkthroughVideoCaptureProps {
 
 export const DEFAULT_ROOM_PROMPTS: Readonly<Record<string, readonly string[]>> = {
   kitchen: [
-    "Run faucet; show water flow and drainage.",
-    "Show sink, counters, outlets, and the running fan.",
-    "Open the kitchen entry and test its lock.",
-    "Show the smoke or CO detector and its indicator.",
+    "Film one continuous take: run the faucet showing flow and drainage, pan the sink, counters, and outlets with the fan running, open the entry and test its lock, then show the smoke or CO detector and its indicator.",
   ],
   bathroom: [
-    "Run faucet or shower; show flow and drainage.",
-    "Turn on the exhaust fan and show the vent.",
-    "Show toilet, bath or shower, and test the lock.",
-    "Show the smoke or CO detector and its indicator.",
+    "Film one continuous take: run the faucet or shower showing flow and drainage, turn on the exhaust fan and show the vent, show the toilet and bath or shower and test the lock, then show the smoke or CO detector and its indicator.",
   ],
   bedroom: [
-    "Show the room, windows, and visible openings.",
-    "Include the smoke or carbon monoxide detector in frame.",
-    "Show the door and how its lock operates.",
+    "Film one continuous take: show the room, windows, and visible openings, include the smoke or carbon monoxide detector in frame, then show the door and how its lock operates.",
   ],
   "bedroom-living": [
-    "Pan the bedroom and living area. Show floors and outlets.",
-    "Show windows in both areas and visible openings.",
-    "Show detectors and operate the entry lock.",
+    "Film one continuous take: pan the bedroom and living area showing floors and outlets, show the windows in both areas and visible openings, then show the detectors and operate the entry lock.",
   ],
   living: [
-    "Pan slowly across the room and visible outlets.",
-    "Include windows and any smoke or carbon monoxide detector.",
-    "Show the entry and how its lock operates.",
+    "Film one continuous take: pan slowly across the room and visible outlets, include the windows and any smoke or carbon monoxide detector, then show the entry and how its lock operates.",
   ],
   hallway: [
-    "Show the clear floor path from both ends.",
-    "Show unit and common-area detectors; keep people out of frame.",
-    "Show the unit entry and test its lock.",
+    "Film one continuous take: walk the clear floor path from both ends, show the unit and common-area detectors with people out of frame, then show the unit entry and test its lock.",
   ],
   default: [
-    "Pan slowly to show the whole room and visible openings.",
-    "Hold the camera steady on each fixture or concern.",
-    "Show the entry and how its lock operates, if present.",
+    "Film one continuous take: pan slowly to show the whole room and visible openings, hold steady on each fixture, then show the entry and how its lock operates if present.",
   ],
 };
 
@@ -677,10 +661,8 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
       const status = isPending
         ? "Marked"
         : isCaptured
-          ? "Captured"
-          : isCurrent
-            ? "Current prompt"
-            : "Up next";
+          ? "Filmed"
+          : "Film this take";
 
       return (
         <li
@@ -700,7 +682,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
             <button
               type="button"
               className={styles.promptCompletion}
-              aria-label={`Undo captured: ${prompt}`}
+              aria-label={`Undo filmed: ${prompt}`}
               onClick={() => markPromptCaptured(promptId, false)}
               disabled={disabled}
             >
@@ -710,7 +692,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
             <button
               type="button"
               className={styles.promptCompletion}
-              aria-label={`Mark captured: ${prompt}`}
+              aria-label={`Mark filmed: ${prompt}`}
               onClick={() => markPromptCaptured(promptId, true)}
               disabled={disabled}
             >
@@ -815,7 +797,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
                 <span>{formatTimestamp(elapsedSeconds)} / {formatTimestamp(effectiveMaxDurationSeconds)}</span>
               </div>
             <div className={styles.recordingProgressCopy}>
-              <span>Room progress · {capturedPromptCount}/{roomPrompts.length} prompts</span>
+              <span>Room progress · {capturedPromptCount >= roomPrompts.length ? "filmed" : "not filmed"}</span>
               <strong>{promptProgressPercent}%</strong>
             </div>
             <div
@@ -906,12 +888,12 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
       <section className={styles.prompts} aria-labelledby={promptsId}>
         <div className={styles.promptHeading}>
           <div>
-            <h3 id={promptsId}>Live Filming Prompts</h3>
-            <p>Follow each step. Assess in person.</p>
+            <h3 id={promptsId}>Filming guide</h3>
+            <p>One clip per room. Assess in person.</p>
           </div>
-          <span className={styles.promptProgress}>{capturedPromptCount} of {roomPrompts.length} captured</span>
+          <span className={styles.promptProgress}>{capturedPromptCount >= roomPrompts.length ? "Filmed" : "Not filmed"}</span>
         </div>
-        <p className="sr-only" role="status">{capturedPromptCount} of {roomPrompts.length} filming prompts captured.</p>
+        <p className="sr-only" role="status">{capturedPromptCount >= roomPrompts.length ? "Room filmed." : "Room not filmed yet."}</p>
         <ol className={styles.promptList}>{renderPromptRows(visiblePromptIndexes)}</ol>
         {roomPrompts.length > collapsedPromptCount && <button
           type="button"

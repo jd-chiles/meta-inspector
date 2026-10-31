@@ -241,14 +241,13 @@ describe("local inspection record validation", () => {
 
   it("persists room prompt completion independently from proposals and evaluator decisions", () => {
     const record = recordWithEvidence();
-    record.completedPromptIdsByRoom.kitchen = ["kitchen-water-drainage", "kitchen-entry-lock"];
+    record.completedPromptIdsByRoom.kitchen = ["kitchen-walkthrough"];
 
     const result = validateInspectionRecord(record, "session-1");
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.record.completedPromptIdsByRoom.kitchen).toEqual([
-        "kitchen-water-drainage",
-        "kitchen-entry-lock",
+        "kitchen-walkthrough",
       ]);
       expect(result.record.proposals["demo-water-supply"]?.modelSuggestion).toBe("A");
       expect(result.record.decisions["demo-water-supply"]).toMatchObject({ status: "A" });
@@ -267,7 +266,7 @@ describe("local inspection record validation", () => {
   it("migrates schema-1 intake, prompt completion, and clips while invalidating unprovable review state", () => {
     const oldRecord = recordWithEvidence() as unknown as Record<string, unknown>;
     oldRecord.schemaVersion = 1;
-    oldRecord.completedPromptIdsByRoom = { kitchen: ["kitchen-water-drainage"] };
+    oldRecord.completedPromptIdsByRoom = { kitchen: ["kitchen-walkthrough"] };
     oldRecord.signoff = {
       evaluatorName: "Alex Morgan",
       typedSignature: "Alex Morgan",
@@ -285,7 +284,7 @@ describe("local inspection record validation", () => {
     if (!result.ok) return;
     expect(result.record.schemaVersion).toBe(MOVE_IN_READY_SCHEMA_VERSION);
     expect(result.record.pseudonym).toBe("Mock Unit 04");
-    expect(result.record.completedPromptIdsByRoom.kitchen).toEqual(["kitchen-water-drainage"]);
+    expect(result.record.completedPromptIdsByRoom.kitchen).toEqual(["kitchen-walkthrough"]);
     expect(result.record.clipIdentities.kitchen?.videoHash).toBe("b".repeat(64));
     expect(result.record.clipIdentities.kitchen?.evidence[0]?.frameIndex).toBeNull();
     expect(result.record.proposals).toEqual({});
@@ -443,11 +442,11 @@ describe("local inspection record validation", () => {
 
   it("rejects duplicate prompt completion and prompt IDs from another room", () => {
     const duplicate = createInitialInspectionRecord("session-1", NOW);
-    duplicate.completedPromptIdsByRoom.kitchen = ["kitchen-water-drainage", "kitchen-water-drainage"];
+    duplicate.completedPromptIdsByRoom.kitchen = ["kitchen-walkthrough", "kitchen-walkthrough"];
     expect(validateInspectionRecord(duplicate, "session-1").ok).toBe(false);
 
     const wrongRoom = createInitialInspectionRecord("session-1", NOW);
-    wrongRoom.completedPromptIdsByRoom.kitchen = ["bathroom-exhaust-fan"];
+    wrongRoom.completedPromptIdsByRoom.kitchen = ["bathroom-walkthrough"];
     expect(validateInspectionRecord(wrongRoom, "session-1").ok).toBe(false);
   });
 

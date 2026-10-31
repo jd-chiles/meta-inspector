@@ -136,8 +136,8 @@ test("the hydrated walkthrough saves and restores real local progress offline", 
     buffer: videoBytes,
   });
   await expect(page.getByText("Clip saved on this device. Review stills are frames from the video at the timestamps shown.")).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("button", { name: "Mark captured: Run faucet; show water flow and drainage.", exact: true }).click();
-  await expect(page.getByText("1 of 4 captured", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /Mark filmed: Film one continuous take/, exact: false }).click();
+  await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
   await expect.poll(() => readSavedProgress(page)).toMatchObject({
     pseudonym: "Offline Saved Unit 04",
     fundingType: "lahsa",
@@ -165,7 +165,7 @@ test("the hydrated walkthrough saves and restores real local progress offline", 
   await expect(page.getByRole("heading", { level: 1, name: "Video Capture" })).toBeVisible();
   await expect(page.getByText("Offline. Capture and review stay on this device; live analysis needs a connection.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Remove clip", exact: true })).toBeVisible();
-  await expect(page.getByText("1 of 4 captured", { exact: true })).toBeVisible();
+  await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
 
   await page.getByRole("button", { name: "Profile", exact: true }).click();
   await expect(page.getByLabel("Unit pseudonym")).toHaveValue("Offline Saved Unit 04");

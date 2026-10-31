@@ -22,12 +22,14 @@ export const MOVE_IN_READY_ROOMS = [
 
 export type MoveInReadyRoomId = (typeof MOVE_IN_READY_ROOMS)[number]["id"];
 
-/** Stable checklist identities so room prompt completion survives reloads. */
+/** Stable checklist identities so room prompt completion survives reloads. One
+ * filming instruction per room: each room captures a single continuous clip,
+ * so the guidance is one take covering every moment the evidence needs. */
 export const MOVE_IN_READY_ROOM_PROMPT_IDS = {
-  kitchen: ["kitchen-water-drainage", "kitchen-surfaces-outlets", "kitchen-entry-lock", "kitchen-detector"],
-  bathroom: ["bathroom-water-drainage", "bathroom-exhaust-fan", "bathroom-fixtures-lock", "bathroom-detector"],
-  "bedroom-living": ["bedroom-living-surfaces-outlets", "bedroom-living-windows", "bedroom-living-detectors-lock"],
-  hallway: ["hallway-walking-path", "hallway-detector", "hallway-entry-lock"],
+  kitchen: ["kitchen-walkthrough"],
+  bathroom: ["bathroom-walkthrough"],
+  "bedroom-living": ["bedroom-living-walkthrough"],
+  hallway: ["hallway-walkthrough"],
 } as const satisfies Record<MoveInReadyRoomId, readonly string[]>;
 
 export type MoveInReadyPromptId =
