@@ -1,0 +1,11 @@
+node_modules
+.next
+.git
+*.md
+Dockerfile
+.dockerignore
+test-results
+playwright-report
+coverage
+artifacts
+fixtures/evaluation

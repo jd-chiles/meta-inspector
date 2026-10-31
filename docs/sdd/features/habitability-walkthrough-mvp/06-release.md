@@ -1,6 +1,21 @@
 # Release record
 
-Status: Not ready
+Status: Ready to deploy, not yet deployed (2026-10-31)
+
+## Production candidate — 2026-10-31 (Muse Code)
+
+App code is green and live-proven: lint/typecheck clean, unit 401 passed,
+e2e 34 passed (H.264 Chromium), CI success, Docker image builds and serves
+200, first real SAM + Muse run returned suggestions end to end. Voice-guided
+journey, batch auto-analysis, issues-first report, sign-off/exports, saved
+inspections, mobile viewport-fit guards. Deploy per `docs/PRODUCTION_DEPLOY.md`.
+Still owner-side: Azure subscription provisioning + custom domain, physical-phone
+LTE pass, recipient/form acceptance, auth/quota decision, independent reviews.
+No approval or promotion is claimed.
+
+## Tree unification + Slice 0 baseline — 2026-10-31 (Muse Code)
+
+Status stays Not ready. This checkout now holds the unified tree (`38d51d3`, pushed): video app plus stills plus UI polish. Current executed checks on that tree: docs/typecheck/lint/unit/build/browser all green as logged in 05-change-log (unit 384/3 skipped, browser 17/2 skipped, fixture-only). This closes the "checks never rerun on current tree" gap for this checkout only. Still open: live video reliability + scored evidence gate (TASK-110), form/recipient acceptance, physical phones, production hosting/auth/retention, independent reviews, and native SDD evidence. No approval or promotion is claimed.
 
 ## Current status update — 2026-10-31
 
