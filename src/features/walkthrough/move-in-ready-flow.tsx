@@ -63,6 +63,7 @@ import {
   type VideoAnalysisIdentity,
 } from "../../domain/move-in-ready";
 import { MOVE_IN_READY_ELEMENT_CRITERIA } from "../../domain/element-criteria";
+import { WALKTHROUGH_CLIENT_HEADER, WALKTHROUGH_CLIENT_ID } from "../../domain/walkthrough-client";
 import {
   buildHmisReadyJson,
   buildMoveInReadyPdf,
@@ -1413,6 +1414,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       pendingCancelRef.current.set(requestIdentity, null);
       const segmentResponse = await fetch("/api/video/segment?stage=segment", {
         method: "POST",
+        headers: { [WALKTHROUGH_CLIENT_HEADER]: WALKTHROUGH_CLIENT_ID },
         body: segmentForm,
         signal: controller.signal,
         cache: "no-store",
@@ -1522,6 +1524,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       // that the server cannot tie back to that clip.
       const mapResponse = await fetch("/api/video/segment?stage=map", {
         method: "POST",
+        headers: { [WALKTHROUGH_CLIENT_HEADER]: WALKTHROUGH_CLIENT_ID },
         body: mapForm,
         signal: controller.signal,
         cache: "no-store",
@@ -3135,6 +3138,7 @@ async function cancelPendingVideoMapping(identity: VideoIdentityFields, candidat
   try {
     await fetch("/api/video/segment?stage=cancel", {
       method: "POST",
+      headers: { [WALKTHROUGH_CLIENT_HEADER]: WALKTHROUGH_CLIENT_ID },
       body: form,
       keepalive: true,
       cache: "no-store",

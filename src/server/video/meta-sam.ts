@@ -21,6 +21,7 @@ import {
   type MoveInReadyElementId,
 } from "../../domain/move-in-ready";
 import { VIDEO_SAMPLE_TIMESTAMP_TOLERANCE_MS } from "../../domain/video-format";
+import { WALKTHROUGH_CLIENT_HEADER, WALKTHROUGH_CLIENT_ID } from "../../domain/walkthrough-client";
 import { VideoSegmentError } from "./errors";
 import {
   claimVideoMapping,
@@ -333,6 +334,11 @@ function assertSameOrigin(request: Request, configuredPublicOrigin?: string): vo
     throw new VideoSegmentError(400, "INVALID_REQUEST", "This request could not be validated.");
   }
   if (!origin) {
+    // Managed ingresses may strip Origin and Referer both. The app marker
+    // header survives proxies and still proves same-app origin: cross-origin
+    // pages cannot set custom headers without a CORS preflight, which the
+    // video API does not answer.
+    if (request.headers.get(WALKTHROUGH_CLIENT_HEADER) === WALKTHROUGH_CLIENT_ID) return;
     throw new VideoSegmentError(400, "INVALID_REQUEST", "Submit the video from this app.");
   }
   try {

@@ -18,6 +18,7 @@ import {
   validateVideoBytes,
 } from "../../../../src/server/video/validate";
 import { MOVE_IN_READY_ELEMENTS, MOVE_IN_READY_ELEMENT_IDS, MOVE_IN_READY_SCHEMA_VERSION } from "../../../../src/domain/move-in-ready";
+import { WALKTHROUGH_CLIENT_HEADER, WALKTHROUGH_CLIENT_ID } from "../../../../src/domain/walkthrough-client";
 import { VideoSegmentError } from "../../../../src/server/video/errors";
 import { claimVideoProcessing, claimVideoSegmentation } from "../../../../src/server/video/operation-guard";
 
@@ -1122,6 +1123,40 @@ describe("POST /api/video/segment", () => {
     const missing = await handleVideoSegmentRequest(noHeaders, { env: LIVE_ENV, fetch: fetchImpl });
     expect(missing.status).toBe(400);
     expect(await missing.json()).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+  });
+
+  it("accepts the same-app client header when the proxy strips Origin and Referer", async () => {
+    const bytes = makeMp4();
+    const form = new FormData();
+    form.append("stage", "segment");
+    form.append("room", "kitchen");
+    form.append("video", new File([bytes], "client-name.mp4", { type: "video/mp4" }));
+    form.append("sessionId", IDENTITY_BASE.sessionId);
+    form.append("schemaVersion", IDENTITY_BASE.schemaVersion);
+    form.append("videoId", IDENTITY_BASE.videoId);
+    form.append("videoRevision", IDENTITY_BASE.videoRevision);
+    form.append("analysisId", IDENTITY_BASE.analysisId);
+    form.append("attempt", IDENTITY_BASE.attempt);
+    form.append("catalogVersion", IDENTITY_BASE.catalogVersion);
+    form.append("expectedVideoSha256", "0".repeat(64));
+    // No Origin/Referer, but the app marker header: must clear the origin
+    // gate and fail later, on the hash check.
+    const headerOnly = new Request(`${ORIGIN}/api/video/segment?stage=segment`, {
+      method: "POST",
+      headers: { [WALKTHROUGH_CLIENT_HEADER]: WALKTHROUGH_CLIENT_ID, "content-length": "65536" },
+      body: form,
+    });
+    const { fetchImpl } = mockMetaFetch();
+    const response = await handleVideoSegmentRequest(headerOnly, { env: LIVE_ENV, fetch: fetchImpl });
+    expect(response.status).toBe(409);
+    const wrongMarker = new Request(`${ORIGIN}/api/video/segment?stage=segment`, {
+      method: "POST",
+      headers: { [WALKTHROUGH_CLIENT_HEADER]: "attacker.example", "content-length": "65536" },
+      body: form,
+    });
+    const rejected = await handleVideoSegmentRequest(wrongMarker, { env: LIVE_ENV, fetch: fetchImpl });
+    expect(rejected.status).toBe(400);
+    expect(await rejected.json()).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
   });
 
   it("rejects a stale mapping identity before the Muse call", async () => {
