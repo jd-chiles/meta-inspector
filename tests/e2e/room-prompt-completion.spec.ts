@@ -8,6 +8,7 @@ import { goToCapture, openProfilePanel, selectRoom } from "./navigation";
 test.use({
   storageState: { cookies: [], origins: [] },
   viewport: { width: 360, height: 800 },
+  isMobile: true,
 });
 
 async function browserCanDecodeH264(page: Page): Promise<boolean> {

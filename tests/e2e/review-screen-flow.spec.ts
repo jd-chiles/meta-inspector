@@ -1,10 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
 
-import { goToCapture, openProfilePanel } from "./navigation";
+import { expectNoViewportOverflow, goToCapture, openProfilePanel } from "./navigation";
 
 test.use({
   storageState: { cookies: [], origins: [] },
   viewport: { width: 360, height: 800 },
+  isMobile: true,
 });
 
 async function openReviewSummary(page: Page): Promise<void> {
@@ -26,6 +27,7 @@ async function openReviewSummary(page: Page): Promise<void> {
   await page.getByRole("navigation", { name: "Main navigation" })
     .getByRole("button", { name: "Review", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Requirement checklist" })).toBeVisible();
+  await expectNoViewportOverflow(page, "Requirement checklist");
 }
 
 test("mobile review opens dedicated all-elements and single-element screens", async ({ page }) => {

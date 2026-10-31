@@ -96,3 +96,7 @@ Hands-free walkthrough rebuild (Paraspot/SnapInspect-style journey): one upfront
 ## 2026-10-31
 
 CI repair: commit the previously missing modules, upgrade @playwright/test 1.49.1 to 1.64.1 and default e2e to full Chromium (headless shell cannot decode H.264), and fall back to the video seek position when requestVideoFrameCallback never fires for detached video. Guide moves from floating button to a fifth bottom-nav tab so it cannot cover content actions; Home offers Continue versus Start-new when progress exists.
+
+## 2026-10-31
+
+Mobile cutoff repair: requirement/AI-report grids and content stacks now constrain minimum track widths so no-wrap text can no longer force the page wider than the phone. E2E runs all mobile specs with real mobile rendering (isMobile) and asserts element-level viewport fit on Home, Capture, checklist, and the open assistant, proven by a negative control (reverted CSS fails the new assertion).

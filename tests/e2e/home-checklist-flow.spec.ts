@@ -1,10 +1,11 @@
 import { test, expect } from "@playwright/test";
 
-import { goToCapture, openProfilePanel } from "./navigation";
+import { expectNoViewportOverflow, goToCapture, openProfilePanel } from "./navigation";
 
 test.use({
   storageState: { cookies: [], origins: [] },
   viewport: { width: 390, height: 844 },
+  isMobile: true,
 });
 
 test("home leads through film into the requirement-by-requirement checklist", async ({ page }) => {
@@ -14,6 +15,7 @@ test("home leads through film into the requirement-by-requirement checklist", as
 
   const home = page.getByTestId("inspection-home");
   await expect(page.getByRole("heading", { level: 1, name: "Inspection home" })).toBeVisible();
+  await expectNoViewportOverflow(page, "Inspection home");
   await expect(home.getByRole("listitem")).toHaveCount(16);
   await expect(home.getByText("0 of 11 decided", { exact: false }).first()).toBeVisible();
 

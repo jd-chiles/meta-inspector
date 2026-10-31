@@ -2,7 +2,9 @@ import { mkdir, writeFile } from "node:fs/promises";
 
 import { expect, test, type Page } from "@playwright/test";
 
-test.use({ storageState: { cookies: [], origins: [] } });
+import { expectNoViewportOverflow } from "./navigation";
+
+test.use({ storageState: { cookies: [], origins: [] }, isMobile: true });
 
 async function openReadyCapture(page: Page, width: number, height: number): Promise<void> {
   await page.setViewportSize({ width, height });
@@ -65,6 +67,7 @@ test("390x844 Capture fills the phone workspace without leaving a dead gap above
   expect(layout.mainScrollHeight).toBeLessThanOrEqual(layout.mainClientHeight + 1);
   await expect(navigation.getByRole("button")).toHaveCount(5);
   await expectNoDocumentOverflow(page, 390, 844);
+  await expectNoViewportOverflow(page, "390x844 Capture");
   await writeFile(
     "artifacts/design-qa/capture-fit-390x844-layout.json",
     JSON.stringify(
@@ -128,6 +131,7 @@ test("360x640 keeps navigation fixed while Capture content scrolls inside the ma
   expect(privacyBox!.y + privacyBox!.height).toBeLessThanOrEqual(navBox!.y - 4);
   expect(await main.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
   await expectNoDocumentOverflow(page, 360, 640);
+  await expectNoViewportOverflow(page, "360x640 Capture");
   const scrollMetrics = await main.evaluate((element) => ({
     scrollTop: element.scrollTop,
     scrollHeight: element.scrollHeight,

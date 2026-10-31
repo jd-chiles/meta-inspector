@@ -11,6 +11,7 @@ test.use({
   serviceWorkers: "allow",
   storageState: { cookies: [], origins: [] },
   viewport: { width: 360, height: 800 },
+  isMobile: true,
 });
 
 async function readSavedProgress(page: Page): Promise<{

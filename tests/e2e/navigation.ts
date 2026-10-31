@@ -52,3 +52,27 @@ export async function selectRoom(page: Page, roomId: "kitchen" | "bathroom" | "b
   }
   await page.getByTestId(`room-step-${roomId}`).click();
 }
+
+/**
+ * Assert no visible element sticks out past the viewport on either side.
+ * Document scrollWidth alone misses cutoff content when an ancestor clips,
+ * so this scans element boxes instead.
+ */
+export async function expectNoViewportOverflow(page: Page, label: string): Promise<void> {
+  const offenders = await page.evaluate(() => {
+    const viewportWidth = window.innerWidth;
+    const found: string[] = [];
+    for (const element of document.querySelectorAll("body *")) {
+      if (!(element instanceof HTMLElement)) continue;
+      const rect = element.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2) continue;
+      if (rect.width > viewportWidth + 1 || rect.left < -1 || rect.right > viewportWidth + 1) {
+        const name = `${element.tagName.toLowerCase()}.${(element.className || "").toString().split(" ")[0] || "no-class"}`.slice(0, 80);
+        found.push(`${name} L:${Math.round(rect.left)} R:${Math.round(rect.right)}`);
+        if (found.length >= 5) break;
+      }
+    }
+    return found;
+  });
+  expect(offenders, `${label} must keep every element inside the viewport`).toEqual([]);
+}

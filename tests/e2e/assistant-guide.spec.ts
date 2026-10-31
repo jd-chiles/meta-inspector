@@ -1,8 +1,11 @@
 import { test, expect } from "@playwright/test";
 
+import { expectNoViewportOverflow } from "./navigation";
+
 test.use({
   storageState: { cookies: [], origins: [] },
   viewport: { width: 390, height: 844 },
+  isMobile: true,
 });
 
 test("AI guide opens from the nav tab and walks setup then filming", async ({ page }) => {
@@ -17,6 +20,7 @@ test("AI guide opens from the nav tab and walks setup then filming", async ({ pa
 
   const guide = page.getByTestId("assistant-guide");
   await expect(guide).toBeVisible();
+  await expectNoViewportOverflow(page, "assistant guide open");
   await expect(guide.getByText("Let's set up this inspection", { exact: true })).toBeVisible();
   await guide.getByRole("button", { name: "Set up the unit", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
