@@ -112,3 +112,7 @@ Live pipeline unblocked: Next.js serves request.url with a localhost host even w
 ## 2026-10-31
 
 Production deploy: Azure Container Apps (metainspect-prod / metainspect-app, westus2, consumption scale-to-zero) serving image metainspect:mvp3 at https://metainspect-app.livelyriver-978b26d8.westus2.azurecontainerapps.io/. ACA ingress strips Origin and Referer, so video segment/map/cancel POSTs now also send a non-secret same-app marker header (src/domain/walkthrough-client.ts) that the server accepts when both browser headers are absent; still CSRF-safe because cross-origin pages cannot set custom headers without a CORS preflight the API does not answer. Live production proof: real SAM-3.1 segmentation HTTP 200. App gated by Entra ID Easy Auth (beacon tenant only): browsers 302 to Microsoft login, anonymous API calls 401. Leaked-then-rotated Entra client secret during setup; active secret stored only as a Container App secret.
+
+## 2026-10-31
+
+Access gate replaced: Entra Easy Auth redirect unusable on iOS (Safari never loads the form_post handshake; Chrome iOS downloads it as a file). Production (image mvp4) now uses an in-app passcode gate: /unlock collects the shared passcode server-side (timing-safe, throttled), middleware requires the stateless HMAC cookie everywhere else. Easy Auth set to AllowAnonymous. Gate inert when INSPECTION_PASSCODE unset (local/CI). Verified on production: 307 to /unlock, 401 wrong code, 200 + cookie on correct code.
