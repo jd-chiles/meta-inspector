@@ -108,3 +108,7 @@ Saved inspections: list/switch/start-new/delete from Home with per-inspection cl
 ## 2026-10-31
 
 Live pipeline unblocked: Next.js serves request.url with a localhost host even when bound to 127.0.0.1, so the same-origin gate rejected every live video request. Loopback spellings (localhost, 127.0.0.1, [::1]) now compare as one app origin; foreign origins still rejected (regression test). First real live proof: SAM segmentation plus Muse mapping returned unreviewed suggestions end to end. Also adds baseline production response headers and a no-store service-worker response.
+
+## 2026-10-31
+
+Production deploy: Azure Container Apps (metainspect-prod / metainspect-app, westus2, consumption scale-to-zero) serving image metainspect:mvp3 at https://metainspect-app.livelyriver-978b26d8.westus2.azurecontainerapps.io/. ACA ingress strips Origin and Referer, so video segment/map/cancel POSTs now also send a non-secret same-app marker header (src/domain/walkthrough-client.ts) that the server accepts when both browser headers are absent; still CSRF-safe because cross-origin pages cannot set custom headers without a CORS preflight the API does not answer. Live production proof: real SAM-3.1 segmentation HTTP 200. App gated by Entra ID Easy Auth (beacon tenant only): browsers 302 to Microsoft login, anonymous API calls 401. Leaked-then-rotated Entra client secret during setup; active secret stored only as a Container App secret.
