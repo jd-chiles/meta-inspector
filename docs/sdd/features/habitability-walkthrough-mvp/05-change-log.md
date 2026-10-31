@@ -88,3 +88,7 @@ Requirement-first UX redesign: app opens on Inspection Home (next-step hero, sta
 ## 2026-10-31
 
 Voice-guided inspection agent: auto-opening AI Guide overlay with speech readout (SpeechSynthesis, mutable, persisted) narrates every stage and timed filming cues during takes; tap-to-respond actions deep-link setup, per-room camera start, one-tap batch analysis, requirement confirm, and sign-off. Batch analysis runs the guarded per-room pipeline sequentially with per-room consent derivation and proposal-proven success. Checklist gains pre-fill-all and save-all-confirmed (in-person acknowledgments stay per-item and explicit). GuideSheet FAB removed and superseded. Service-worker shell cache bumped v2 to v3 so installed devices pick up new builds.
+
+## 2026-10-31
+
+Hands-free walkthrough rebuild (Paraspot/SnapInspect-style journey): one upfront walkthrough consent, film 4 rooms, AI batch auto-starts on the 4th saved clip and auto-opens the report; issues-first AI Report section surfaces deficient and evidence-less drafts with video timestamps. Per-room manual analysis remains as fallback. Auto-batch covered by a mock-live e2e; issue selection covered by unit test.

@@ -1219,6 +1219,57 @@ test.describe("Move-in Ready mobile flow", () => {
       await stopMockLiveServer();
     });
 
+    test("walkthrough consent auto-runs AI analysis for all filmed rooms and opens the report", async ({ page }) => {
+      test.setTimeout(300_000);
+      const videoBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern.mp4"));
+      const mock = await installSharedElementAnalysisMock(page);
+
+      try {
+        await page.goto(MOCK_LIVE_BASE_URL);
+        await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
+        await expect(page.getByTestId("analysis-mode")).toHaveText("Meta live · untested");
+        await setLahsaProfile(page);
+        await goToCapture(page);
+
+        const consent = page.getByTestId("walkthrough-consent");
+        await expect(consent).toBeVisible();
+        await consent.getByRole("checkbox", { name: /Every clip I film is staged\/mock-unit footage/ }).check();
+        await consent.getByRole("checkbox", { name: /I understand each filmed clip will be sent/ }).check();
+
+        const firstRooms = ["kitchen", "bathroom", "bedroom-living"] as const;
+        for (let index = 0; index < firstRooms.length; index += 1) {
+          const roomId = firstRooms[index];
+          await selectRoom(page, roomId);
+          await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
+            name: `synthetic-${roomId}-test-pattern.mp4`,
+            mimeType: "video/mp4",
+            buffer: videoBytes,
+          });
+          await expect(page.getByText(/Clip saved on this device\./)).toBeVisible({ timeout: 20_000 });
+          await expect(page.getByText(`${index + 1} of 4 clips saved`, { exact: true })).toBeVisible();
+        }
+        await selectRoom(page, "hallway");
+        await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
+          name: "synthetic-hallway-test-pattern.mp4",
+          mimeType: "video/mp4",
+          buffer: videoBytes,
+        });
+        // Saving the 4th clip auto-starts batch analysis, which immediately
+        // takes over room selection; assert the batch outcome instead of the
+        // transient per-room notice.
+        await expect(page.getByRole("heading", { level: 1, name: "Requirement checklist" })).toBeVisible({ timeout: 240_000 });
+        expect(mock.rooms.filter((entry) => entry.startsWith("segment:"))).toHaveLength(4);
+        expect(mock.rooms.filter((entry) => entry.startsWith("map:"))).toHaveLength(4);
+
+        await page.getByRole("button", { name: "View all 11 requirements", exact: true }).click();
+        const overview = page.getByRole("region", { name: "All 11 inspection elements" });
+        await overview.locator("#element-overview-list").getByRole("button", { name: /Water supply/ }).click();
+        await expect(page.getByTestId("review-element-demo-water-supply")).toContainText("Mock hallway water supply proposal.");
+      } finally {
+        await page.unroute("**/api/video/segment*");
+      }
+    });
+
     test("offline analysis saves a pending intent and waits for an explicit retry", async ({ page }) => {
       test.setTimeout(90_000);
       const videoBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern.mp4"));

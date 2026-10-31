@@ -307,6 +307,9 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   const batchQueueRef = useRef<MoveInReadyRoomId[]>([]);
   const batchTotalRef = useRef(0);
   const batchRunningRef = useRef(false);
+  const [walkthroughAttested, setWalkthroughAttested] = useState(false);
+  const [walkthroughSendConsent, setWalkthroughSendConsent] = useState(false);
+  const batchAutoStartedRef = useRef(false);
   const [assistantOpen, setAssistantOpen] = useState(() =>
     typeof navigator !== "undefined" && (navigator as { webdriver?: boolean }).webdriver === true ? false : true);
   const [voiceOn, setVoiceOn] = useState(() => readVoiceEnabled());
@@ -810,9 +813,12 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       const failed = batchFailedRooms;
       setBatchActive(false);
       setBatchProgress(null);
-      setAnalysisNotice(failed.length === 0
-        ? "AI finished every filmed room. Open the checklist to confirm each requirement."
-        : `AI finished with ${failed.length} room${failed.length === 1 ? "" : "s"} needing attention: ${failed.join(", ")}. Run batch analysis again to retry only those rooms.`);
+      if (failed.length === 0) {
+        setAnalysisNotice("AI finished every filmed room. Confirm each requirement below.");
+        changeStep("review");
+      } else {
+        setAnalysisNotice(`AI finished with ${failed.length} room${failed.length === 1 ? "" : "s"} needing attention: ${failed.join(", ")}. Run batch analysis again to retry only those rooms.`);
+      }
       return;
     }
     const roomId = queue[0];
@@ -857,6 +863,26 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       if (!proved) setBatchFailedRooms((previous) => [...previous, roomLabel(roomId)]);
       setBatchProgress({ done: total - batchQueueRef.current.length, total, roomLabel: roomLabel(roomId) });
     });
+  });
+
+  // Auto-run the AI batch once every room is filmed and the walkthrough
+  // consent was confirmed upfront. One user decision covers the run; each
+  // room still passes the full per-room consent/identity guards inside the
+  // batch driver, and MOV-only or already-analyzed rooms are skipped.
+  useEffect(() => {
+    if (!walkthroughAttested || !walkthroughSendConsent) return;
+    if (batchActive || batchAutoStartedRef.current) return;
+    if (analysisMode !== "live" || !online) return;
+    if (capturedRoomCount < MOVE_IN_READY_ROOMS.length) return;
+    const current = recordRef.current;
+    if (!current || current.fundingType !== "lahsa" || !current.pseudonym.trim()) return;
+    const needsWork = MOVE_IN_READY_ROOMS.some((room) =>
+      clips[room.id] && clips[room.id]?.mime !== "video/quicktime" && !roomHasCurrentProposal(room.id));
+    if (!needsWork) return;
+    batchAutoStartedRef.current = true;
+    setBatchAttested(true);
+    setBatchSendConsent(true);
+    startBatchAnalysis();
   });
 
   // Speak each new guidance node aloud while the assistant is open.
@@ -1920,6 +1946,17 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       setAnalysisError("");
       setMockUnitAttestationKey(null);
       setSendVideoConsentKey(null);
+      setBatchAttested(false);
+      setBatchSendConsent(false);
+      setBatchActive(false);
+      setBatchProgress(null);
+      setBatchFailedRooms([]);
+      setWalkthroughAttested(false);
+      setWalkthroughSendConsent(false);
+      batchQueueRef.current = [];
+      batchTotalRef.current = 0;
+      batchRunningRef.current = false;
+      batchAutoStartedRef.current = false;
       setAnalysisExpanded(false);
       setSignoffName("");
       setSignoffAttested(false);
@@ -2133,6 +2170,20 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                           Open requirement checklist <ArrowRight size={16} aria-hidden="true" />
                         </button>
                       )}
+                      {capturedRoomCount === 0 && analysisMode === "live" && online && (
+                        <div className={styles.walkthroughConsent} data-testid="walkthrough-consent">
+                          <strong>Hands-free AI walkthrough</strong>
+                          <p className={styles.cardLead}>Confirm once. Film all 4 rooms and the AI analyzes every clip by itself, then brings you the report.</p>
+                          <label className={styles.checkLabel}>
+                            <input type="checkbox" checked={walkthroughAttested} onChange={(event) => setWalkthroughAttested(event.currentTarget.checked)} />
+                            <span>Every clip I film is staged/mock-unit footage with no tenants, faces, addresses, personal documents, or real case notes.</span>
+                          </label>
+                          <label className={styles.checkLabel}>
+                            <input type="checkbox" checked={walkthroughSendConsent} onChange={(event) => setWalkthroughSendConsent(event.currentTarget.checked)} />
+                            <span>I understand each filmed clip will be sent for live processing by Meta once all 4 rooms are filmed.</span>
+                          </label>
+                        </div>
+                      )}
                       {capturedRoomCount > 0 && (
                         <details className={styles.batchDisclosure} data-testid="batch-analysis-disclosure">
                           <summary>
@@ -2319,6 +2370,43 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   Continue: {nextUndecidedElement.label} <ArrowRight size={16} aria-hidden="true" />
                 </button>
               )}
+              {!mobileReviewDetailOpen && hasAnyProposals && (() => {
+                const issues = selectIssueElements(record.proposals, record.decisions);
+                if (issues.length === 0) return null;
+                return (
+                  <section className={`${styles.card} ${styles.aiReport}`} aria-labelledby="ai-report-heading" data-testid="ai-report">
+                    <div className={styles.cardTitleRow}>
+                      <div>
+                        <h2 id="ai-report-heading">AI found {issues.length} issue{issues.length === 1 ? "" : "s"}</h2>
+                        <p className={styles.cardLead}>Unreviewed drafts with video evidence. Tap one to verify it in person.</p>
+                      </div>
+                      <AlertCircle size={21} aria-hidden="true" />
+                    </div>
+                    <ul className={styles.aiReportList}>
+                      {issues.map((elementId) => {
+                        const element = MOVE_IN_READY_ELEMENTS.find((item) => item.id === elementId);
+                        const proposal = record.proposals[elementId];
+                        const firstEvidence = proposal?.evidence[0];
+                        if (!element || !proposal) return null;
+                        return (
+                          <li key={elementId}>
+                            <button type="button" className={styles.aiReportRow} onClick={() => openReviewElement(elementId)}>
+                              <span className={`${styles.elementOverviewStatus} ${proposal.modelSuggestion === "D" ? styles.elementOverviewDeficient : styles.elementOverviewCheck}`}>
+                                {proposal.modelSuggestion === "D" ? "Deficient" : "Check"}
+                              </span>
+                              <span className={styles.homeRequirementCopy}>
+                                <strong>{element.label}</strong>
+                                <small>{proposal.observation}{firstEvidence ? ` · ${roomLabel(firstEvidence.roomId)} ${formatTimestamp(firstEvidence.timestampMs / 1000)}` : ""}</small>
+                              </span>
+                              <ArrowRight size={16} aria-hidden="true" />
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
+                );
+              })()}
               <section className={`${styles.card} ${styles.reviewOverview} ${showAllReviewElements ? styles.reviewOverviewAll : ""} ${mobileReviewDetailOpen ? styles.reviewOverviewHiddenOnMobile : ""}`} aria-label="All 11 inspection elements">
                 <div className={styles.cardTitleRow}><div><h2>{showAllReviewElements ? "All 11 Form 1083 requirements" : "11 Form 1083 requirements"}</h2><p className={styles.cardLead}>
                   {hasAnyProposals ? "AI drafts are ready. Confirm each requirement in person, in order." : "No AI draft yet. Work through each requirement in person, in order."}
@@ -3283,6 +3371,25 @@ function prefillDraftFromProposal(draft: DecisionDraft, proposal: ModelElementPr
       reinspectionDate: draft.reinspectionDate || proposal.deficiencySuggestion.reinspectionDate,
     } : {}),
   };
+}
+
+/**
+ * Unresolved elements whose AI draft needs evaluator attention first: a
+ * suggested deficiency or a draft without verified evidence. Decided
+ * elements never appear, and pure "A" drafts stay in the checklist.
+ */
+export function selectIssueElements(
+  proposals: Partial<Record<MoveInReadyElementId, ModelElementProposal>>,
+  decisions: EvaluatorDecisionSet,
+): MoveInReadyElementId[] {
+  return MOVE_IN_READY_ELEMENTS
+    .filter((element) => {
+      const proposal = proposals[element.id];
+      if (!proposal) return false;
+      if ((decisions[element.id]?.status ?? "unreviewed") !== "unreviewed") return false;
+      return proposal.modelSuggestion === "D" || proposal.state === "needs-human-check";
+    })
+    .map((element) => element.id);
 }
 
 function updateChecked(values: string[], value: string, checked: boolean, limit: number): string[] {
