@@ -530,7 +530,7 @@ export default function LiveCapture(props: LiveCaptureProps): React.JSX.Element 
             Retake clip
           </button>
         )}
-        {(phase === "preview" || phase === "recording" || phase === "done") && (
+        {phase !== "saving" && (
           <button
             className={styles.secondaryButton}
             type="button"
