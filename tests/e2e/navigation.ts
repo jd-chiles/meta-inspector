@@ -1,13 +1,22 @@
 import { expect, type Page } from "@playwright/test";
 
-/** Capture is the first step but is reached by contextual back on mobile. */
+/** Film is reached from Home (Continue) or by contextual back on mobile. */
 export async function goToCapture(page: Page): Promise<void> {
-  const captureHeading = page.getByRole("heading", { level: 1, name: "Video Capture" });
+  const captureHeading = page.getByRole("heading", { level: 1, name: "Film the unit" });
   for (let attempt = 0; attempt < 6; attempt += 1) {
     if (await captureHeading.isVisible()) return;
 
+    const home = page.getByTestId("inspection-home");
+    if (await home.isVisible()) {
+      await home.getByRole("button", { name: "Continue", exact: false }).first().click();
+      continue;
+    }
+
     const backButtons = [
       page.getByRole("button", { name: "Back to Capture", exact: true }),
+      page.getByRole("button", { name: "Back to home", exact: true }),
+      page.getByRole("button", { name: "Back to checklist", exact: true }),
+      page.getByRole("button", { name: "Back to all 11 requirements", exact: true }),
       page.getByRole("button", { name: "Back to review summary", exact: true }),
       page.getByRole("button", { name: "Back to all 11 elements", exact: true }),
       page.getByRole("button", { name: "Back to review overview", exact: true }),

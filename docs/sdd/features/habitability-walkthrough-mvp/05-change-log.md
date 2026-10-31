@@ -1,5 +1,21 @@
 # Change log
 
+## UI overhaul + walkthrough guide — October 31, 2026 (Muse Code)
+
+Visual overhaul of the Move-in Ready app within the pinned layout geometry (no box, spacing, or type-size changes; color/depth/typography only): dark camera-viewfinder empty state, refined cards/buttons/rows/nav, pulsing REC dot with reduced-motion guard, antialiased type. Added an always-available walkthrough guide: floating entry pill plus a 5-step checklist sheet (setup → film → review → sign-off → export) derived deterministically from saved progress, with jump actions; HUD route excluded. New tests: guide-model unit table (5), guide FAB/sheet browser spec (2). Verified: lint/typecheck clean, unit green, browser 19 passed / 2 skipped (fixture-only). No behavior, copy, testid, or layout-box changes to existing flows.
+
+## Sprint slices 1, 2, 5 (agent parts) — October 31, 2026 (Muse Code)
+
+Slice 1 audit: video picker offers/accepts video coherently (`video/mp4`, `video/quicktime`; camera input carries `capture="environment"`); HUD exit, acknowledgment migration, 11a/11b aggregate, conditional landlord date, and Add-note boundaries all have passing unit/browser coverage. The stills-picker iOS sheet quirk found earlier sits in orphaned code nothing mounts; left untouched. No Slice 1 code changes; no gaps demonstrated.
+
+Slice 2 reliability repair: SAM per-concept calls now run with bounded overlap (max 3, order-preserving, fail-fast with sibling abort) instead of sequentially, addressing the reproducible kitchen 23 s clip timeout against the coded 150 s stage deadline; added elapsed ticker (aria-hidden) during segmenting/mapping and a pagehide keepalive cancel so a closed tab cannot wedge the session for the 15-minute lease. New tests: 2 server concurrency tests (overlap bounds/order, fail-fast abort) + 2 cancel-tracker unit tests. Verified: lint/typecheck clean, unit 388 passed / 3 skipped, browser 17 passed / 2 skipped (fixture-only), build green. No live call was made; kitchen wall-time improvement is unmeasured until an owner-initiated live attempt. Server per-request logging noted as follow-up, not implemented.
+
+Slice 5 agent part: added `output: standalone`, root `Dockerfile` (FFmpeg 9.0.2 build stage + standalone run as non-root), `.dockerignore`. Verified: `docker build` succeeds; container serves 200 on `/`, `/manifest.webmanifest`, `/sw.js`; `/opt/ffmpeg/bin/ffmpeg` reports 9.0.2; process runs as `app`. Azure provisioning/execution remains an owner-operator step per the existing ACA plan. No task acceptance or native SDD evidence claimed; release stays Not ready.
+
+## Tree unification + Slice 0 baseline verification — October 31, 2026 (Muse Code)
+
+Unified the Codex worktree video app (Move-in Ready flow, room video, `/api/video/segment`, `/api/guide`, PDF/JSON exports, new suites) with the stills walkthrough and UI polish into this checkout; committed and pushed as `38d51d3` on `origin/main` with a clean tree. Executed checks on that exact tree, all observed this session: `node scripts/verify-sdd.mjs` passed (15 requirements, 11 active acyclic tasks, 7 named checks); `npm run lint` clean; `npm run typecheck` clean; `npm run test:unit` 384 passed / 3 skipped (22 files); `npm run build` green (routes `/`, `/api/analyze`, `/api/guide`, `/api/video/segment`); `npx playwright test` 17 passed / 2 skipped against a fresh loopback production server in fixture mode with provider keys scrubbed. No task acceptance, native SDD approval/evidence/review, live provider result, clip-gate score, device check, recipient acceptance, or deployment is claimed. Release stays Not ready.
+
 ## Epoch 3 rescope — 11-item Form 1083 + installable PWA — October 28, 2026
 
 Documentation and planning pass only; no product implementation started. Owner-directed rescope for the November 4 hackathon deliverable. Epochs 1–2 implementation and all verification evidence preserved in history.
@@ -64,3 +80,7 @@ Correct only TASK-112 acceptance: TASK-103 depends on TASK-113 and historical TA
 ## 2026-10-30T00:29:23.596Z
 
 Repair REQ-006/design schemaVersion omission: name schema version and catalog version separately across four authored artifacts and TASK-111. Preserve TASK-113 ordering/history/evidence; no implementation, checks or approval; fresh independent spec then plan reviews required.
+
+## 2026-10-31
+
+Requirement-first UX redesign: app opens on Inspection Home (next-step hero, stage progress, 11-requirement status list, room shortcuts) instead of the Capture form; bottom navigation gains Home. Capture is headed "Film the unit" with a next-room/checklist bar above the camera. Review is headed "Requirement checklist": ordered Form 1083 checklist with progress bar, continue-to-next-undecided, and an explicit "Use AI draft to pre-fill" action that fills editable fields only — the in-person acknowledgment and save stay evaluator actions, so no AI text completes a manual check. Headings/back-labels and e2e specs updated; new home-checklist-flow spec covers the sequence.

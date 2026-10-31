@@ -25,7 +25,7 @@ async function openReviewSummary(page: Page): Promise<void> {
   await goToCapture(page);
   await page.getByRole("navigation", { name: "Main navigation" })
     .getByRole("button", { name: "Review", exact: true }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "Draft Review" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Requirement checklist" })).toBeVisible();
 }
 
 test("mobile review opens dedicated all-elements and single-element screens", async ({ page }) => {
@@ -41,13 +41,13 @@ test("mobile review opens dedicated all-elements and single-element screens", as
   }));
   expect(Math.max(...overviewGaps), "the four-row mobile review overview should stay compact").toBeLessThanOrEqual(12);
   const finalRowBottom = await rows.last().evaluate((item) => item.getBoundingClientRect().bottom);
-  const viewAllTop = await page.getByRole("button", { name: "View all 11 elements", exact: true })
+  const viewAllTop = await page.getByRole("button", { name: "View all 11 requirements", exact: true })
     .evaluate((button) => button.getBoundingClientRect().top);
   expect(viewAllTop - finalRowBottom, "the all-elements link should follow the compact list").toBeLessThanOrEqual(24);
 
-  await page.getByRole("button", { name: "View all 11 elements", exact: true }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "All review elements", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { level: 1, name: "Draft Review", exact: true })).toBeHidden();
+  await page.getByRole("button", { name: "View all 11 requirements", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "All 11 requirements", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Requirement checklist", exact: true })).toBeHidden();
   await expect(rows).toHaveCount(11);
 
   const expectedLabels = [
@@ -68,7 +68,7 @@ test("mobile review opens dedicated all-elements and single-element screens", as
   }
 
   // The dedicated list is not the four-row summary with its overview/sign-off actions.
-  await expect(page.getByRole("button", { name: "View all 11 elements", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "View all 11 requirements", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Continue to sign-off", exact: true })).toHaveCount(0);
 
   await elementList.getByRole("button", { name: /Structure and materials/ }).click();
@@ -77,23 +77,23 @@ test("mobile review opens dedicated all-elements and single-element screens", as
   await expect(page.getByRole("heading", { level: 1, name: "Structure and materials", exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "All 11 inspection elements" })).toBeHidden();
   await expect(visibleDetails).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "Back to all 11 elements", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back to all 11 requirements", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Save evaluator decision", exact: true })).toHaveCount(1);
   await expect(page.getByRole("navigation", { name: "Main navigation" })).toBeHidden();
 
-  await page.getByRole("button", { name: "Back to all 11 elements", exact: true }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "All review elements", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Back to all 11 requirements", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "All 11 requirements", exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "All 11 inspection elements" })).toBeVisible();
   await expect(rows).toHaveCount(11);
 
   await elementList.getByRole("button", { name: /Structure and materials/ }).click();
-  await page.getByRole("button", { name: "Back to all 11 elements", exact: true }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "All review elements", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Back to review summary", exact: true }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "Draft Review", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Back to all 11 requirements", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "All 11 requirements", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Back to checklist", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Requirement checklist", exact: true })).toBeVisible();
   await expect(rows).toHaveCount(4);
   await expect(elementList.locator("button[aria-pressed='true']")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "View all 11 elements", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "View all 11 requirements", exact: true })).toBeVisible();
 });
 
 test("mobile Add Note saves and restores a local inspection note", async ({ page }) => {
@@ -103,7 +103,7 @@ test("mobile Add Note saves and restores a local inspection note", async ({ page
   await expect(page.getByRole("heading", { level: 1, name: "Add Note", exact: true })).toBeVisible();
   await page.getByRole("textbox", { name: "Inspection note", exact: true }).fill("Check the staged kitchen window latch during the walkthrough.");
   await page.getByRole("button", { name: "Save note", exact: true }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "Draft Review", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Requirement checklist", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Edit note", exact: true })).toBeVisible();
 
   await page.reload();

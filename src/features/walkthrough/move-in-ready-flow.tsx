@@ -12,6 +12,7 @@ import {
   Download,
   FileText,
   FolderOpen,
+  Home,
   LoaderCircle,
   RefreshCw,
   ShieldCheck,
@@ -103,10 +104,13 @@ import {
   type VideoClipStore,
 } from "./video-store";
 import { extractVideoStills, formatTimestamp, sha256Blob, type VideoStill } from "./video-utils";
+import { createPendingCancelTracker } from "./pending-cancel";
+import GuideSheet from "./guide-sheet";
+import { deriveGuideModel, type GuideAction } from "./walkthrough-guide";
 import styles from "./move-in-ready-flow.module.css";
 
 export type AnalysisMode = "live" | "fixture" | "unconfigured";
-type Step = "capture" | "review" | "signoff" | "profile";
+type Step = "home" | "capture" | "review" | "signoff" | "profile";
 type ProfileSection = "unit" | "evaluator" | "agency";
 type AnalysisStatus = "idle" | "segmenting" | "mapping" | "complete" | "error";
 type DecisionChoice = "unreviewed" | "needs-human-check" | "A" | "D";
@@ -134,7 +138,7 @@ function form1083AdministrativeBlocker(record: MoveInReadyInspection): string | 
   return null;
 }
 
-interface VideoIdentityFields {
+export interface VideoIdentityFields {
   sessionId: string;
   schemaVersion: number;
   videoId: string;
@@ -257,7 +261,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   const mainScrollRef = useRef<HTMLElement | null>(null);
   const inspectionStoreRef = useRef<InspectionStore | null>(null);
   const videoStoreRef = useRef<VideoClipStore | null>(null);
-  const [step, setStep] = useState<Step>("capture");
+  const [step, setStep] = useState<Step>("home");
   const [profileSection, setProfileSection] = useState<ProfileSection>("unit");
   const [setupExpanded, setSetupExpanded] = useState(false);
   const [selectedRoomId, setSelectedRoomId] = useState<MoveInReadyRoomId>("kitchen");
@@ -284,6 +288,9 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   const [analysisExpanded, setAnalysisExpanded] = useState(false);
   const [clipDetailsExpanded, setClipDetailsExpanded] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>("idle");
+  const [analysisElapsedSeconds, setAnalysisElapsedSeconds] = useState(0);
+  const analysisStartedAtRef = useRef<number | null>(null);
+  const pendingCancelRef = useRef(createPendingCancelTracker());
   const [analysisError, setAnalysisError] = useState("");
   const [analysisNotice, setAnalysisNotice] = useState("");
   const [drafts, setDrafts] = useState<Partial<Record<MoveInReadyElementId, DecisionDraft>>>({});
@@ -347,6 +354,35 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       identity.videoId === videoId && identity.videoRevision === videoRevision && identity.videoHash === videoHash,
     );
   }
+
+  // Release a server-held mapping lease when the tab closes mid-analysis.
+  // The keepalive cancel is idempotent; lease expiry remains the fallback.
+  useEffect(() => {
+    const tracker = pendingCancelRef.current;
+    const onPageHide = () => {
+      const pending = tracker.consume();
+      if (pending) void cancelPendingVideoMapping(pending.identity, pending.token);
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, []);
+
+  // Elapsed ticker while a live analysis is in flight. Live rooms take on
+  // the order of a minute; the counter is decorative (aria-hidden) so screen
+  // readers hear the stable status text instead of every second.
+  useEffect(() => {
+    if (analysisStatus !== "segmenting" && analysisStatus !== "mapping") {
+      analysisStartedAtRef.current = null;
+      setAnalysisElapsedSeconds(0);
+      return;
+    }
+    if (analysisStartedAtRef.current === null) analysisStartedAtRef.current = Date.now();
+    const startedAt = analysisStartedAtRef.current;
+    const timer = window.setInterval(() => {
+      setAnalysisElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [analysisStatus]);
 
   useEffect(() => {
     let active = true;
@@ -603,6 +639,10 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     : null, [currentRecord, capturedRoomIds]);
   const reviewCounts = useMemo(() => getReviewCounts(currentRecord?.decisions), [currentRecord?.decisions]);
   const hasAnyProposals = MOVE_IN_READY_ELEMENTS.some((element) => Boolean(currentRecord?.proposals[element.id]));
+  const nextUndecidedElement = MOVE_IN_READY_ELEMENTS.find(
+    (element) => currentRecord?.decisions[element.id]?.status === "unreviewed",
+  ) ?? null;
+  const nextRoomToFilm = roomClips.find((room) => !room.captured) ?? null;
   const activeReviewIndex = activeElementId ? MOVE_IN_READY_ELEMENT_IDS.indexOf(activeElementId) : -1;
   const form1083Blocker = currentRecord ? form1083AdministrativeBlocker(currentRecord) : null;
   const canSignOff = Boolean(
@@ -613,6 +653,15 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   );
   const completedResult = currentRecord?.fundingType === "lahsa" && finalization?.status === "complete" && !form1083Blocker ? finalization.result : null;
   const canCapture = isCaptureSetupComplete(currentRecord);
+  const guideModel = useMemo(() => deriveGuideModel({
+    fundingType: currentRecord?.fundingType === "hud" ? "hud" : currentRecord?.fundingType === "lahsa" ? "lahsa" : "unknown",
+    canCapture: isCaptureSetupComplete(currentRecord),
+    pseudonym: currentRecord?.pseudonym ?? "",
+    rooms: roomClips.map((room) => ({ id: room.id, label: room.label, captured: room.captured })),
+    resolvedDecisions: reviewCounts.resolved,
+    totalElements: MOVE_IN_READY_ELEMENTS.length,
+    signed: Boolean(completedResult && currentRecord?.signoff),
+  }), [currentRecord, canCapture, roomClips, reviewCounts.resolved, completedResult]);
   const profileSectionReady = {
     unit: Boolean(currentRecord?.pseudonym.trim() && currentRecord.fundingType !== "unknown"),
     evaluator: Boolean(currentRecord?.evaluatorName.trim() && currentRecord.evaluatorAgencyName.trim()),
@@ -814,6 +863,33 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     }
     setReviewError("");
     scrollMainToTop();
+  }
+
+  function selectRoom(roomId: string): void {
+    if (!isMoveInReadyRoomId(roomId)) return;
+    invalidateActiveAnalysis("Analysis was cancelled because the selected room changed.");
+    setSelectedRoomId(roomId);
+    setClipDetailsExpanded(false);
+    setAnalysisExpanded(false);
+    setMockUnitAttestationKey(null);
+    setSendVideoConsentKey(null);
+    updateRecord((current) => ({ ...current, selectedRoomId: roomId }));
+    setAnalysisError("");
+  }
+
+  function handleGuideAction(action: GuideAction): void {
+    if (action.type === "setup") {
+      changeStep("capture");
+      setSetupExpanded(true);
+      window.setTimeout(() => {
+        document.getElementById("capture-pseudonym")?.focus({ preventScroll: false });
+      }, 60);
+    } else if (action.type === "room") {
+      changeStep("capture");
+      selectRoom(action.roomId);
+    } else if (action.type === "step") {
+      changeStep(action.step);
+    }
   }
 
   function openProfileForRequiredDetails(): void {
@@ -1080,6 +1156,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       appendIdentity(segmentForm, requestIdentity);
       if (!intentIsCurrent() || !analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion)) return;
       segmentationRequested = true;
+      pendingCancelRef.current.set(requestIdentity, null);
       const segmentResponse = await fetch("/api/video/segment?stage=segment", {
         method: "POST",
         body: segmentForm,
@@ -1090,6 +1167,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       if (!segmentResponse.ok) throw new Error(readSafeApiError(segmentJson, segmentResponse.status));
       const segmented = parseSegmentResponse(segmentJson, requestIdentity, roomId);
       candidateTokenToRelease = segmented.candidateToken;
+      pendingCancelRef.current.set(requestIdentity, segmented.candidateToken ?? null);
       if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion)) return;
 
       setAnalysisStatus("mapping");
@@ -1266,6 +1344,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       if (generation === analysisGenerationRef.current) {
         abortRef.current = null;
       }
+      pendingCancelRef.current.clear();
       if (segmentationRequested && !mappingCompleted) {
         void cancelPendingVideoMapping(requestIdentity, candidateTokenToRelease);
       }
@@ -1647,9 +1726,110 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       </div>
 
       <main id="main-content" ref={mainScrollRef} className={styles.main}>
+        {step === "home" && (
+          <>
+            <StepHeader headingRef={stepHeadingRef} eyebrow="INSPECTION HOME" title="Inspection home" lead={canCapture ? record.pseudonym : "One guided pass: film the unit, let AI draft, confirm each requirement."} />
+            <section className={`${styles.contentStack} ${styles.homeContent}`} aria-label="Inspection home" data-testid="inspection-home">
+              <div className={`${styles.card} ${styles.homeNextCard}`}>
+                <p className={styles.draftLabel}>Next step</p>
+                <h2>{guideModel?.nextLabel ?? "Walkthrough complete"}</h2>
+                <p className={styles.cardLead}>
+                  {record.fundingType === "hud"
+                    ? "This unit needs the HQS workflow. Form 1083 cannot be completed here."
+                    : "The AI drafts from your room videos. You only confirm each requirement in person — nothing is decided for you."}
+                </p>
+                {record.fundingType !== "hud" && (
+                  <button
+                    className={`${styles.button} ${styles.wideButton}`}
+                    type="button"
+                    onClick={() => {
+                      if (guideModel && guideModel.nextAction.type !== "none") handleGuideAction(guideModel.nextAction);
+                      else if (!canCapture) { changeStep("capture"); setSetupExpanded(true); }
+                      else changeStep("review");
+                    }}
+                  >
+                    Continue <ArrowRight size={17} aria-hidden="true" />
+                  </button>
+                )}
+              </div>
+
+              {guideModel && (
+                <ol className={styles.homeStages} aria-label="Inspection progress">
+                  {guideModel.steps.map((stage, index) => (
+                    <li key={stage.id} className={`${styles.homeStage} ${stage.state === "done" ? styles.homeStageDone : stage.state === "current" ? styles.homeStageCurrent : ""}`}>
+                      <span className={styles.homeStageNumber}>{stage.state === "done" ? <CheckCircle2 size={16} aria-hidden="true" /> : index + 1}</span>
+                      <span className={styles.homeStageCopy}><strong>{stage.title}</strong><small>{stage.detail}</small></span>
+                      <span className={styles.homeStageState}>{stage.state === "done" ? "Done" : stage.state === "current" ? "Next" : "Locked"}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+
+              <section className={styles.card} aria-labelledby="home-requirements-heading">
+                <div className={styles.cardTitleRow}>
+                  <div>
+                    <h2 id="home-requirements-heading">Form 1083 requirements</h2>
+                    <p className={styles.cardLead}>{reviewCounts.resolved} of {MOVE_IN_READY_ELEMENTS.length} decided · AI drafts stay unreviewed until you confirm them.</p>
+                  </div>
+                  <ClipboardCheck size={21} aria-hidden="true" />
+                </div>
+                <div className={styles.homeProgressTrack} role="progressbar" aria-label="Requirements decided" aria-valuemin={0} aria-valuemax={MOVE_IN_READY_ELEMENTS.length} aria-valuenow={reviewCounts.resolved}>
+                  <span style={{ width: `${(reviewCounts.resolved / MOVE_IN_READY_ELEMENTS.length) * 100}%` }} />
+                </div>
+                <ul className={styles.homeRequirementList}>
+                  {MOVE_IN_READY_ELEMENTS.map((element, index) => {
+                    const decision = record.decisions[element.id];
+                    const proposal = record.proposals[element.id];
+                    const status = decision.status === "A" ? "Approved" : decision.status === "D" ? "Deficient" : decision.status === "needs-human-check" ? "Check" : proposal ? "AI draft" : "Open";
+                    return (
+                      <li key={element.id}>
+                        <button
+                          type="button"
+                          className={styles.homeRequirementRow}
+                          disabled={record.fundingType !== "lahsa"}
+                          onClick={() => { changeStep("review"); openReviewElement(element.id); }}
+                        >
+                          <span className={styles.elementOverviewNumber}>{index + 1}</span>
+                          <span className={styles.homeRequirementCopy}><strong>{element.label}</strong><small>{element.roomIds.map((roomId) => roomLabel(roomId)).join(" · ")}</small></span>
+                          <span className={styles.elementOverviewStatus}>{status}</span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+
+              <section className={styles.card} aria-labelledby="home-rooms-heading">
+                <div className={styles.cardTitleRow}>
+                  <div>
+                    <h2 id="home-rooms-heading">Room evidence</h2>
+                    <p className={styles.cardLead}>{capturedRoomCount} of {MOVE_IN_READY_ROOMS.length} clips saved. One continuous take per room.</p>
+                  </div>
+                  <Video size={21} aria-hidden="true" />
+                </div>
+                <div className={styles.homeRoomGrid}>
+                  {roomClips.map((room) => (
+                    <button
+                      key={room.id}
+                      type="button"
+                      className={styles.homeRoomButton}
+                      disabled={!canCapture}
+                      onClick={() => { changeStep("capture"); selectRoom(room.id); }}
+                    >
+                      <strong>{room.label}</strong>
+                      <span>{room.captured ? "Filmed" : "Not filmed"}</span>
+                    </button>
+                  ))}
+                </div>
+                {!canCapture && <p className={styles.helpText}>Finish unit setup first — Continue above takes you there.</p>}
+              </section>
+            </section>
+          </>
+        )}
+
         {step === "capture" && (
           <>
-            <StepHeader headingRef={stepHeadingRef} compact eyebrow="STEP 1 OF 3" title="Video Capture" lead={canCapture ? record.pseudonym : "Set up this unit to begin recording."} />
+            <StepHeader headingRef={stepHeadingRef} compact eyebrow="STEP 1 OF 3 · FILM" title="Film the unit" lead={canCapture ? `${record.pseudonym} · one take per room, then AI drafts the checklist` : "Set up this unit to begin recording."} backLabel="home" onBack={() => changeStep("home")} />
             <section className={`${styles.contentStack} ${styles.captureContent}`} aria-label="Video capture">
               {!canCapture && <div className={styles.card}>
                 <button className={styles.setupToggle} type="button" data-testid="capture-setup-toggle" aria-expanded={setupExpanded} aria-controls="capture-setup-fields" onClick={() => setSetupExpanded((expanded) => !expanded)}>
@@ -1687,6 +1867,27 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
 
               {record.fundingType !== "hud" && (
                 <>
+                  {canCapture && (
+                    <div className={`${styles.card} ${styles.captureNextBar}`} data-testid="capture-next-bar">
+                      <div>
+                        <strong>{capturedRoomCount} of {MOVE_IN_READY_ROOMS.length} rooms filmed</strong>
+                        <p className={styles.cardLead}>
+                          {nextRoomToFilm
+                            ? "This clip is saved on this device. Film the next room, or run AI analysis on a saved room from its panel above."
+                            : "Every room is filmed. Open the checklist — AI drafts are waiting for your in-person confirmation."}
+                        </p>
+                      </div>
+                      {nextRoomToFilm ? (
+                        <button className={styles.button} type="button" onClick={() => selectRoom(nextRoomToFilm.id)}>
+                          Film next: {nextRoomToFilm.label} <ArrowRight size={16} aria-hidden="true" />
+                        </button>
+                      ) : (
+                        <button className={styles.button} type="button" onClick={() => changeStep("review")}>
+                          Open requirement checklist <ArrowRight size={16} aria-hidden="true" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <WalkthroughVideoCapture
                     key={`${sessionId}:${selectedRoomId}`}
                     sessionId={sessionId}
@@ -1710,17 +1911,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                         },
                       }));
                     }}
-                    onRoomChange={(roomId) => {
-                      if (!isMoveInReadyRoomId(roomId)) return;
-                      invalidateActiveAnalysis("Analysis was cancelled because the selected room changed.");
-                      setSelectedRoomId(roomId);
-                      setClipDetailsExpanded(false);
-                      setAnalysisExpanded(false);
-                      setMockUnitAttestationKey(null);
-                      setSendVideoConsentKey(null);
-                      updateRecord((current) => ({ ...current, selectedRoomId: roomId }));
-                      setAnalysisError("");
-                    }}
+                    onRoomChange={(roomId) => selectRoom(roomId)}
                     disabled={!canCapture || analysisStatus === "segmenting" || analysisStatus === "mapping"}
                     onClipChange={(clip, roomId) => handleClipChange(clip, roomId)}
                     detailsExpanded={clipDetailsExpanded}
@@ -1770,7 +1961,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                         {analysisError && <p className={styles.inlineError} role="alert">{analysisError}</p>}
                         <div className={styles.buttonRow}>
                           <button className={`${styles.button} ${styles.wideButton}`} type="button" onClick={() => void analyzeRoom()} disabled={analysisMode !== "live" || !clips[selectedRoomId] || clips[selectedRoomId]?.mime === "video/quicktime" || !mockUnitAttested || !sendVideoConsent || analysisStatus === "segmenting" || analysisStatus === "mapping" || (!online && Boolean(pendingForSelectedRoom))}>
-                            {analysisStatus === "segmenting" || analysisStatus === "mapping" ? <><LoaderCircle className={styles.spinner} size={17} aria-hidden="true" /> {analysisStatus === "segmenting" ? "Segmenting room video…" : "Mapping source stills…"}</> : pendingForSelectedRoom ? online ? <><RefreshCw size={17} aria-hidden="true" /> Retry analysis</> : <><CloudOff size={17} aria-hidden="true" /> Analysis queued</> : analysisStatus === "complete" ? <><RefreshCw size={17} aria-hidden="true" /> Analyze this room again</> : online ? <><Video size={17} aria-hidden="true" /> Analyze this room</> : <><CloudOff size={17} aria-hidden="true" /> Queue analysis for when connected</>}
+                            {analysisStatus === "segmenting" || analysisStatus === "mapping" ? <><LoaderCircle className={styles.spinner} size={17} aria-hidden="true" /> {analysisStatus === "segmenting" ? "Segmenting room video…" : "Mapping source stills…"} <span aria-hidden="true">{formatTimestamp(analysisElapsedSeconds)}</span></> : pendingForSelectedRoom ? online ? <><RefreshCw size={17} aria-hidden="true" /> Retry analysis</> : <><CloudOff size={17} aria-hidden="true" /> Analysis queued</> : analysisStatus === "complete" ? <><RefreshCw size={17} aria-hidden="true" /> Analyze this room again</> : online ? <><Video size={17} aria-hidden="true" /> Analyze this room</> : <><CloudOff size={17} aria-hidden="true" /> Queue analysis for when connected</>}
                           </button>
                           {(analysisStatus === "segmenting" || analysisStatus === "mapping") && <button className={styles.secondaryButton} type="button" onClick={() => invalidateActiveAnalysis("Analysis was cancelled. No result was saved.")}>Cancel</button>}
                         </div>
@@ -1779,7 +1970,6 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                       </div>
                     </details>
                   </WalkthroughVideoCapture>
-
 
                 </>
               )}
@@ -1791,10 +1981,10 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
           <>
             <StepHeader
               headingRef={stepHeadingRef}
-              eyebrow="STEP 2 OF 3"
-              title={record.fundingType === "hud" ? "HQS required" : record.fundingType === "unknown" ? "Choose funding type" : reviewNoteOpen ? "Add Note" : mobileReviewDetailOpen && !isWideLayout && activeElementId ? MOVE_IN_READY_ELEMENTS.find((element) => element.id === activeElementId)?.label ?? "Element review" : showAllReviewElements ? "All review elements" : "Draft Review"}
-              lead={record.fundingType === "hud" ? "Use the HQS inspection workflow for HUD-funded units." : record.fundingType === "unknown" ? "Choose the applicable route in Profile before reviewing." : reviewNoteOpen ? "Add a short note to this local walkthrough." : mobileReviewDetailOpen && !isWideLayout ? `Element ${activeReviewIndex + 1} of ${MOVE_IN_READY_ELEMENTS.length} · in-person check required` : showAllReviewElements ? "Select one element to review." : `${record.pseudonym} · ${capturedRoomCount}/${MOVE_IN_READY_ROOMS.length} room clips`}
-              backLabel={reviewNoteOpen ? "review summary" : mobileReviewDetailOpen && !isWideLayout && showAllReviewElements ? "all 11 elements" : mobileReviewDetailOpen && !isWideLayout ? "review overview" : showAllReviewElements ? "review summary" : "Capture"}
+              eyebrow="STEP 2 OF 3 · CHECKLIST"
+              title={record.fundingType === "hud" ? "HQS required" : record.fundingType === "unknown" ? "Choose funding type" : reviewNoteOpen ? "Add Note" : mobileReviewDetailOpen && !isWideLayout && activeElementId ? MOVE_IN_READY_ELEMENTS.find((element) => element.id === activeElementId)?.label ?? "Requirement review" : showAllReviewElements ? "All 11 requirements" : "Requirement checklist"}
+              lead={record.fundingType === "hud" ? "Use the HQS inspection workflow for HUD-funded units." : record.fundingType === "unknown" ? "Choose the applicable route in Profile before reviewing." : reviewNoteOpen ? "Add a short note to this local walkthrough." : mobileReviewDetailOpen && !isWideLayout ? `Requirement ${activeReviewIndex + 1} of ${MOVE_IN_READY_ELEMENTS.length} · confirm in person` : showAllReviewElements ? "Work through each requirement in order. AI drafts first, your decision second." : `${record.pseudonym} · ${reviewCounts.resolved} of ${MOVE_IN_READY_ELEMENTS.length} requirements decided`}
+              backLabel={reviewNoteOpen ? "checklist" : mobileReviewDetailOpen && !isWideLayout && showAllReviewElements ? "all 11 requirements" : mobileReviewDetailOpen && !isWideLayout ? "checklist" : showAllReviewElements ? "checklist" : "home"}
               onBack={() => {
                 if (reviewNoteOpen) {
                   setReviewNoteOpen(false);
@@ -1803,7 +1993,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                 } else if (showAllReviewElements) {
                   returnToReviewSummary();
                 } else {
-                  changeStep("capture");
+                  changeStep("home");
                 }
               }}
             />
@@ -1838,12 +2028,20 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                 </div>
               </section> : <>
               <div className={styles.reviewSummary}>
-                <div><span>Evaluator decisions</span><strong>{reviewCounts.resolved} of {MOVE_IN_READY_ELEMENTS.length} reviewed</strong></div>
+                <div><span>Requirements decided</span><strong>{reviewCounts.resolved} of {MOVE_IN_READY_ELEMENTS.length} reviewed</strong></div>
                 <div className={styles.decisionTotals}>A {reviewCounts.approved} · D {reviewCounts.deficient}</div>
               </div>
+              <div className={styles.homeProgressTrack} role="progressbar" aria-label="Checklist progress" aria-valuemin={0} aria-valuemax={MOVE_IN_READY_ELEMENTS.length} aria-valuenow={reviewCounts.resolved}>
+                <span style={{ width: `${(reviewCounts.resolved / MOVE_IN_READY_ELEMENTS.length) * 100}%` }} />
+              </div>
+              {!mobileReviewDetailOpen && nextUndecidedElement && (
+                <button className={`${styles.button} ${styles.wideButton}`} type="button" onClick={() => openReviewElement(nextUndecidedElement.id)}>
+                  Continue: {nextUndecidedElement.label} <ArrowRight size={16} aria-hidden="true" />
+                </button>
+              )}
               <section className={`${styles.card} ${styles.reviewOverview} ${showAllReviewElements ? styles.reviewOverviewAll : ""} ${mobileReviewDetailOpen ? styles.reviewOverviewHiddenOnMobile : ""}`} aria-label="All 11 inspection elements">
-                <div className={styles.cardTitleRow}><div><h2>{showAllReviewElements ? "All 11 LAHSA Habitability Elements" : "11 LAHSA Habitability Elements"}</h2><p className={styles.cardLead}>
-                  {hasAnyProposals ? "AI suggestions are unreviewed. Check each item in person." : "No AI draft yet. Review each item in person."}
+                <div className={styles.cardTitleRow}><div><h2>{showAllReviewElements ? "All 11 Form 1083 requirements" : "11 Form 1083 requirements"}</h2><p className={styles.cardLead}>
+                  {hasAnyProposals ? "AI drafts are ready. Confirm each requirement in person, in order." : "No AI draft yet. Work through each requirement in person, in order."}
                   {!record.evaluatorName.trim() && <> Evaluator name is required before decisions. <button className={styles.linkButton} type="button" onClick={openProfileForRequiredDetails}>Set up profile</button></>}
                 </p></div></div>
                 <ul className={`${styles.elementOverview} ${showAllReviewElements ? styles.elementOverviewAll : ""}`} id="element-overview-list">
@@ -1886,7 +2084,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                 </ul>
                 {!showAllReviewElements && <div className={styles.overviewActions}>
                     <button className={styles.overviewDisclosure} type="button" onClick={() => { setShowAllReviewElements(true); scrollMainToTop("smooth"); }}>
-                      View all {MOVE_IN_READY_ELEMENTS.length} elements <ArrowRight size={16} aria-hidden="true" />
+                      View all {MOVE_IN_READY_ELEMENTS.length} requirements <ArrowRight size={16} aria-hidden="true" />
                     </button>
                     <div className={styles.overviewPrimaryActions}>
                       <button className={styles.secondaryButton} type="button" onClick={() => { setReviewNoteDraft(record.inspectionNote); setReviewNoteOpen(true); }}><StickyNote size={16} aria-hidden="true" /> {record.inspectionNote.trim() ? "Edit note" : "Add note"}</button>
@@ -1939,6 +2137,27 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                             {proposal.state === "needs-human-check" && <p className={styles.proposalWarning}>Needs human check: this draft has no verified linked source still.</p>}
                           </> : <p>No AI draft for this element. Assess it with the source clip and the required in-person checks.</p>}
                           <p className={styles.proposalDecisionMeta}><span>Evaluator: {decisionLabel(decision)}</span><span>{correctionStatus}</span></p>
+                          {proposal && !isFireSafety && (
+                            <button
+                              type="button"
+                              className={styles.secondaryButton}
+                              onClick={() => updateDecisionDraft(element.id, (current) => ({
+                                ...current,
+                                choice: proposal.modelSuggestion,
+                                rationale: current.rationale.trim() ? current.rationale : proposal.observation,
+                                evidenceStillIds: proposal.evidence.length > 0 ? proposal.evidence.map((reference) => reference.stillId) : current.evidenceStillIds,
+                                ...(proposal.modelSuggestion === "D" && proposal.deficiencySuggestion ? {
+                                  issueDescription: current.issueDescription.trim() ? current.issueDescription : proposal.deficiencySuggestion.deficientArea,
+                                  correction: current.correction.trim() ? current.correction : proposal.deficiencySuggestion.correction,
+                                  completionDate: current.completionDate || proposal.deficiencySuggestion.completionDate,
+                                  reinspectionDate: current.reinspectionDate || proposal.deficiencySuggestion.reinspectionDate,
+                                } : {}),
+                              }))}
+                            >
+                              Use AI draft to pre-fill
+                            </button>
+                          )}
+                          {proposal && <p className={styles.helpText}>Pre-fill only. You still complete the in-person check and save your own decision below.</p>}
                         </div>
                         {visibleEvidenceView ? <figure className={styles.proposalEvidenceFigure}>
                           <Image src={visibleEvidenceView.src} width={160} height={120} unoptimized alt={`${roomLabel(visibleEvidenceView.reference.roomId)} source still at ${formatTimestamp(visibleEvidenceView.reference.timestampMs / 1000)}`} />
@@ -2085,7 +2304,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
 
         {step === "signoff" && (
           <>
-            <StepHeader headingRef={stepHeadingRef} eyebrow="STEP 3 OF 3" title={record.fundingType === "hud" ? "HQS required" : record.fundingType === "unknown" ? "Choose funding type" : "Sign-Off & Export"} lead={record.fundingType === "hud" ? "Use the HQS inspection workflow for HUD-funded units." : record.fundingType === "unknown" ? "Choose the applicable route in Profile before signing." : "Result, signature, and local exports."} backLabel="Review" onBack={() => changeStep("review")} />
+            <StepHeader headingRef={stepHeadingRef} eyebrow="STEP 3 OF 3 · SIGN-OFF" title={record.fundingType === "hud" ? "HQS required" : record.fundingType === "unknown" ? "Choose funding type" : "Sign-Off & Export"} lead={record.fundingType === "hud" ? "Use the HQS inspection workflow for HUD-funded units." : record.fundingType === "unknown" ? "Choose the applicable route in Profile before signing." : "Result auto-generated from your 11 decisions, then signature and local exports."} backLabel="checklist" onBack={() => changeStep("review")} />
             <div className={`${styles.contentStack} ${styles.signoffContent}`}>
               {record.fundingType !== "lahsa" ? <section className={`${styles.card} ${styles.signoffRoute}`} aria-labelledby="signoff-funding-route-heading">
                 <div className={`${styles.callout} ${record.fundingType === "hud" ? styles.calloutDanger : styles.calloutWarning}`} role={record.fundingType === "hud" ? "alert" : "status"}>
@@ -2160,7 +2379,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
 
         {step === "profile" && (
           <>
-            <StepHeader headingRef={stepHeadingRef} eyebrow="WORKSPACE SETUP" title="Profile" lead="Complete one short section at a time. Your progress saves on this device." backLabel="Capture" onBack={() => changeStep("capture")} />
+            <StepHeader headingRef={stepHeadingRef} eyebrow="WORKSPACE SETUP" title="Profile" lead="Complete one short section at a time. Your progress saves on this device." backLabel="home" onBack={() => changeStep("home")} />
             <div className={styles.contentStack}>
               <section className={styles.profileFlow} aria-label="Profile setup">
                 <div className={styles.profileProgress}>
@@ -2304,6 +2523,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
 
       <div className={styles.appFooter}>
         <nav className={styles.bottomNav} aria-label="Main navigation">
+          <NavButton icon={<Home size={19} aria-hidden="true" />} label="Home" active={step === "home"} onClick={() => changeStep("home")} disabled={recordingInProgress} />
           <NavButton icon={<ClipboardCheck size={19} aria-hidden="true" />} label="Review" active={step === "review"} onClick={() => changeStep("review")} disabled={recordingInProgress} />
           <NavButton icon={<CheckCircle2 size={19} aria-hidden="true" />} label="Sign-Off" active={step === "signoff"} onClick={() => changeStep("signoff")} disabled={recordingInProgress} />
           <NavButton icon={<CircleHelp size={19} aria-hidden="true" />} label="Profile" active={step === "profile"} onClick={() => changeStep("profile")} disabled={recordingInProgress} />
@@ -2321,6 +2541,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
         </div>}
       </div>
 
+      <GuideSheet model={guideModel} rooms={roomClips} onAction={handleGuideAction} />
     </div>
   );
 

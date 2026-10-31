@@ -64,6 +64,8 @@ test("room prompt completion persists with a saved clip and stays room-specific"
 
   await page.reload();
   await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
+  await goToCapture(page);
+  await selectRoom(page, "kitchen");
   await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
   const filmedKitchenPrompt = page.getByRole("listitem").filter({ hasText: "Film one continuous take" });
   await expect(filmedKitchenPrompt.getByRole("button", { name: /Undo filmed: Film one continuous take/, exact: false })).toBeVisible();
@@ -82,8 +84,9 @@ test("room prompt completion persists with a saved clip and stays room-specific"
 
   await page.reload();
   await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
+  await page.getByTestId("inspection-home").getByRole("button", { name: "Kitchen Filmed", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
   await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
-  await selectRoom(page, "kitchen");
   await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
 });
 

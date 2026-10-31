@@ -9,7 +9,7 @@ import path from "node:path";
 
 import { expect, test, type Page } from "@playwright/test";
 
-import { goToCapture, openProfilePanel } from "./navigation";
+import { goToCapture, openProfilePanel, selectRoom } from "./navigation";
 
 test.use({
   storageState: { cookies: [], origins: [] },
@@ -135,6 +135,9 @@ test("a mobile MOV upload is normalized, saved locally as MP4, and decodes from 
   expect(stored.byteLength).toBeGreaterThan(0);
 
   await page.reload();
+  await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
+  await goToCapture(page);
+  await selectRoom(page, "kitchen");
   await expect(page.getByText("synthetic-h264-test-pattern.mp4", { exact: true })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByLabel("Kitchen walkthrough clip preview")).toBeVisible();
   const preview = await decodeSavedPreview(page);

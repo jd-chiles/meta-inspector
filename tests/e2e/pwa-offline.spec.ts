@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { expect, test, type Page } from "@playwright/test";
 
-import { goToCapture, openProfilePanel } from "./navigation";
+import { goToCapture, openProfilePanel, selectRoom } from "./navigation";
 
 const APP_SHELL_CACHE = "habitability-walkthrough-shell-v2";
 
@@ -162,7 +162,9 @@ test("the hydrated walkthrough saves and restores real local progress offline", 
   const offlineReload = await page.reload({ waitUntil: "domcontentloaded" });
   expect(offlineReload?.status()).toBe(200);
   await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
-  await expect(page.getByRole("heading", { level: 1, name: "Video Capture" })).toBeVisible();
+  await goToCapture(page);
+  await selectRoom(page, "kitchen");
+  await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
   await expect(page.getByText("Offline. Capture and review stay on this device; live analysis needs a connection.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Remove clip", exact: true })).toBeVisible();
   await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();

@@ -9,6 +9,8 @@ async function openReadyCapture(page: Page, width: number, height: number): Prom
   await page.goto("/");
   await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
   await expect(page.getByTestId("analysis-mode")).toHaveText("Sample only");
+  await page.getByTestId("inspection-home").getByRole("button", { name: "Continue", exact: false }).first().click();
+  await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
   const setupToggle = page.getByTestId("capture-setup-toggle");
   if (await setupToggle.getAttribute("aria-expanded") !== "true") await setupToggle.click();
   await page.getByLabel("Unit pseudonym").fill("Staged Demo Unit 04");
@@ -61,7 +63,7 @@ test("390x844 Capture fills the phone workspace without leaving a dead gap above
   expect(privacyBox!.y + privacyBox!.height).toBeLessThanOrEqual(layout.nav.top - 4);
   expect(layout.nav.top - (privacyBox!.y + privacyBox!.height), "the last Capture action should sit within 32px of navigation").toBeLessThanOrEqual(32);
   expect(layout.mainScrollHeight).toBeLessThanOrEqual(layout.mainClientHeight + 1);
-  await expect(navigation.getByRole("button")).toHaveCount(3);
+  await expect(navigation.getByRole("button")).toHaveCount(4);
   await expectNoDocumentOverflow(page, 390, 844);
   await writeFile(
     "artifacts/design-qa/capture-fit-390x844-layout.json",

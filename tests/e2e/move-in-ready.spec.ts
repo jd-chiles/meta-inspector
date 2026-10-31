@@ -684,11 +684,13 @@ async function readStoredWalkthroughState(page: Page, sessionId: string): Promis
 }
 
 test.describe("Move-in Ready mobile flow", () => {
-  test("360px shows the three navigation items and keeps default Capture usable without horizontal scroll", async ({ page }) => {
+  test("360px shows the four navigation items and keeps default Capture usable without horizontal scroll", async ({ page }) => {
     await openApp(page);
     await mkdir(path.join(process.cwd(), "artifacts/design-qa"), { recursive: true });
+    await expect(page.getByRole("heading", { level: 1, name: "Inspection home" })).toBeVisible();
+    await goToCapture(page);
     const setupToggle = page.getByTestId("capture-setup-toggle");
-    await expect(setupToggle).toHaveAttribute("aria-expanded", "false");
+    await expect(setupToggle).toHaveAttribute("aria-expanded", "true");
     const firstRunCapture = page.getByTestId("walkthrough-video-capture");
     await expect(firstRunCapture).toBeVisible();
     await expect(page.getByTestId("capture-setup-gate")).toBeVisible();
@@ -701,7 +703,7 @@ test.describe("Move-in Ready mobile flow", () => {
 
     await goToCapture(page);
     await page.locator("#main-content").evaluate((element) => element.scrollTo(0, 0));
-    await expect(page.getByRole("heading", { level: 1, name: "Video Capture" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
     await expectNoHorizontalScroll(page);
     const roomPicker = page.getByTestId("room-picker-toggle");
     await expect(roomPicker).toBeVisible();
@@ -715,8 +717,8 @@ test.describe("Move-in Ready mobile flow", () => {
     await roomPicker.click();
 
     const mainNav = page.getByRole("navigation", { name: "Main navigation" });
-    await expect(mainNav.getByRole("button")).toHaveCount(3);
-    for (const label of ["Review", "Sign-Off", "Profile"]) {
+    await expect(mainNav.getByRole("button")).toHaveCount(4);
+    for (const label of ["Home", "Review", "Sign-Off", "Profile"]) {
       await expect(mainNav.getByRole("button", { name: label, exact: true })).toBeVisible();
     }
     await expect(mainNav.getByRole("button", { name: "Capture", exact: true })).toHaveCount(0);
@@ -770,7 +772,7 @@ test.describe("Move-in Ready mobile flow", () => {
 
     const navigation = page.getByRole("navigation", { name: "Main navigation" });
     const views = [
-      ["Review", "Draft Review"],
+      ["Review", "Requirement checklist"],
       ["Sign-Off", "Sign-Off & Export"],
       ["Profile", "Profile"],
     ] as const;
@@ -817,8 +819,8 @@ test.describe("Move-in Ready mobile flow", () => {
         await expect(page.getByText(/Potential provider charges/i)).toBeVisible();
         await expect(page.getByText(/does not mean that a provider request has run or succeeded/i)).toBeVisible();
         await expect(page.getByText(/selected room video is sent to this server and Meta for SAM/i)).toBeVisible();
-        await page.getByRole("button", { name: "Back to Capture", exact: true }).click();
-        await expect(page.getByRole("heading", { level: 1, name: "Video Capture" })).toBeVisible();
+        await page.getByRole("button", { name: "Back to home", exact: true }).click();
+        await goToCapture(page);
       }
     }
   });
@@ -917,6 +919,7 @@ test.describe("Move-in Ready mobile flow", () => {
 
     await page.reload();
     await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
+    await goToCapture(page);
     await expect(page.getByText("1 of 4 clips saved", { exact: true })).toBeVisible();
     const before = await readStoredWalkthroughState(page, oldSessionId!);
     expect(before.clipCount).toBe(1);
@@ -944,8 +947,8 @@ test.describe("Move-in Ready mobile flow", () => {
     await page.getByRole("button", { name: "Profile", exact: true }).click();
     await expect(page.getByLabel("Unit pseudonym")).toHaveValue("");
     await expect(page.getByLabel("Funding type")).toHaveValue("unknown");
-    await page.getByRole("button", { name: "Back to Capture", exact: true }).click();
-    await expect(page.getByRole("heading", { level: 1, name: "Video Capture", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Back to home", exact: true }).click();
+    await goToCapture(page);
     await expect(page.getByText("Set up this unit to begin recording.", { exact: true })).toBeVisible();
   });
 
@@ -1190,6 +1193,9 @@ test.describe("Move-in Ready mobile flow", () => {
     await expect(page.getByText(/Clip saved on this device\./)).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText("replacement-test-pattern.mp4", { exact: true })).toBeVisible();
     await page.reload();
+    await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
+    await goToCapture(page);
+    await selectRoom(page, "kitchen");
     await expect(page.getByRole("button", { name: "Replace clip" })).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText("replacement-test-pattern.mp4", { exact: true })).toBeVisible();
     const reloadedStillsDisclosure = page.getByTestId("source-stills-details");
@@ -1279,13 +1285,17 @@ test.describe("Move-in Ready mobile flow", () => {
         await page.getByRole("button", { name: "Profile", exact: true }).click();
         await page.getByLabel("Evaluator name").fill("Mock Evaluator");
         await goToCapture(page);
+        await selectRoom(page, "kitchen");
+        await expandAnalysisDetails(page);
+        await page.getByRole("checkbox", { name: /I attest this is staged\/mock-unit footage/ }).check();
+        await page.getByRole("checkbox", { name: /I understand this selected mock-unit video/ }).check();
         await page.getByRole("button", { name: "Analyze this room", exact: true }).click();
         await expect(page.getByTestId("analysis-disclosure")).toHaveJSProperty("open", false);
         await expandAnalysisDetails(page);
         await expect(page.getByRole("button", { name: "Analyze this room again", exact: true })).toBeVisible({ timeout: 30_000 });
 
         await page.getByRole("button", { name: "Review", exact: true }).click();
-        await page.getByRole("button", { name: "View all 11 elements", exact: true }).click();
+        await page.getByRole("button", { name: "View all 11 requirements", exact: true }).click();
         const overview = page.getByRole("region", { name: "All 11 inspection elements" });
         const elementRows = overview.locator("#element-overview-list").getByRole("button");
         const waterSupplyRow = elementRows.filter({ hasText: "Water supply" });
@@ -1332,10 +1342,10 @@ test.describe("Move-in Ready mobile flow", () => {
         expect(mock.rooms).toEqual(["segment:kitchen", "map:kitchen", "segment:bathroom", "map:bathroom"]);
 
         await page.getByRole("button", { name: "Review", exact: true }).click();
-        await page.getByRole("button", { name: "View all 11 elements", exact: true }).click();
+        await page.getByRole("button", { name: "View all 11 requirements", exact: true }).click();
         await waterSupplyRow.click();
         await expect(waterSupply).toContainText("Mock bathroom water supply proposal.");
-        await page.getByRole("button", { name: "Back to all 11 elements", exact: true }).click();
+        await page.getByRole("button", { name: "Back to all 11 requirements", exact: true }).click();
         await expect(waterSupplyRow).toContainText("Open");
         expect(await readSavedWaterSupplyDecision(page)).toMatchObject({
           status: "unreviewed",
@@ -1346,12 +1356,12 @@ test.describe("Move-in Ready mobile flow", () => {
         await page.reload();
         await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
         await page.getByRole("button", { name: "Review", exact: true }).click();
-        await page.getByRole("button", { name: "View all 11 elements", exact: true }).click();
+        await page.getByRole("button", { name: "View all 11 requirements", exact: true }).click();
         const reloadedOverview = page.getByRole("region", { name: "All 11 inspection elements" });
         const reloadedWaterSupplyRow = reloadedOverview.locator("#element-overview-list").getByRole("button", { name: /Water supply/ });
         await reloadedWaterSupplyRow.click();
         await expect(page.getByTestId("review-element-demo-water-supply")).toContainText("Mock bathroom water supply proposal.");
-        await page.getByRole("button", { name: "Back to all 11 elements", exact: true }).click();
+        await page.getByRole("button", { name: "Back to all 11 requirements", exact: true }).click();
         await expect(reloadedWaterSupplyRow).toContainText("Open");
         expect(await readSavedWaterSupplyDecision(page)).toMatchObject({ status: "unreviewed" });
       } finally {
@@ -1380,6 +1390,9 @@ test.describe("Move-in Ready mobile flow", () => {
         expect(mock.stages.filter((stage) => stage === "map"), "a stale segmented response must not start Muse mapping").toHaveLength(0);
 
         await page.reload();
+        await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
+        await goToCapture(page);
+        await selectRoom(page, "kitchen");
         await expect(page.getByRole("button", { name: "Replace clip" })).toBeVisible({ timeout: 20_000 });
         await expect(page.getByText("replacement-during-response.mp4", { exact: true })).toBeVisible();
         await page.getByRole("button", { name: "Review", exact: true }).click();
@@ -1410,6 +1423,8 @@ test.describe("Move-in Ready mobile flow", () => {
         expect(mock.stages.filter((stage) => stage === "map"), "a stale segmented response must not start Muse mapping").toHaveLength(0);
 
         await page.reload();
+        await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
+        await goToCapture(page);
         await expect(page.getByText("No video recorded for this room yet.")).toBeVisible({ timeout: 20_000 });
         await page.getByRole("button", { name: "Review", exact: true }).click();
         await page.getByRole("region", { name: "All 11 inspection elements" }).locator("#element-overview-list").getByRole("button").filter({ hasText: "Structure and materials" }).click();
@@ -1445,9 +1460,11 @@ test.describe("Move-in Ready mobile flow", () => {
         await mock.mappingResponseSettled;
         await page.reload();
         await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
+        await goToCapture(page);
+        await selectRoom(page, "kitchen");
         await expect(page.getByText("replacement-during-map.mp4", { exact: true })).toBeVisible();
         await page.getByRole("button", { name: "Review", exact: true }).click();
-        await page.getByRole("button", { name: "View all 11 elements", exact: true }).click();
+        await page.getByRole("button", { name: "View all 11 requirements", exact: true }).click();
         const overview = page.getByRole("region", { name: "All 11 inspection elements" });
         const waterSupplyRow = overview.locator("#element-overview-list").getByRole("button", { name: /Water supply/ });
         await waterSupplyRow.click();
@@ -1499,7 +1516,8 @@ test.describe("Move-in Ready mobile flow", () => {
         await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
         await page.getByRole("button", { name: "Profile", exact: true }).click();
         await expect(page.getByLabel("Unit pseudonym")).toHaveValue("");
-        await page.getByRole("button", { name: "Back to Capture", exact: true }).click();
+        await page.getByRole("button", { name: "Back to home", exact: true }).click();
+        await goToCapture(page);
         await expect(page.getByText("Set up this unit to begin recording.", { exact: true })).toBeVisible();
         const deleted = await readStoredWalkthroughState(page, deletedSessionId!);
         expect(deleted).toMatchObject({ clipCount: 0, stillCount: 0, record: null });
@@ -1582,7 +1600,7 @@ test.describe("Move-in Ready mobile flow", () => {
     await uploadRequiredRoomClips(page, ["kitchen"]);
     await selectRoom(page, "kitchen");
     await page.getByRole("button", { name: "Review", exact: true }).click();
-    await page.getByRole("button", { name: "View all 11 elements", exact: true }).click();
+    await page.getByRole("button", { name: "View all 11 requirements", exact: true }).click();
     const overview = page.getByRole("region", { name: "All 11 inspection elements" });
     const overviewButtons = overview.locator("#element-overview-list").getByRole("button");
     const waterSupplyRow = overviewButtons.filter({ hasText: "Water supply" });
@@ -1597,7 +1615,7 @@ test.describe("Move-in Ready mobile flow", () => {
     await waterSupply.getByRole("checkbox", { name: "I completed every required in-person check for this element" }).check();
     await page.getByRole("button", { name: "Save evaluator decision", exact: true }).click();
     await expect(page.getByRole("alert").filter({ hasText: /source still|deficient area|correction|completion date/i })).toContainText(/source still|deficient area|correction|completion date/i);
-    await page.getByRole("button", { name: "Back to all 11 elements", exact: true }).click();
+    await page.getByRole("button", { name: "Back to all 11 requirements", exact: true }).click();
     await expect(waterSupplyRow).toContainText("Open");
     await waterSupplyRow.click();
 
@@ -1647,7 +1665,7 @@ test.describe("Move-in Ready mobile flow", () => {
     await goToCapture(page);
     await uploadRequiredRoomClips(page);
     await page.getByRole("button", { name: "Review", exact: true }).click();
-    await page.getByRole("button", { name: "View all 11 elements", exact: true }).click();
+    await page.getByRole("button", { name: "View all 11 requirements", exact: true }).click();
 
     const elementButtons = page.getByRole("region", { name: "All 11 inspection elements" }).locator("#element-overview-list").getByRole("button");
     await expect(elementButtons).toHaveCount(11);
