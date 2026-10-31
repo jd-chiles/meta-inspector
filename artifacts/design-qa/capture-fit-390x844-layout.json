@@ -1,0 +1,12 @@
+{
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "captureToNavigationGap": 12,
+  "lastPromptBottomToNavigationGap": 109.578125,
+  "lastActionBottomToNavigationGap": 12,
+  "mainScrollHeight": 766,
+  "mainClientHeight": 766,
+  "horizontalOverflow": false
+}

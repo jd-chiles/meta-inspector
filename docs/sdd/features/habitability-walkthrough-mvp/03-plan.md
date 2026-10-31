@@ -1,69 +1,45 @@
-# Implementation plan — 11 items + PWA (epoch 3)
+# Implementation plan — Move-in Ready video walkthrough
 
-Epochs 1–2 delivered a verified 3–4-item fixture walkthrough (all builders passed; 6/6 epoch-2 checks green on `ca373d3f`; code/qa/security passed). This plan reuses that implementation and adds the epoch-3 delta for November 4. No product implementation starts until this plan is reviewed and checkpointed.
+## Scope and safety baseline
 
-## Reuse analysis (no rewrite)
+REQ-001 through REQ-015 remain authoritative. Preserve all historical task/evidence records and unrelated dirty checkout changes. Form 1083 identity/use is owner-confirmed; recipient acceptance, case readiness and HMIS integration remain unverified. Use staged/mock-unit data only. The owner initially authorized Codex and explicitly delegated the remaining implementation sprint to Muse Code on 2026-10-31 through `docs/MUSE_CODE_HANDOFF.md`. The native SDD runtime still reports approval pending because its approval tool is unavailable; the implementation agent must leave that plugin state untouched and must not claim native approval/evidence that was not recorded.
 
-| Existing capability | Reuse for 11-item + PWA | New work |
-|---|---|---|
-| Domain schemas/reducer (`src/domain/`) | Catalogue/evidence shapes already parametric in item lists; extend item count, not logic | None (audit only) |
-| Session manager (`session.ts`) | Attempt/generation/pending machinery covers offline queue semantics | Offline queue states + explicit sync action |
-| Capture/review UI | Item-driven components render N items unchanged | PWA install affordance; pending/offline banners |
-| Server adapter/validation | Unchanged trust boundary | None |
-| Export snapshot + print CSS | Snapshot already item-generic | PDF acceptance (same policy) |
-| Storage (IndexedDB) | Saved progress rides on existing store | Schema bump only if fields required |
-| Tests (129 unit + 15 browser) | Patterns reused; fixtures extended | 11-item + PWA offline + PDF cases |
-| walkthrough.css | Adopted epoch 2, verified | None |
+Keep Node 22/Next.js/React and fixed server-only provider allowlists. Validate actual media bytes/resource limits; packet-copy remux supported MOV without re-encoding and preserve prior clips on failure. Upload validated MP4 once in stage=segment; server FFmpeg derives hash-verified candidates/context JPEGs into bounded expiring one-time process-local leases. Stage=map accepts identity/token only and rejects client media/stills. Never fetch client URLs. Secrets/provider bodies/file IDs/media stay out of browser bundles/logs/exports/service-worker caches. Fail closed without fixture fallback; optional Baseten mapping fallback is eligible-provider-error-only and disclosed.
 
-Estimated added work: catalog contract + data (S), PWA shell/SW/offline (M), PDF acceptance (S), verification expansion (M), demo/release/docs pointers (S). All fit November 4 except provider-detail mapping (blocked on OPEN details — tracked, not scheduled).
+Bind evidence to session, room, element, media ID/hash, schemaVersion and catalogVersion as separate dimensions, frame/time, analysis attempt and revision. Match schemaVersion and catalogVersion independently and exactly against both request and current session/evidence identity before accepting async work; missing or mismatched versions discard stale results. Changes to either version invalidate outstanding analysis and affected suggestions/decisions/sign-off and require renewed analysis/human review; preserved clips are not silently rebound. Replacement/cancellation/deletion/reanalysis invalidate stale results and affected decisions/sign-off. AI drafts never satisfy manual checks or evaluator decisions; human acknowledgment, independent 11a/11b decisions and complete signed fields govern results/exports. Pending/rejected/unsupported text is not approved export content. HUD cases stop at HQS; mock identity/address stay blank; exports remain local/manual-upload; local deletion never implies provider deletion. Preserve offline recovery, shell-only caches and identical room-scoped prompt-completion rules in requirements/design.
 
-## Dependency graph (new tasks only; epoch 1–2 history preserved)
+## Ordered active-graph docs gate — TASK-113
 
-Serial where ownership overlaps; PWA and catalog proceed in parallel under concurrency 1 in task-ID order:
+TASK-113 introduces active-tasks.json as a nonempty JSON array containing exactly TASK-103 through TASK-113. The validator checks record schema and unique IDs across every tasks.json record, including history. Plan checkboxes, current REQ coverage, active dependency membership, DAG cycles, and shared-path ownership apply only to manifest-selected active records. It rejects missing/malformed/empty manifests, duplicate/noncanonical/unknown IDs, active dependencies outside the manifest, cycles, missing active coverage/check mappings/checkboxes, and unserialized active ownership. History cannot satisfy active coverage. Preserve every TASK-069–TASK-076 record and all other legacy records/evidence without changing their historical meaning.
 
-TASK-069 (catalog contract v0.2) → TASK-071 (catalog data x11 + fixtures) → TASK-072 (verification expansion) → TASK-073 (demo/release/docs pointers).
-TASK-070 (PWA shell + offline) → TASK-072.
-TASK-080 (repair lint + gate, depends 070+072) → rerun checks. TASK-081 (verify-script alignment, depends 073). TASK-082 (lint leftover + loopback bind, depends 080).
+The active manifest and validator implementation are in place. TASK-113 requires both `node scripts/verify-sdd.mjs` and its focused unit tests to pass before TASK-103–TASK-106 are accepted. Those changes already exist in this worktree; this is an acceptance prerequisite, not a claim about their historical start order. Local results do not update or replace native SDD plugin evidence; leave the native runtime unchanged when its tools are unavailable.
 
-Reviewers run first (read-only): spec → plan → implementation → verifying. Reviewer tasks carry no writable files by design; scripts/verify-sdd.mjs exempts reviewer profiles from the ownership assert.
+## Active work and phase ownership
 
-## Tasks
+Owned paths are phase-based exclusive scopes. TASK-113 amends the authored task/plan/verification contracts, project ownership guidance, current status docs, and validator. TASK-103 may amend its specified documents and establish workspace files after TASK-113. TASK-107 may amend flow/store/page/styles from completed TASK-103; TASK-108 may extend earlier implementation tests after TASK-107 completes. Shared files are never edited concurrently. Independent disjoint app slices can run after TASK-113's docs and focused unit checks. Manifest/lockfile expansion requires explicit serialized ownership.
 
-- [x] TASK-069 — Catalog contract v0.2 (11 items, OPEN mapping blocks)
-  Architect. Requirements: REQ-001, REQ-011. Files: 02-design.md (catalog section), src/data/catalog.demo.json (contract shape only — data values in TASK-071). Acceptance: 11 stable IDs; OPEN fields optional-but-fail-closed; demo label retained.
-- [x] TASK-070 — PWA shell: manifest, icons, service worker, offline pending
-  Frontend, medium. Requirements: REQ-007, REQ-009, REQ-013. Files: public/manifest.webmanifest, public/sw.js, src/features/walkthrough/offline.ts. Acceptance: installable; offline shell loads with saved progress; analyses queue as pending, never auto-verdict; SW never caches evidence/keys/media.
-- [x] TASK-071 — Catalog data x11 plus rights-cleared fixtures
-  Implementer, medium. Depends on: TASK-069. Requirements: REQ-001, REQ-002, REQ-011. Files: src/data/catalog.demo.json, fixtures/README.md, fixtures/media. Acceptance: 11 items load; official wording left OPEN and verbatim-labeled; fixtures manifest current.
-- [x] TASK-072 — Verification expansion (11-item, PWA offline, PDF)
-  Tests, medium. Depends on: TASK-070, TASK-071. Requirements: REQ-001, REQ-002, REQ-003, REQ-004, REQ-005, REQ-006, REQ-007, REQ-008, REQ-009, REQ-010, REQ-011, REQ-012, REQ-013. Files: tests/unit/catalog-11.test.ts, tests/e2e/pwa-offline.spec.ts, tests/e2e/catalog-11.spec.ts. Acceptance: new behavioral tests fail without the feature; no weakened assertions; PDF/export parity covered.
-- [x] TASK-073 — Demo script, release notes, README/IDEA pointers
-  Documentation, low. Depends on: TASK-069, TASK-070, TASK-071, TASK-072. Requirements: REQ-011, REQ-012. Files: docs/DEMO.md, docs/sdd/features/habitability-walkthrough-mvp/06-release.md, README.md, IDEA.md. Acceptance: demo claims match executed evidence; README/IDEA point at the approved SDD revision + task IDs; IDEA.md stays historical. (Kanban board + worker prompts are owner-executed external updates, listed here as deferred actions, not SDD files.)
-- [x] TASK-074 — Spec review (superseded failed review, repaired via TASK-076; closed historical)
-  Spec-reviewer. Requirements: REQ-001, REQ-003, REQ-004, REQ-006, REQ-010, REQ-011, REQ-013. Acceptance: blocking contradiction recorded; no edits, no shell.
-- [x] TASK-075 — Plan review (dead, pending on superseded TASK-074; replaced by TASK-077; closed historical)
-  Plan-reviewer. Depends on: TASK-074. Requirements: REQ-001–REQ-013. Acceptance: superseded; no edits, no shell.
-- [x] TASK-076 — Spec re-review after confirmation-semantics fix
-  Spec-reviewer. Requirements: REQ-001, REQ-003, REQ-004, REQ-006, REQ-010, REQ-011, REQ-013. Acceptance: attested-vs-details consistent; verdict via sdd_submit_result.
-- [x] TASK-077 — Plan review of epoch-3 graph (second attempt)
-  Plan-reviewer. Depends on: TASK-076. Requirements: REQ-001–REQ-013. Acceptance: graph verified; verdict via sdd_submit_result.
-- [x] TASK-078 — Spec review of epoch-3 packet (current fingerprint)
-  Spec-reviewer. Requirements: REQ-001–REQ-013. Acceptance: packet reviewed; verdict via sdd_submit_result.
-- [x] TASK-079 — Plan review of epoch-3 graph (current fingerprint)
-  Plan-reviewer. Depends on: TASK-078. Requirements: REQ-001–REQ-013. Acceptance: plan verified; verdict via sdd_submit_result.
-- [x] TASK-080 — Repair verification failures (lint + 11-item gate)
-  Tests. Depends on: TASK-072, TASK-070. Requirements: REQ-001, REQ-011, REQ-012. Files: public/sw.js, tests/unit/catalog-11.test.ts, tests/unit/integration/flow.test.ts. Acceptance: lint clean, unit exact-11 contract, no weakened assertions.
-- [x] TASK-081 — Align verify script with reviewer practice
-  Documentation. Depends on: TASK-073. Requirements: REQ-012. Files: scripts/verify-sdd.mjs. Acceptance: reviewer empty-files allowed; guards intact.
-- [x] TASK-082 — Repair lint leftover and loopback test server
-  Tests. Depends on: TASK-080. Requirements: REQ-011, REQ-012. Files: tests/unit/catalog-11.test.ts, playwright.config.ts. Acceptance: lint passes, webServer loopback-only, verdict via sdd_submit_result.
+- [ ] TASK-113 — Active graph-aware SDD docs check; implementer, medium; REQ-012; no dependencies; checks docs/unit. Owns scripts/verify-sdd.mjs, scripts/sdd-validation.mjs, active-tasks.json, tasks.json, 03-plan.md, 04-verification.md, tests/unit/sdd/verify-sdd.test.ts, AGENTS.md, docs/BUILD_PLAN.md, docs/DEMO.md, docs/REVIEW_AND_CI.md, docs/OPENCODE_HANDOFF.md, docs/MUSE_CODE_HANDOFF.md, docs/PRODUCTION_MVP_ROADMAP.md, 00-request.md, and 06-release.md. Acceptance is the strict active/history contract above; all history is preserved. The owner has explicitly authorized Muse Code to continue the implementation sprint through the handoff; this does not change native SDD task or approval status. Do not route implementation to OpenCode. Local docs and focused unit checks are required; native plugin evidence is reported only if its tool records it.
+- [ ] TASK-103 — Workspace foundation; implementer, medium; depends on TASK-113. REQ-001, REQ-003, REQ-005, REQ-006, REQ-007, REQ-008, REQ-009, REQ-010, REQ-012, REQ-013, REQ-014, REQ-015. Exact workspace/catalog/session/app/export/tests/product-document paths in tasks.json/runtime. Checks docs, lint, typecheck, unit, browser, build.
+- [ ] TASK-104 — Domain/intake; implementer, medium; depends on TASK-113. REQ-001, REQ-004, REQ-005, REQ-006, REQ-015. Owns move-in-ready domain and its unit tests. Checks typecheck, unit.
+- [ ] TASK-105 — Room video capture/storage; frontend, high; depends on TASK-113. REQ-002, REQ-006, REQ-007, REQ-009, REQ-013. Owns video-capture.tsx/CSS, video-store.ts, video-utils.ts. Checks typecheck, unit, browser.
+- [ ] TASK-106 — Server SAM/Muse pipeline; backend, high; depends on TASK-113. REQ-003, REQ-004, REQ-006, REQ-010. Owns video route and enumerated server/video source/tests. Checks typecheck, unit, build.
+- [ ] TASK-107 — Integrated workflow/viewport implementation; frontend, high; depends on TASK-103–TASK-106. REQ-001, REQ-005, REQ-008, REQ-009, REQ-014, REQ-015. Owns flow/store/PDF exporter/page/styles. Checks docs, typecheck, unit, browser, build.
+- [ ] TASK-108 — Behavioral tests; tests, high; depends on TASK-107. REQ-001, REQ-002, REQ-003, REQ-004, REQ-005, REQ-006, REQ-007, REQ-008, REQ-009, REQ-010, REQ-011, REQ-012, REQ-013, REQ-014, REQ-015. Owns move-in-ready browser and PDF tests, including tests/e2e/mobile-capture-viewport.spec.ts. Checks unit, browser, build. Never weaken existing assertions.
+- [ ] TASK-109 — Documentation/visual QA only; documentation, medium; depends on TASK-108. REQ-009, REQ-011, REQ-012. Owns design-qa.md/enumerated screenshots only. Records P0/P1/P2, measurements and honest preview status; does not edit app code. Codex refreshes the Tailscale preview only under the owner's existing request. Checks browser, docs; Codex executes them.
+- [ ] TASK-110 — Real video evaluation record; documentation, high; depends on TASK-106 plus a qualifying rights-cleared owner clip and reviewable provider output. REQ-003, REQ-004, REQ-011. Owns video-clip-gate.md; check docs. Owner supplied two room clips on 2026-10-31, but one request timed out and the other was canceled before saving; the current set does not establish all gate cues or fit the authored single-clip limit. Held: no dispatch/pass without actual scored timestamp/identity/miss evidence; fixtures/history cannot satisfy it.
+- [ ] TASK-111 — Independent fresh spec review; spec-reviewer, low; no dependencies; REQ-004, REQ-005, REQ-006, REQ-009, REQ-010, REQ-011; check docs as mapping only. Read-only, owns no files, runs no shell. Review separate schemaVersion and catalogVersion identity, exact matching/invalidation, spec/safety and planned validation boundaries without claiming TASK-113 implementation.
+- [ ] TASK-112 — Independent fresh plan review; plan-reviewer, medium; depends on TASK-111. REQ-001 through REQ-015; check docs as mapping only. Read-only, owns no files. Inspect current validator and proposed active manifest/task; confirm strict rejection rules, history preservation, ordering/ownership and explicit planned-not-done state. Planning verdict cannot claim docs check passed or resolve the original executable-validator defect as implemented.
 
-Explicit requirement coverage: REQ-001 (TASK-069, TASK-071, TASK-072), REQ-002 (TASK-071, TASK-072), REQ-003 (TASK-072), REQ-004 (TASK-072), REQ-005 (TASK-072), REQ-006 (TASK-072), REQ-007 (TASK-070, TASK-072), REQ-008 (TASK-072), REQ-009 (TASK-070, TASK-072), REQ-010 (TASK-072), REQ-011 (TASK-069, TASK-071, TASK-072, TASK-073), REQ-012 (TASK-072, TASK-073), REQ-013 (TASK-070, TASK-072).
+Historical TASK-069–TASK-073 are not active TASK-103 prerequisites; its only prerequisite now is TASK-113. Medium difficulty covers connected validator/manifest/contracts; high covers codec, provider, async integration and cross-boundary testing risks rather than file count.
 
-## November 4 fit flags
+## Capture-fit acceptance and QA amendment route
 
-Fits: 069 (S), 070 (M), 071 (S), 072 (M), 073 (S). Does NOT fit (blocked, tracked as OPEN): provider-detail mapping (official wording, physical tests, sign-offs, accepted output format) — needs the missing confirmation details; catalog ships demo-labeled.
+Frontend TASK-107 implements Capture at 360×640 and 390×844 CSS pixels: gap from the last visible prompt/action to the top of safe-area navigation <=32 CSS px when content fits; otherwise only the main pane scrolls and actionable controls remain unobscured and reachable. Document scroll width <= viewport width at both sizes. Screens remain distinct and navigation never covers content. TASK-109 records these measurements only. If a P0/P1 code defect remains, Codex adds an explicitly owned frontend amendment, serializes shared edits, reruns affected checks, and obtains fresh QA before a pass. Documentation workers gain no implicit source-edit rights; never retry a passed task to bypass ownership.
 
-## Later phase (not scheduled)
+## Verification ownership and external gates
 
-HMIS packet formatting/acceptance, landlord fix lists/deadlines, multi-device/background-sync. Enter only with confirmed requirements + schedule via a future revision.
+Seven commands remain configured in .sdd/config.json/04-verification.md. Codex runs the configured docs, lint, typecheck, unit, browser, and build commands and records exact results. The live check requires separate user authorization and rights-cleared media; it proves connectivity only. Physical iOS/Android camera/codec tests, real clip quality, recipient acceptance, and native SDD evidence remain external gates. No false live/fixture equivalence, demo quality, review approval, or release claim.
+
+## Authorization boundary
+
+The owner has authorized Codex implementation in this thread. Implement the active tasks and run their configured local checks. Do not hand-edit plugin-owned state/evidence, advance native SDD approval/stage, publish/deploy, or make live provider calls without separate authorization. Report native workflow gaps without stopping authorized local code work.

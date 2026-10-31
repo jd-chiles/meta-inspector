@@ -31,10 +31,8 @@
  *    unreviewed worker record, never as a finding, verdict, or submission.
  *    Unresolved required checks list in their own section, separate from the
  *    worker deficiency list: a missing check is absent evidence, not a
- *    finding. Reserved catalog placeholders carry an explicit
- *    "unverified placeholder — no official wording" tag in provenance and
- *    beside the item so illustrative content can never read as a confirmed
- *    Form 1083 mapping.
+ *    finding. The item labels follow the project-owner-confirmed Form 1083
+ *    workflow; this app does not claim verbatim form wording or submission.
  */
 
 import type { Catalog } from "../domain/catalog";
@@ -61,32 +59,6 @@ export const EXPORT_ALLOWED_MIMES = [
 ] as const;
 
 export type ExportMode = AnalysisMode;
-
-/**
- * Verbatim tag for reserved catalog placeholders. The seven demo placeholders
- * (`demo-item-05` … `demo-item-11`) carry illustrative wording only: this tag
- * marks them wherever they appear in the export so they can never read as a
- * confirmed Form 1083 mapping (REQ-001, REQ-008, REQ-011).
- */
-export const EXPORT_PLACEHOLDER_TAG =
-  "unverified placeholder — no official wording";
-
-/** Demo-reserved placeholder IDs: `demo-item-<digits>` (currently 05–11). */
-const RESERVED_PLACEHOLDER_ITEM_PATTERN = /^demo-item-\d+$/;
-
-/**
- * True when a catalog item is a reserved placeholder rather than a confirmed
- * checklist entry. Only demo-mode catalogs can carry placeholders: a
- * confirmed catalog must never match, so a future confirmed item reusing a
- * numeric suffix cannot inherit the tag.
- */
-export function isReservedPlaceholderItem(
-  catalog: Catalog,
-  itemId: string,
-): boolean {
-  if (catalog.mode !== "demo") return false;
-  return RESERVED_PLACEHOLDER_ITEM_PATTERN.test(itemId);
-}
 
 export interface ExportMediaInput {
   bytes: Uint8Array;
@@ -177,8 +149,6 @@ export interface ExportItemSnapshot {
    * record, never as a finding or verdict.
    */
   deficiency: ExportDeficiencySnapshot | null;
-  /** True for reserved catalog placeholders (no official wording). */
-  isPlaceholder: boolean;
 }
 
 export interface ExportUnresolvedEntry {
@@ -378,10 +348,6 @@ export function buildExportSnapshot(input: BuildExportInput): ExportSnapshot {
       (disposition === "accepted" || disposition === "accepted-edited") &&
       unresolvedChecks.length === 0;
 
-    // Reserved placeholders are illustrative only: tag them so the export
-    // can never present them as confirmed Form 1083 entries (REQ-001).
-    const isPlaceholder = isReservedPlaceholderItem(catalog, catalogItem.id);
-
     // Worker-authored deficiency intent (never model output). Copied by value
     // so later worker edits cannot change built content; exported for
     // unresolved items too, like manual-check notes, and always labeled as
@@ -497,15 +463,6 @@ export function buildExportSnapshot(input: BuildExportInput): ExportSnapshot {
       { label: "Analysis mode", value: analysisMode },
     ];
 
-    if (isPlaceholder) {
-      // Catalog provenance for the seven reserved placeholders: unverified
-      // illustrative content, no official wording, no mapping claim.
-      provenance.push({
-        label: "Form mapping",
-        value: EXPORT_PLACEHOLDER_TAG,
-      });
-    }
-
     const unresolvedReason = completed
       ? null
       : unresolvedReasonFor(
@@ -540,7 +497,6 @@ export function buildExportSnapshot(input: BuildExportInput): ExportSnapshot {
       manualChecks,
       provenance,
       deficiency,
-      isPlaceholder,
     };
   });
 
@@ -627,12 +583,12 @@ export function exportFilename(sessionId: string, generatedAt: string): string {
 
 const EXPORT_CSS = [
   ":root{color-scheme:light}",
-  "body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;line-height:1.6;margin:0;color:#1a1a1a;background:#fff;overflow-wrap:break-word}",
+  "body{font-family:'Public Sans',system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;line-height:1.6;margin:0;color:#1c2530;background:#fff;overflow-wrap:break-word}",
   ".export-page{width:100%;max-width:56rem;margin:0 auto;padding:1rem}",
   ".export-banner{margin:0 0 1rem;padding:.625rem .875rem;font-weight:700;color:#3f2d01;background:#fef3c7;border:.125rem solid #3f2d01;border-radius:.375rem}",
   ".export-print-banner{display:none}",
   "img{max-width:100%;height:auto}",
-  ".export-card{border:1px solid #8a8a8a;border-radius:.375rem;padding:.75rem 1rem;margin:0 0 1rem;display:grid;gap:.5rem;max-width:100%}",
+  ".export-card{border:1px solid #c3cede;border-radius:.625rem;padding:.75rem 1rem;margin:0 0 1rem;display:grid;gap:.5rem;max-width:100%}",
   ".export-item{break-inside:avoid}",
   ".export-section{break-inside:avoid}",
   ".export-meta{margin:0;font-size:.9rem}",
@@ -700,9 +656,6 @@ export function renderExportHtml(snapshot: ExportSnapshot): string {
       const statusLine = item.completed
         ? `Status: reviewed (${esc(item.disposition ?? "unreviewed")}) — completed.`
         : `Status: ${esc(item.status ?? "unknown")} (${esc(item.disposition ?? "unreviewed")}) — unresolved: ${esc(item.unresolvedReason ?? "unresolved")}.`;
-      const placeholderTag = item.isPlaceholder
-        ? `<p class="export-meta">Form mapping: ${esc(EXPORT_PLACEHOLDER_TAG)}.</p>`
-        : "";
       const photo = item.photoDataUrl && item.photoDataUrl.startsWith("data:image/")
       ? `<img src="${esc(item.photoDataUrl)}" alt="Normalized photo for ${esc(item.label ?? item.itemId ?? "unknown-item")}" />`
       : `<p class="export-meta">${esc(item.photoOmittedReason ?? "No photo available.")}</p>`;
@@ -766,7 +719,6 @@ export function renderExportHtml(snapshot: ExportSnapshot): string {
         `<p class="export-banner">${banner}</p>` +
         `<h2>${esc(item.label ?? item.itemId ?? "unknown-item")}</h2>` +
         `<p class="export-meta" role="status">${statusLine}</p>` +
-        `${placeholderTag}` +
         `${photo}` +
         `${noteBlock}` +
         `${deficiencyBlock}` +

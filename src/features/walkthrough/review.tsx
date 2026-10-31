@@ -337,6 +337,8 @@ export default function WorkerReview(props: WorkerReviewProps) {
 
       {previewUrl && (
         <figure className="wt-figure">
+          {/* Local object URLs are transient device media; next/image cannot optimize them. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={previewUrl}
             alt={`Staged photo under review for ${itemLabel}`}
@@ -348,7 +350,7 @@ export default function WorkerReview(props: WorkerReviewProps) {
       {/* Provenance stays visible with the draft (REQ-006). */}
       <dl
         data-testid={`review-provenance-${item.itemId}`}
-        className="wt-card"
+        className="wt-panel"
       >
         <dt className="wt-label">Evidence provenance</dt>
         <dd className="wt-kv">
@@ -386,7 +388,7 @@ export default function WorkerReview(props: WorkerReviewProps) {
 
       {/* Empty state: no draft yet. */}
       {kind === "empty" && (
-        <div className="wt-card" role="note" data-testid={`review-empty-${item.itemId}`}>
+        <div className="wt-panel" role="note" data-testid={`review-empty-${item.itemId}`}>
           <p className="wt-statusline">
             No draft yet for this item. Capture a photo and run analysis in
             the capture step above; the draft, unknowns, and checks will
@@ -398,11 +400,15 @@ export default function WorkerReview(props: WorkerReviewProps) {
       {/* Loading state: analysis inflight, review locked with recovery. */}
       {kind === "loading" && (
         <div
-          className="wt-card"
+          className="wt-panel"
           role="status"
           aria-busy="true"
           data-testid={`review-loading-${item.itemId}`}
         >
+          <div className="wt-skeleton" aria-hidden="true">
+            <span className="wt-skeleton-bar" />
+            <span className="wt-skeleton-bar wt-skeleton-bar--short" />
+          </div>
           <p className="wt-statusline">
             Analysis in progress — waiting for the draft. Review controls are
             locked until it arrives; the photo is kept.
@@ -450,13 +456,13 @@ export default function WorkerReview(props: WorkerReviewProps) {
 
       {/* Draft block: observation, evidence, unknowns stay together. */}
       {item.draft && (
-        <div className="wt-card" data-testid={`review-draft-${item.itemId}`}>
+        <div className="wt-panel" data-testid={`review-draft-${item.itemId}`}>
           <p className="wt-statusline">
             <strong>AI draft observation (unreviewed until you accept):</strong>
           </p>
-          <p className="wt-statusline" data-testid={`review-observation-${item.itemId}`}>
+          <blockquote className="wt-quote" data-testid={`review-observation-${item.itemId}`}>
             {item.draft.observation}
-          </p>
+          </blockquote>
           {item.draft.visibleEvidence.length > 0 && (
             <div>
               <p className="wt-statusline">
@@ -513,7 +519,7 @@ export default function WorkerReview(props: WorkerReviewProps) {
       )}
 
       {/* Required + suggested manual checks (REQ-005). */}
-      <div className="wt-card" data-testid={`review-checks-${item.itemId}`}>
+      <div className="wt-panel" data-testid={`review-checks-${item.itemId}`}>
         <p className="wt-statusline">
           <strong>Manual checks</strong> — every required check needs a worker
           outcome plus a note. “Not performed” stays unresolved.
@@ -628,7 +634,7 @@ export default function WorkerReview(props: WorkerReviewProps) {
       </div>
 
       {/* Worker-only finding (REQ-005). Never prefilled from the AI draft. */}
-      <div className="wt-card" data-testid={`review-deficiency-${item.itemId}`}>
+      <div className="wt-panel" data-testid={`review-deficiency-${item.itemId}`}>
         <p className="wt-statusline">
           <strong>Worker finding (optional).</strong> Recorded by you only —
           nothing here is filled in from the AI draft, and this is not an
@@ -803,7 +809,7 @@ export default function WorkerReview(props: WorkerReviewProps) {
 
       {/* Accept / edit / reject — only for an unreviewed draft. */}
       {kind === "awaiting-review" && (
-        <div className="wt-card" data-testid={`review-actions-${item.itemId}`}>
+        <div className="wt-panel" data-testid={`review-actions-${item.itemId}`}>
           <p className="wt-statusline">
             <strong>Decide on this draft.</strong> Accepting text records a
             worker note only — required checks above stay exactly as they are.
@@ -926,7 +932,7 @@ export default function WorkerReview(props: WorkerReviewProps) {
       {/* Reviewed state: decision recorded, change via reanalysis. */}
       {kind === "reviewed" && (
         <div
-          className="wt-card"
+          className="wt-panel"
           role="status"
           data-testid={`review-reviewed-${item.itemId}`}
         >
@@ -956,7 +962,7 @@ export default function WorkerReview(props: WorkerReviewProps) {
       {/* Rejected state: reason visible with recovery. */}
       {kind === "rejected" && (
         <div
-          className="wt-card"
+          className="wt-alert"
           role="alert"
           data-testid={`review-rejected-${item.itemId}`}
         >

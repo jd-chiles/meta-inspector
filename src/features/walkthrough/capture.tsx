@@ -161,15 +161,15 @@ export default function GuidedCapture(props: GuidedCaptureProps) {
     <section
       aria-labelledby={headingId}
       data-testid={`capture-${itemId}`}
-      className="wt-card"
+      className="wt-card wt-capture-card"
     >
-      <h4 id={headingId} className="wt-subhead">
+      <h4 id={headingId} className="wt-subhead wt-capture-title">
         Photo for: {itemLabel}
       </h4>
-      <p id={guidanceId} className="wt-note">
+      <p id={guidanceId} className="wt-note wt-capture-guidance">
         {captureGuidance}
       </p>
-      <p className="wt-statusline" data-testid={`capture-mode-${itemId}`}>
+      <p className="wt-statusline wt-capture-mode" data-testid={`capture-mode-${itemId}`}>
         Analysis mode: {analysisMode}
         {analysisMode === "fixture"
           ? " (mock output — not live inference)"
@@ -217,12 +217,12 @@ export default function GuidedCapture(props: GuidedCaptureProps) {
 
       {/* Empty state: pickers + camera fallback help. */}
       {!showPreview && !isAnalyzing && (
-        <div className="wt-card">
-          <p className="wt-note" role="note">
+        <div className="wt-panel wt-capture-empty-state">
+          <p className="wt-note wt-capture-instructions" role="note">
             No photo yet for this item. Take a photo or upload one (JPEG, PNG,
             or WebP, up to 8 MiB). Self-shot mock-unit photos only.
           </p>
-          <div className="wt-actions wt-no-print">
+          <div className="wt-actions wt-no-print wt-capture-actions">
             {cameraOffered && (
               <button
                 type="button"
@@ -285,6 +285,8 @@ export default function GuidedCapture(props: GuidedCaptureProps) {
       {/* Preview state: photo + retake/replace/remove. */}
       {showPreview && previewUrl && (
         <figure className="wt-figure">
+          {/* Local object URLs are transient device media; next/image cannot optimize them. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={previewUrl}
             alt={`Preview of the staged photo for ${itemLabel}`}
@@ -328,8 +330,12 @@ export default function GuidedCapture(props: GuidedCaptureProps) {
           aria-busy="true"
           id={statusId}
           data-testid={`capture-loading-${itemId}`}
-          className="wt-card"
+          className="wt-panel"
         >
+          <div className="wt-skeleton" aria-hidden="true">
+            <span className="wt-skeleton-bar" />
+            <span className="wt-skeleton-bar wt-skeleton-bar--short" />
+          </div>
           <p className="wt-statusline">
             Analyzing… waiting for the review draft. The photo is kept; you
             can cancel and the photo stays.

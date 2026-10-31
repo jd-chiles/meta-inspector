@@ -1,77 +1,25 @@
 {
   "schemaVersion": 1,
   "catalogId": "demo-habitability-walkthrough",
-  "version": "0.2.0-demo.1",
+  "version": "0.3.0-demo.3",
   "mode": "demo",
-  "demoNotice": "Demo checklist — not a verified Form 1083 mapping.",
+  "demoNotice": "Project owner confirms this workflow uses LAHSA Form 1083. This local app prepares a draft; it does not submit to HMIS.",
   "sourceConfirmation": {
-    "status": "unconfirmed",
-    "suppliedBy": null,
+    "status": "owner-attested",
+    "suppliedBy": "project owner",
     "verifiedBy": null,
     "verifiedAt": null,
-    "notes": "Illustrative demo catalog. Public-only source: LAHSA FY22-23 Form 1083 (footer 12-19-22, lahsa.org/item.ashx?id=6886, accessed 2026-10-28); selection docs/ITEM_SELECTION.md #4, #5, #8, #11a mapped to demo-* IDs. Seven reserved placeholders demo-item-05..11 added 2026-10-28; official wording, physical tests, and sign-offs TBD. No provider has confirmed an operative Form 1083 copy, version, wording, or physical-test requirements. Missing confirmation never promotes a demo item (see docs/integration/FORM_1083_MAPPING.md §1.2)."
+    "notes": "The project owner confirmed that LAHSA Habitability Standards Inspection Form 1083 is the form used and submitted in this workflow. These eleven area labels follow the project owner's Form 1083 model. The app prepares a local draft and has no HMIS submission connection; exact form wording and provider acceptance of this app's export are not asserted."
   },
   "items": [
     {
-      "id": "demo-interior-air",
-      "label": "Interior air — window / fan / A/C (illustrative)",
-      "captureGuidance": "Photograph the window, fan, or A/C unit in place, whole fixture visible, no people or identifying views.",
-      "manualChecks": [
-        {
-          "id": "demo-interior-air-mc1",
-          "instruction": "Operate the window / switch the fan or A/C on and confirm airflow or function by feel or sound. A photograph cannot establish airflow or that the unit runs.",
-          "requiresPhysicalTest": true,
-          "photoCannotEstablish": true
-        }
-      ]
-    },
-    {
-      "id": "demo-water-supply",
-      "label": "Water supply — faucets and flow (illustrative)",
-      "captureGuidance": "Stand back 1–2 meters; photograph the faucet/basin in one frame, no people or identifying items.",
-      "manualChecks": [
-        {
-          "id": "demo-water-supply-mc1",
-          "instruction": "Run the taps, confirm hot water and clear steady flow and drainage. A photograph cannot establish water flow, temperature, or drainage.",
-          "requiresPhysicalTest": true,
-          "photoCannotEstablish": true
-        }
-      ]
-    },
-    {
-      "id": "demo-lighting-electric",
-      "label": "Lighting and electricity (illustrative)",
-      "captureGuidance": "Photograph the room's light source(s) and outlet(s) with lights on, fixtures only, no people.",
-      "manualChecks": [
-        {
-          "id": "demo-lighting-electric-mc1",
-          "instruction": "Operate switches/lights and confirm outlets power a test lamp. A photograph cannot establish that lights or outlets work.",
-          "requiresPhysicalTest": true,
-          "photoCannotEstablish": true
-        }
-      ]
-    },
-    {
-      "id": "demo-smoke-co",
-      "label": "Smoke + CO detectors (illustrative)",
-      "captureGuidance": "Photograph each detector unit in place from directly below; do not touch or remove the unit for the photo.",
-      "manualChecks": [
-        {
-          "id": "demo-smoke-co-mc1",
-          "instruction": "Press the test button on each unit and confirm the alarm sounds. A photograph cannot establish that an alarm works.",
-          "requiresPhysicalTest": true,
-          "photoCannotEstablish": true
-        }
-      ]
-    },
-    {
       "id": "demo-item-05",
-      "label": "Reserved placeholder 05 — official wording TBD (illustrative)",
-      "captureGuidance": "Photograph the relevant fixture or area in place, whole subject visible, no people or identifying views. Official Form 1083 wording TBD — this placeholder carries no verified mapping.",
+      "label": "Structure and materials",
+      "captureGuidance": "Photograph the relevant structure or building materials in context. Keep the area visible and exclude people, documents, and identifying details.",
       "manualChecks": [
         {
           "id": "demo-item-05-mc1",
-          "instruction": "Perform the in-person check for this area per worker procedure and confirm by direct observation. A photograph cannot establish the physical condition. Official requirement TBD.",
+          "instruction": "Inspect whether the building feels safe and structurally sound, as if it is not going to fall down. Record what you observed and any area you could not assess; a photo alone cannot establish structural condition.",
           "requiresPhysicalTest": true,
           "photoCannotEstablish": true
         }
@@ -79,12 +27,12 @@
     },
     {
       "id": "demo-item-06",
-      "label": "Reserved placeholder 06 — official wording TBD (illustrative)",
-      "captureGuidance": "Photograph the relevant fixture or area in place, whole subject visible, no people or identifying views. Official Form 1083 wording TBD — this placeholder carries no verified mapping.",
+      "label": "Access",
+      "captureGuidance": "Photograph the entry and any other available exit route in context. Exclude people and identifying details.",
       "manualChecks": [
         {
           "id": "demo-item-06-mc1",
-          "instruction": "Perform the in-person check for this area per worker procedure and confirm by direct observation. A photograph cannot establish the physical condition. Official requirement TBD.",
+          "instruction": "Check that residents can access the housing without entering another person's private property and that the structure provides a usable fire-escape option other than the front door. A photo cannot establish that a route is usable.",
           "requiresPhysicalTest": true,
           "photoCannotEstablish": true
         }
@@ -92,12 +40,38 @@
     },
     {
       "id": "demo-item-07",
-      "label": "Reserved placeholder 07 — official wording TBD (illustrative)",
-      "captureGuidance": "Photograph the relevant fixture or area in place, whole subject visible, no people or identifying views. Official Form 1083 wording TBD — this placeholder carries no verified mapping.",
+      "label": "Space and security",
+      "captureGuidance": "Photograph the available sleeping space and relevant door hardware without showing people or personal belongings.",
       "manualChecks": [
         {
           "id": "demo-item-07-mc1",
-          "instruction": "Perform the in-person check for this area per worker procedure and confirm by direct observation. A photograph cannot establish the physical condition. Official requirement TBD.",
+          "instruction": "Confirm adequate space and security for each resident and their belongings, an acceptable place to sleep, and doors that lock. Record any limitation; a photo cannot confirm that a lock works.",
+          "requiresPhysicalTest": true,
+          "photoCannotEstablish": true
+        }
+      ]
+    },
+    {
+      "id": "demo-interior-air",
+      "label": "Interior air quality / ventilation",
+      "captureGuidance": "Photograph the relevant window, fan, or ventilation fixture in place. Exclude people and identifying details.",
+      "manualChecks": [
+        {
+          "id": "demo-interior-air-mc1",
+          "instruction": "Check that every room or space has natural or mechanical ventilation. Operate the available fan or air conditioning to confirm it works; a photo alone cannot establish airflow.",
+          "requiresPhysicalTest": true,
+          "photoCannotEstablish": true
+        }
+      ]
+    },
+    {
+      "id": "demo-water-supply",
+      "label": "Water supply",
+      "captureGuidance": "Photograph the relevant faucet, basin, or water fixture in context. Exclude people and identifying details.",
+      "manualChecks": [
+        {
+          "id": "demo-water-supply-mc1",
+          "instruction": "Check that the supply is free from contamination. Operate all faucets and confirm working, hot, clear water; a photo cannot establish flow, clarity, or temperature.",
           "requiresPhysicalTest": true,
           "photoCannotEstablish": true
         }
@@ -105,12 +79,12 @@
     },
     {
       "id": "demo-item-08",
-      "label": "Reserved placeholder 08 — official wording TBD (illustrative)",
-      "captureGuidance": "Photograph the relevant fixture or area in place, whole subject visible, no people or identifying views. Official Form 1083 wording TBD — this placeholder carries no verified mapping.",
+      "label": "Sanitary facilities",
+      "captureGuidance": "Photograph relevant sanitary facilities without including people, personal items, or identifying details.",
       "manualChecks": [
         {
           "id": "demo-item-08-mc1",
-          "instruction": "Perform the in-person check for this area per worker procedure and confirm by direct observation. A photograph cannot establish the physical condition. Official requirement TBD.",
+          "instruction": "Check that sanitary facilities are sufficient, in proper operating condition, usable in privacy, and adequate for personal cleanliness. Include shared-space facilities; a photo cannot establish function or privacy.",
           "requiresPhysicalTest": true,
           "photoCannotEstablish": true
         }
@@ -118,12 +92,25 @@
     },
     {
       "id": "demo-item-09",
-      "label": "Reserved placeholder 09 — official wording TBD (illustrative)",
-      "captureGuidance": "Photograph the relevant fixture or area in place, whole subject visible, no people or identifying views. Official Form 1083 wording TBD — this placeholder carries no verified mapping.",
+      "label": "Thermal environment",
+      "captureGuidance": "Photograph the relevant heating or cooling equipment in place. Exclude people and identifying details.",
       "manualChecks": [
         {
           "id": "demo-item-09-mc1",
-          "instruction": "Perform the in-person check for this area per worker procedure and confirm by direct observation. A photograph cannot establish the physical condition. Official requirement TBD.",
+          "instruction": "Check that adequate heating or cooling facilities are in proper operating condition and operate the available equipment to confirm it works. A photo cannot establish operation.",
+          "requiresPhysicalTest": true,
+          "photoCannotEstablish": true
+        }
+      ]
+    },
+    {
+      "id": "demo-lighting-electric",
+      "label": "Lighting and electricity",
+      "captureGuidance": "Photograph relevant lighting and outlets in context. Do not touch damaged equipment; exclude people and identifying details.",
+      "manualChecks": [
+        {
+          "id": "demo-lighting-electric-mc1",
+          "instruction": "Check that natural or artificial light supports normal indoor activities and health and safety, and that enough safe outlets are available for essential appliances. Do not test damaged equipment; a photo cannot confirm operation or safety.",
           "requiresPhysicalTest": true,
           "photoCannotEstablish": true
         }
@@ -131,12 +118,12 @@
     },
     {
       "id": "demo-item-10",
-      "label": "Reserved placeholder 10 — official wording TBD (illustrative)",
-      "captureGuidance": "Photograph the relevant fixture or area in place, whole subject visible, no people or identifying views. Official Form 1083 wording TBD — this placeholder carries no verified mapping.",
+      "label": "Food preparation and refuse disposal",
+      "captureGuidance": "Photograph relevant food-preparation and refuse-disposal areas in context. Exclude people and identifying details.",
       "manualChecks": [
         {
           "id": "demo-item-10-mc1",
-          "instruction": "Perform the in-person check for this area per worker procedure and confirm by direct observation. A photograph cannot establish the physical condition. Official requirement TBD.",
+          "instruction": "Check that food-preparation areas have suitable space and equipment to store, prepare, and serve food sanitarily. Inspect shared space and refuse disposal; a photo cannot establish usability.",
           "requiresPhysicalTest": true,
           "photoCannotEstablish": true
         }
@@ -144,12 +131,25 @@
     },
     {
       "id": "demo-item-11",
-      "label": "Reserved placeholder 11 — official wording TBD (illustrative)",
-      "captureGuidance": "Photograph the relevant fixture or area in place, whole subject visible, no people or identifying views. Official Form 1083 wording TBD — this placeholder carries no verified mapping.",
+      "label": "Sanitary condition",
+      "captureGuidance": "Photograph the relevant area as found. Avoid people, documents, and personal details.",
       "manualChecks": [
         {
           "id": "demo-item-11-mc1",
-          "instruction": "Perform the in-person check for this area per worker procedure and confirm by direct observation. A photograph cannot establish the physical condition. Official requirement TBD.",
+          "instruction": "Assess whether the housing and its equipment are maintained in sanitary condition. Record areas you could not assess; a photo cannot establish the condition of the whole unit.",
+          "requiresPhysicalTest": true,
+          "photoCannotEstablish": true
+        }
+      ]
+    },
+    {
+      "id": "demo-smoke-co",
+      "label": "Fire safety",
+      "captureGuidance": "Capture smoke and carbon monoxide detectors on each occupied unit level and smoke detectors in accessible public or common areas. Do not remove or handle equipment for the photo.",
+      "manualChecks": [
+        {
+          "id": "demo-smoke-co-mc1",
+          "instruction": "Form 1083 section 11: check 11a working smoke/CO detectors on each occupied unit level and bedroom-adjacent hallway placement if practicable, plus any hearing-impaired alarm provision; check 11b at least one smoke detector in every public/common area. No health details; mark unknown if unassessed.",
           "requiresPhysicalTest": true,
           "photoCannotEstablish": true
         }

@@ -93,7 +93,7 @@ const NOW = "2026-10-27T12:00:00.000Z";
 
 const CATALOG_INPUT = {
   catalogId: "demo-habitability-walkthrough",
-  catalogVersion: "0.2.0-demo.1",
+  catalogVersion: "0.3.0-demo.3",
   itemIds: ["demo-water-supply", "demo-interior-air"],
 };
 
@@ -270,7 +270,7 @@ function demoCatalog(): Catalog {
 const VALID_FIELDS = {
   sessionId: "session-1",
   itemId: "demo-water-supply",
-  catalogVersion: "0.2.0-demo.1",
+  catalogVersion: "0.3.0-demo.3",
   analysisId: "analysis-1",
 };
 
@@ -405,7 +405,7 @@ describe("delayed fixture responses never overwrite newer evidence", () => {
         attempt + 99,
         "media-1",
         HASH_A,
-        { sessionId: "session-1", catalogVersion: "0.2.0-demo.1" },
+        { sessionId: "session-1", catalogVersion: "0.3.0-demo.3" },
       ),
       NOW,
     );
@@ -420,7 +420,7 @@ describe("delayed fixture responses never overwrite newer evidence", () => {
         attempt,
         "media-1",
         HASH_A,
-        { sessionId: "intruder-session", catalogVersion: "0.2.0-demo.1" },
+        { sessionId: "intruder-session", catalogVersion: "0.3.0-demo.3" },
       ),
       NOW,
     );
@@ -439,7 +439,7 @@ describe("delayed fixture responses never overwrite newer evidence", () => {
         analysisId: "analysis-1",
         sessionId: "session-1",
         itemId: "demo-interior-air",
-        catalogVersion: "0.2.0-demo.1",
+        catalogVersion: "0.3.0-demo.3",
         mediaId: "media-1",
         mediaHash: HASH_A,
         model: "muse-spark-1.3",
@@ -995,7 +995,7 @@ describe("review and manual checks stay honest", () => {
         attempt,
         "media-1",
         HASH_A,
-        { sessionId: "session-1", catalogVersion: "0.2.0-demo.1" },
+        { sessionId: "session-1", catalogVersion: "0.3.0-demo.3" },
       ),
       NOW,
     );
@@ -1034,7 +1034,7 @@ describe("review and manual checks stay honest", () => {
         attempt,
         "media-1",
         HASH_A,
-        { sessionId: "session-9", catalogVersion: "0.2.0-demo.1" },
+        { sessionId: "session-9", catalogVersion: "0.3.0-demo.3" },
       ),
       NOW,
     );
@@ -1194,7 +1194,7 @@ describe("review and manual checks stay honest", () => {
         HASH_A,
         {
           sessionId: "session-evil",
-          catalogVersion: "0.2.0-demo.1",
+          catalogVersion: "0.3.0-demo.3",
           draft: {
             observation: 'Sink looks ok <script>alert("xss")</script>.',
             visibleEvidence: ['<img src=x onerror=alert(1)>'],
@@ -1307,17 +1307,17 @@ describe("catalog and fixture honesty", () => {
     expect(canClaimFormMapping(catalog)).toBe(false);
     expect(catalog.items.length).toBe(11);
     expect(catalog.items.map((item) => item.id)).toEqual([
-      "demo-interior-air",
-      "demo-water-supply",
-      "demo-lighting-electric",
-      "demo-smoke-co",
       "demo-item-05",
       "demo-item-06",
       "demo-item-07",
+      "demo-interior-air",
+      "demo-water-supply",
       "demo-item-08",
       "demo-item-09",
+      "demo-lighting-electric",
       "demo-item-10",
       "demo-item-11",
+      "demo-smoke-co",
     ]);
     expect(getCatalogItem(catalog, "demo-water-supply")).not.toBeNull();
 

@@ -57,7 +57,7 @@ function validEnvelope(overrides: Record<string, unknown> = {}): Record<string, 
     analysisId: "analysis-1",
     sessionId: "session-1",
     itemId: "demo-water-supply",
-    catalogVersion: "0.2.0-demo.1",
+    catalogVersion: "0.3.0-demo.3",
     mediaId: "media-1",
     mediaHash: HASH_A,
     model: "muse-spark-1.3",
@@ -75,7 +75,7 @@ function draftSession(): SessionState {
     "session-1",
     {
       catalogId: "demo-habitability-walkthrough",
-      catalogVersion: "0.2.0-demo.1",
+      catalogVersion: "0.3.0-demo.3",
       itemIds: ["demo-water-supply", "demo-interior-air"],
     },
     T0,
@@ -125,22 +125,22 @@ describe("versioned illustrative catalog (REQ-001)", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.items.length).toBe(11);
-    expect(result.value.version).toBe("0.2.0-demo.1");
+    expect(result.value.version).toBe("0.3.0-demo.3");
     expect(result.value.mode).toBe("demo");
     expect(result.value.demoNotice).toBe(DEMO_NOTICE);
     const ids = result.value.items.map((item) => item.id);
     expect(ids).toEqual([
-      "demo-interior-air",
-      "demo-water-supply",
-      "demo-lighting-electric",
-      "demo-smoke-co",
       "demo-item-05",
       "demo-item-06",
       "demo-item-07",
+      "demo-interior-air",
+      "demo-water-supply",
       "demo-item-08",
       "demo-item-09",
+      "demo-lighting-electric",
       "demo-item-10",
       "demo-item-11",
+      "demo-smoke-co",
     ]);
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of ids) {
@@ -159,6 +159,23 @@ describe("versioned illustrative catalog (REQ-001)", () => {
         `item ${item.id} must keep a physical test a photograph cannot establish`,
       ).toBe(true);
     }
+  });
+
+  it("keeps both Form 1083 section 11 fire-safety parts in the worker checklist", () => {
+    const fireSafety = assertValidCatalog(demoCatalogJson).items.find((item) => item.id === "demo-smoke-co");
+    const instruction = fireSafety?.manualChecks.map((check) => check.instruction).join(" ") ?? "";
+
+    expect(instruction).toMatch(/Form 1083 section 11/i);
+    expect(instruction).toMatch(/check 11a/i);
+    expect(instruction).toMatch(/check 11b/i);
+    expect(instruction).toMatch(/each occupied unit level/i);
+    expect(instruction).toMatch(/bedroom-adjacent hallway placement/i);
+    expect(instruction).toMatch(/hearing-impaired alarm provision/i);
+    expect(instruction).toMatch(/every public\/common area/i);
+    expect(instruction).toMatch(/at least one smoke detector in every public\/common area/i);
+    expect(instruction).toMatch(/no health details/i);
+    expect(instruction).toMatch(/mark unknown if unassessed/i);
+    expect(instruction.length).toBeLessThanOrEqual(300);
   });
 
   it("rejects an item with no photo-gap physical test", () => {
@@ -183,7 +200,7 @@ describe("versioned illustrative catalog (REQ-001)", () => {
   it("stays unconfirmed and cannot claim a Form 1083 mapping", () => {
     const catalog = assertValidCatalog(demoCatalogJson);
     expect(isDemoCatalog(catalog)).toBe(true);
-    expect(catalog.sourceConfirmation.status).toBe("unconfirmed");
+    expect(catalog.sourceConfirmation.status).toBe("owner-attested");
     expect(canClaimFormMapping(catalog)).toBe(false);
   });
 
@@ -382,7 +399,7 @@ describe("evidence reducer races and review integrity (REQ-005, REQ-006)", () =>
       "session-1",
       {
         catalogId: "demo-habitability-walkthrough",
-        catalogVersion: "0.2.0-demo.1",
+        catalogVersion: "0.3.0-demo.3",
         itemIds: ["demo-water-supply"],
       },
       T0,
@@ -424,7 +441,7 @@ describe("evidence reducer races and review integrity (REQ-005, REQ-006)", () =>
       "session-1",
       {
         catalogId: "demo-habitability-walkthrough",
-        catalogVersion: "0.2.0-demo.1",
+        catalogVersion: "0.3.0-demo.3",
         itemIds: ["demo-water-supply"],
       },
       T0,
@@ -578,7 +595,7 @@ describe("evidence reducer races and review integrity (REQ-005, REQ-006)", () =>
       "session-1",
       {
         catalogId: "demo-habitability-walkthrough",
-        catalogVersion: "0.2.0-demo.1",
+        catalogVersion: "0.3.0-demo.3",
         itemIds: ["demo-water-supply"],
       },
       T0,
@@ -642,7 +659,7 @@ describe("evidence reducer races and review integrity (REQ-005, REQ-006)", () =>
       "session-1",
       {
         catalogId: "demo-habitability-walkthrough",
-        catalogVersion: "0.2.0-demo.1",
+        catalogVersion: "0.3.0-demo.3",
         itemIds: ["demo-water-supply"],
       },
       T0,

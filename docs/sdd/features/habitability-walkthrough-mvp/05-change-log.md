@@ -32,3 +32,35 @@ Documentation-only update under TASK-034 (REQ-012) closing the stale-record bloc
 ## TASK-010 verification and readiness-gap record — October 27, 2026
 
 Documentation-only update under TASK-010 (REQ-003, REQ-011, REQ-012). Source snapshot: `0318bbea7a44c20df9fda285897eef71cafb2b54c05a94d5ec10d8f34` (SDD revision 67, stage `implementing`). Wrote `docs/evaluation/results.md` (all cells unmeasured, sample size zero, fixture-only inputs, live pending, demo-only form status); extended `docs/REVIEW_AND_CI.md` with exact configured commands, two observed `docs`-check entries, absence of app checks, hosted docs-only CI run `40432010484` as the only CI success, no live smoke, no independent reviews, setup names only, Not-ready readiness. Release stayed Not ready; form status illustrative demo.
+
+## 2026-10-29T21:38:41.564Z
+
+Re-declare the active-worktree task graph TASK-103–TASK-110 after the runtime registry was recreated empty; no historical evidence from /home/hermes/workspace/meta-inspect is imported and no code checks run while Codex audits are in flight.
+
+## 2026-10-29T23:46:45.562Z
+
+Refresh the stale TASK-103 acceptance contract from the updated authored requirements; make mobile viewport fit measurable in REQ-009, TASK-109, and verification; preserve prior evidence/history and re-declare current TASK-103–TASK-110 from the feature tasks.json. No app code checks or source edits are included.
+
+## 2026-10-30T00:02:22.224Z
+
+Reconcile the two open non-blocking independent-review findings and correct stale TASK-103 dependency wording in authored SDD documents. Preserve all prior evidence/history, reset review baselines, and re-register active tasks with TASK-103 dependencies=[] before fresh spec/plan reviews. No application-source changes or code checks.
+
+## 2026-10-30T00:14:21.275Z
+
+Repair documentation-only QA boundaries and serialized phase ownership; assign measured Capture-fit implementation to frontend TASK-107, preserve legacy evidence/history, and require fresh independent spec/plan reviews without app work, checks, or approval.
+
+## 2026-10-30T00:20:23.588Z
+
+Plan TASK-113 active graph-aware docs validator repair before TASK-103–106, preserve all historical records/evidence, keep implementation and docs checks unexecuted, and obtain fresh spec/plan reviews without approval.
+
+## 2026-10-30T00:22:55.069Z
+
+Finalize TASK-113 ordered docs gate and align TASK-103 description with its new prerequisite before fresh read-only reviews; no validator, manifest or application implementation and no checks/approval.
+
+## 2026-10-30T00:26:41.240Z
+
+Correct only TASK-112 acceptance: TASK-103 depends on TASK-113 and historical TASK-069–073 are not active prerequisites. Preserve history/evidence and unchanged plan/requirements; obtain fresh independent reviews without implementation, checks or approval.
+
+## 2026-10-30T00:29:23.596Z
+
+Repair REQ-006/design schemaVersion omission: name schema version and catalog version separately across four authored artifacts and TASK-111. Preserve TASK-113 ordering/history/evidence; no implementation, checks or approval; fresh independent spec then plan reviews required.

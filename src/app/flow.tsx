@@ -40,6 +40,7 @@ import {
   type ExportSnapshot,
 } from "../export/summary";
 import GuidedCapture from "../features/walkthrough/capture";
+import GuidePanel from "../features/walkthrough/guide";
 import {
   DeferredInstallPrompt,
   clearQueuedForSession,
@@ -89,6 +90,8 @@ interface FlowError {
   message: string;
 }
 
+type WorkspaceView = "overview" | "walkthrough" | "notes" | "packet" | "settings";
+
 function itemSummary(record: ItemRecord | null): string {
   if (!record || record.deleted) return "no photo yet";
   switch (record.status) {
@@ -109,21 +112,6 @@ function itemSummary(record: ItemRecord | null): string {
     default:
       return record.status;
   }
-}
-
-/** Selector-card presentation for one checklist item (status text kept verbatim). */
-function pickTone(record: ItemRecord | null): string {
-  if (!record || record.deleted || record.status === "empty")
-    return "wt-pick--empty";
-  if (record.status === "error" || record.status === "rejected")
-    return "wt-pick--attention";
-  if (
-    record.status === "reviewed" &&
-    (record.disposition === "accepted" ||
-      record.disposition === "accepted-edited")
-  )
-    return "wt-pick--done";
-  return "wt-pick--active";
 }
 
 function chipTone(record: ItemRecord | null): string {
@@ -206,6 +194,12 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
 
   const [snap, setSnap] = useState<SessionManagerSnapshot | null>(null);
   const [localErrors, setLocalErrors] = useState<Record<string, FlowError>>({});
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("overview");
+  const [selectedItemId, setSelectedItemId] = useState(
+    () => catalog?.items[0]?.id ?? "",
+  );
+  const [mobileReviewOpen, setMobileReviewOpen] = useState(false);
+  const [mobileGuideOpen, setMobileGuideOpen] = useState(false);
 
   // Offline-first PWA wiring (REQ-007, REQ-009, REQ-013): a pending-only
   // analysis queue, service-worker shell status, and an install affordance
@@ -675,7 +669,6 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
       analysisMode,
       generatedAt: state.updatedAt,
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, catalog, analysisMode, mediaVersion]);
 
   function handlePrint(): void {
@@ -718,22 +711,66 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
           return record && !record.deleted && record.mediaId !== null;
         }).length
       : 0;
-  const draftsDecided =
-    state && catalog
-      ? catalog.items.filter((entry) => {
-          const record = state.items[entry.id];
-          return (
-            record &&
-            !record.deleted &&
-            (record.disposition === "accepted" ||
-              record.disposition === "accepted-edited" ||
-              record.disposition === "rejected")
-          );
-        }).length
-      : 0;
-  const exportReady = exportSnapshot?.canClaimCompleted ?? false;
   const exportUnresolved = exportSnapshot?.unresolved.length ?? itemCount;
   const unresolvedNoun = exportUnresolved === 1 ? "item" : "items";
+  const completedCount = exportSnapshot?.completedCount ?? 0;
+  const activeItem =
+    catalog?.items.find((entry) => entry.id === selectedItemId) ??
+    catalog?.items[0] ?? {
+      id: "",
+      label: "",
+      captureGuidance: "",
+      manualChecks: [],
+    };
+  const activeItemIndex = Math.max(0, catalog?.items.findIndex((entry) => entry.id === activeItem.id) ?? 0);
+  const activeRecord = state?.items[activeItem.id] ?? null;
+  const performedCheckCount = activeRecord?.manualChecks.filter((check) => check.outcome === "performed").length ?? 0;
+
+  useEffect(() => {
+    const reviewAvailable = ["draft", "reviewed", "rejected", "error"].includes(activeRecord?.status ?? "");
+    setMobileReviewOpen(reviewAvailable);
+    setMobileGuideOpen(false);
+    if (reviewAvailable && window.matchMedia("(max-width: 48rem)").matches) {
+      window.requestAnimationFrame(() => {
+        document.getElementById("active-item-review")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  }, [activeItem.id, activeRecord?.status]);
+  const activeGuideStage =
+    activeRecord?.status === "error" || activeRecord?.status === "rejected"
+      ? "blocked"
+      : activeRecord?.status === "draft"
+        ? "analysis-ready"
+        : activeRecord?.status === "reviewed"
+          ? performedCheckCount >= activeItem.manualChecks.length
+            ? "complete"
+            : "worker-reviewed"
+          : activeRecord?.mediaId
+            ? "photo-saved"
+            : "start";
+
+  function guideCopy(): string {
+    if (activeRecord?.status === "analyzing") {
+      return "I’m checking the photo for visible details. This step cannot determine whether the area passes or fails.";
+    }
+    if (activeRecord?.status === "error") {
+      return "The photo review did not finish. The photo is still saved locally; retry the review or replace the photo.";
+    }
+    if (activeRecord?.status === "draft" || activeRecord?.status === "rejected") {
+      return "An AI observation is ready as an unreviewed draft. Read it, correct or reject it, and then complete the in-person check below.";
+    }
+    if (activeRecord?.status === "reviewed") {
+      const checks = activeRecord.manualChecks.filter((check) => check.outcome === "performed").length;
+      if (checks < activeItem.manualChecks.length) {
+        return "Your worker review is saved. Complete the required in-person check below before moving on.";
+      }
+      return "This area has a worker-reviewed note and recorded physical check. You can continue to the next area.";
+    }
+    if (activeRecord?.mediaId) {
+      return "The photo is saved. Finish the AI observation, review it in your own words, and record the in-person check.";
+    }
+    return "Let’s work through one Form 1083 area at a time. Start with a photo of the relevant feature, then review the observation and do the required in-person check.";
+  }
 
   // Pending-only offline queue depth for this session, and the install
   // affordance (prompt when captured, manual guidance otherwise).
@@ -772,469 +809,412 @@ export default function WalkthroughFlow(props: WalkthroughFlowProps) {
     );
   }
 
+
   return (
     <div className="wt">
-      <section aria-labelledby="flow-status-heading">
-        <h2 id="flow-status-heading" className="wt-section-title">
-          Session status
-        </h2>
-        {storageAlert ? (
-          <div role="alert" className="wt-alert" data-testid="flow-storage-error">
-            <p className="wt-statusline">
-              <strong>Storage problem:</strong> {storage.message}
-            </p>
-            <div className="wt-actions wt-no-print">
-              <button
-                type="button"
-                className="wt-btn"
-                onClick={() => void handleRetryLoad()}
-              >
-                Retry loading the session
+      <nav className="wt-workspace-nav" aria-label="Walkthrough sections">
+        {([
+          ["overview", "Overview", "Home"],
+          ["walkthrough", "Walkthrough", "Inspect"],
+          ["notes", "Case notes", "Notes"],
+          ["packet", "Correction packet", "Packet"],
+          ["settings", "Offline & settings", "Offline"],
+        ] as const).map(([view, label, mobileLabel]) => (
+          <button
+            key={view}
+            type="button"
+            className={"wt-nav-button" + (workspaceView === view ? " wt-nav-button--active" : "")}
+            aria-current={workspaceView === view ? "page" : undefined}
+            aria-label={label}
+            data-testid={"nav-" + view}
+            onClick={() => setWorkspaceView(view)}
+          >
+            <span className="wt-nav-full-label">{label}</span>
+            <span className="wt-nav-mobile-label">{mobileLabel}</span>
+          </button>
+        ))}
+      </nav>
+
+      {storageAlert && (
+        <div role="alert" className="wt-alert wt-storage-alert" data-testid="flow-storage-error">
+          <p className="wt-statusline"><strong>Local session needs attention.</strong> {storage.message}</p>
+          <div className="wt-actions wt-no-print">
+            {storage.kind !== "needs-reset" && (
+              <button type="button" className="wt-btn" onClick={() => void handleRetryLoad()}>
+                Retry loading
               </button>
-              <button
-                type="button"
-                className="wt-btn"
-                onClick={() => void handleResetStorage()}
-              >
-                Reset storage and start a fresh local session
-              </button>
-            </div>
+            )}
+            <button type="button" className="wt-btn wt-btn--primary" onClick={() => void handleResetStorage()}>
+              Reset local session
+            </button>
           </div>
-        ) : (
-          <p
-            role="status"
-            className="wt-statusline"
-            data-testid="flow-storage-status"
-          >
-            Status: {storage.message}
-          </p>
-        )}
-        {!ready && !storageAlert && (
-          <p role="status" className="wt-statusline">
-            Loading the checklist — capture, review, and export appear as soon
-            as the local session is ready.
-          </p>
-        )}
-      </section>
-
-      <section aria-labelledby="offline-heading" className="wt-section">
-        <h2 id="offline-heading" className="wt-section-title">
-          Offline and install
-        </h2>
-        <p
-          role="status"
-          className="wt-statusline"
-          data-testid="offline-status"
-        >
-          {describeOfflineState({ online, pendingCount })}
-        </p>
-        {queueNotice && (
-          <p
-            role="note"
-            className="wt-note"
-            data-testid="offline-queue-notice"
-          >
-            {queueNotice}
-          </p>
-        )}
-        <p role="status" className="wt-statusline" data-testid="sw-status">
-          {swMessage}
-        </p>
-        <div data-testid="pwa-install">
-          {installStandalone || installAccepted ? (
-            <p
-              role="note"
-              className="wt-note"
-              data-testid="pwa-install-installed"
-            >
-              Installed: this walkthrough runs from your home screen with
-              saved local progress. Analyses still need a connection and run
-              only when you retry them explicitly.
-            </p>
-          ) : installAffordance.mode === "prompt" ? (
-            <div className="wt-actions wt-no-print">
-              <button
-                type="button"
-                className="wt-btn"
-                data-testid="pwa-install-button"
-                onClick={() => void handleInstall()}
-              >
-                Install the walkthrough app
-              </button>
-            </div>
-          ) : (
-            <div data-testid="pwa-install-guidance">
-              <p role="note" className="wt-note">
-                Install this walkthrough for offline launch — or keep using
-                it in the browser. When the browser offers no install button,
-                follow these steps:
-              </p>
-              <ol className="wt-list">
-                {installSteps.map((step) => (
-                  <li key={step}>{step}</li>
-                ))}
-              </ol>
-            </div>
-          )}
         </div>
-      </section>
+      )}
 
-      {ready && state && (
-        <section aria-labelledby="flow-steps-heading" className="wt-section">
-          <h2 id="flow-steps-heading" className="wt-section-title">
-            Your progress: 1 Capture → 2 Review → 3 Export
-          </h2>
-          <ol className="wt-steps">
-            <li
-              className={`wt-step ${photosCaptured === itemCount && itemCount > 0 ? "wt-step--done" : "wt-step--current"}`}
+      {workspaceView === "overview" && (
+        <section className="wt-dashboard" aria-labelledby="overview-heading">
+          <div className="wt-dashboard-hero">
+            <div>
+              <p className="wt-eyebrow">LAHSA · Form 1083 walkthrough</p>
+              <h2 id="overview-heading">One area at a time</h2>
+              <p className="wt-lede">Capture evidence, review the photo observation, record each in-person check, then prepare a local draft packet.</p>
+            </div>
+            <button
+              type="button"
+              className="wt-btn wt-btn--primary wt-start-button"
+              data-testid="start-walkthrough"
+              disabled={!ready}
+              onClick={() => setWorkspaceView("walkthrough")}
             >
-              <span className="wt-step-num" aria-hidden="true">
-                1
-              </span>
+              {photosCaptured > 0 ? "Continue walkthrough" : "Start walkthrough"}
+            </button>
+          </div>
+
+          <div className="wt-progress-card">
+            <div className="wt-progress-heading">
               <div>
-                <p className="wt-step-name">
-                  <a href="#flow-checklist">Capture</a>
-                </p>
-                <p className="wt-step-detail" role="status">
-                  Step 1 of 3 — {photosCaptured} of {itemCount} photos captured
-                  {photosCaptured === itemCount && itemCount > 0
-                    ? " — complete."
-                    : "."}
-                </p>
+                <p className="wt-card-kicker">Local session progress</p>
+                <h3>{completedCount} of {itemCount} areas ready for the draft packet</h3>
               </div>
-            </li>
-            <li
-              className={`wt-step ${draftsDecided === itemCount && itemCount > 0 ? "wt-step--done" : "wt-step--current"}`}
-            >
-              <span className="wt-step-num" aria-hidden="true">
-                2
-              </span>
-              <div>
-                <p className="wt-step-name">
-                  <a href={`#item-${catalog.items[0].id}`}>Review</a>
-                </p>
-                <p className="wt-step-detail" role="status">
-                  Step 2 of 3 — {draftsDecided} of {itemCount} drafts decided
-                  {draftsDecided === itemCount && itemCount > 0
-                    ? " — complete."
-                    : "."}
-                </p>
+              <span className="wt-chip wt-chip--active">{photosCaptured} photos</span>
+            </div>
+            <progress aria-label="Completed Form 1083 areas" max={itemCount} value={completedCount} />
+            <p className="wt-note">Worker review and required physical checks must both be recorded for an area to count as complete.</p>
+          </div>
+
+          <div className="wt-overview-grid">
+            <section className="wt-area-board" aria-labelledby="areas-heading">
+              <div className="wt-section-heading-row">
+                <div>
+                  <p className="wt-card-kicker">Inspection areas</p>
+                  <h3 id="areas-heading">Form 1083 checklist</h3>
+                </div>
+                <button type="button" className="wt-text-button" onClick={() => setWorkspaceView("walkthrough")}>
+                  Open guided view
+                </button>
               </div>
-            </li>
-            <li
-              className={`wt-step ${exportReady ? "wt-step--done" : "wt-step--current"}`}
-            >
-              <span className="wt-step-num" aria-hidden="true">
-                3
-              </span>
-              <div>
-                <p className="wt-step-name">
-                  <a href="#export-summary">Export</a>
-                </p>
-                <p className="wt-step-detail" role="status">
-                  Step 3 of 3 —{" "}
-                  {exportReady
-                    ? "all items completed; export is ready."
-                    : `${exportUnresolved} ${unresolvedNoun} still unresolved; export stays a draft.`}
-                </p>
-              </div>
-            </li>
-          </ol>
+              <details className="wt-area-disclosure" data-testid="overview-area-disclosure">
+                <summary>
+                  <span>Show all {itemCount} inspection areas</span>
+                  <span className="wt-disclosure-meta">{completedCount} of {itemCount} complete</span>
+                </summary>
+                <ol className="wt-overview-list">
+                  {catalog.items.map((entry, index) => {
+                    const record = state?.items[entry.id] ?? null;
+                    const complete = exportSnapshot?.items.find((item) => item.itemId === entry.id)?.completed ?? false;
+                    return (
+                      <li key={entry.id} className="wt-overview-item">
+                        <button
+                          type="button"
+                          className="wt-overview-button"
+                          data-testid={"overview-item-" + entry.id}
+                          onClick={() => {
+                            setSelectedItemId(entry.id);
+                            setWorkspaceView("walkthrough");
+                          }}
+                        >
+                          <span className="wt-area-number">{String(index + 1).padStart(2, "0")}</span>
+                          <span className="wt-overview-copy">
+                            <strong>{entry.label}</strong>
+                            <span>{complete ? "Worker-reviewed and physical check recorded" : itemSummary(record)}</span>
+                          </span>
+                          <span className={"wt-area-state" + (complete ? " wt-area-state--done" : "")} aria-label={complete ? "Complete" : "Needs work"}>
+                            {complete ? "✓" : "›"}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </details>
+            </section>
+
+            <aside className="wt-next-card" aria-labelledby="next-up-heading">
+              <p className="wt-card-kicker">Next up</p>
+              <h3 id="next-up-heading">{catalog.items.find((entry) => !exportSnapshot?.items.find((item) => item.itemId === entry.id)?.completed)?.label ?? "Review your draft packet"}</h3>
+              <p className="wt-note">AI output stays an unreviewed observation. You decide what to keep and record the physical check yourself.</p>
+              <button type="button" className="wt-btn" onClick={() => {
+                const nextItem = catalog.items.find((entry) => !exportSnapshot?.items.find((item) => item.itemId === entry.id)?.completed);
+                if (nextItem) setSelectedItemId(nextItem.id);
+                setWorkspaceView(nextItem ? "walkthrough" : "packet");
+              }}>
+                Continue with next step
+              </button>
+            </aside>
+          </div>
         </section>
       )}
 
-      {ready && state && (
-        <nav aria-label="Checklist items" className="wt-section">
-          <h2 id="flow-checklist" className="wt-section-title">
-            Checklist
-          </h2>
-          <p className="wt-section-sub">
-            11 demo items. Each card shows what to photograph and its current
-            state — open an item to capture and review it below.
-          </p>
-          <ol className="wt-pick-grid">
-            {catalog.items.map((entry, index) => {
-              const record = state.items[entry.id] ?? null;
-              return (
-                <li key={entry.id} className={`wt-pick ${pickTone(record)}`}>
-                  <p className="wt-pick-label">
-                    Item {index + 1} of {itemCount}: {entry.label}
-                  </p>
-                  <p className="wt-pick-guidance">{entry.captureGuidance}</p>
-                  <div className="wt-pick-row">
-                    <span className={`wt-chip ${chipTone(record)}`}>
-                      {itemSummary(record)}
-                    </span>
-                    <a className="wt-btn" href={`#item-${entry.id}`}>Open item →</a>
-                  </div>
-                </li>
-              );
-            })}
-          </ol>
-        </nav>
-      )}
-
-      {ready &&
-        state &&
-        catalog.items.map((catalogItem, index) => {
-          const record: ItemRecord | null =
-            state.items[catalogItem.id] ?? null;
-          if (!record) {
-            return (
-              <article
-                key={catalogItem.id}
-                id={`item-${catalogItem.id}`}
-                className="wt-card wt-item wt-section"
-              >
-                <h2 className="wt-item-title">{catalogItem.label}</h2>
-                <p role="note" className="wt-note">
-                  This catalog entry has no session record yet. Reload the
-                  session; if this persists, reset storage to start a fresh
-                  local session.
-                </p>
-              </article>
-            );
-          }
-          const requiredCheckIds = catalogItem.manualChecks.map(
-            (check) => check.id,
-          );
-          const previewUrl = manager.previewUrlFor(record.mediaId);
-          // The persisted item error is surfaced exactly once, by
-          // WorkerReview (review-error-*) with its reanalyze affordance.
-          // The reducer always stamps the error together with status "error",
-          // so forwarding it to GuidedCapture as well would render a second
-          // identical alert (capture-error-*) for the same outcome. The
-          // capture panel therefore receives no item error and only announces
-          // its own client-side validation (e.g. empty file) via
-          // capture-error-*.
-          const captureError = null;
-          const flowError = localErrors[catalogItem.id] ?? null;
-          return (
-            <article
-              key={catalogItem.id}
-              id={`item-${catalogItem.id}`}
-              aria-label={catalogItem.label}
-              className="wt-card wt-item wt-section"
-            >
-              <div className="wt-item-head">
-                <p className="wt-item-kicker">
-                  Item {index + 1} of {itemCount}
-                </p>
-                <h2 className="wt-item-title">{catalogItem.label}</h2>
-                <span className={`wt-chip ${chipTone(record)}`}>
-                  {itemSummary(record)}
-                </span>
-              </div>
-              {flowError && !record.error && (
-                <p
-                  role="alert"
-                  className="wt-statusline"
-                  data-testid={`flow-error-${catalogItem.id}`}
-                >
-                  <strong>Error [{flowError.code}]:</strong>{" "}
-                  {flowError.message}
-                </p>
-              )}
-              {isItemQueued(offlineQueue, state.sessionId, catalogItem.id) && (
-                <p
-                  role="status"
-                  className="wt-statusline"
-                  data-testid={`offline-pending-${catalogItem.id}`}
-                >
-                  {describePendingItem(catalogItem.label)}
-                </p>
-              )}
-              <div className="wt-item-sub">
-                <h3 className="wt-subhead">Step 1 — Photo</h3>
-                <GuidedCapture
-                  itemId={catalogItem.id}
-                  itemLabel={catalogItem.label}
-                  captureGuidance={catalogItem.captureGuidance}
-                  status={record.status}
-                  previewUrl={previewUrl}
-                  error={captureError}
-                  analysisMode={analysisMode}
-                  onSelectFile={(file) =>
-                    void handleSelectFile(catalogItem.id, file)
-                  }
-                  onCancelAnalysis={() =>
-                    void handleCancel(catalogItem.id)
-                  }
-                  onRemovePhoto={() => void handleRemove(catalogItem.id)}
-                  disabled={!ready}
-                />
-              </div>
-              <div className="wt-item-sub">
-                <h3 className="wt-subhead">Step 2 — Worker review</h3>
-                <WorkerReview
-                  item={record}
-                  catalogItem={catalogItem}
-                  sessionId={state.sessionId}
-                  catalogVersion={state.catalogVersion}
-                  previewUrl={previewUrl}
-                  analysisMode={analysisMode}
-                  onAccept={() => void handleAccept(catalogItem.id)}
-                  onAcceptEdited={(revisedText) =>
-                    void handleAcceptEdited(catalogItem.id, revisedText)
-                  }
-                  onReject={(reason) =>
-                    void handleReject(catalogItem.id, reason)
-                  }
-                  onRecordManualCheck={(checkId, outcome, note) =>
-                    void handleRecordManualCheck(
-                      catalogItem.id,
-                      requiredCheckIds,
-                      checkId,
-                      outcome,
-                      note,
-                    )
-                  }
-                  onRecordDeficiency={(input) =>
-                    void handleRecordDeficiency(catalogItem.id, input)
-                  }
-                  onClearDeficiency={() =>
-                    void handleClearDeficiency(catalogItem.id)
-                  }
-                  onReanalyze={() => void handleReanalyze(catalogItem.id)}
-                  onCancelAnalysis={() => void handleCancel(catalogItem.id)}
-                  disabled={!ready}
-                />
-              </div>
-            </article>
-          );
-        })}
-
-      <div className="wt-section" data-testid="case-notes-section">
-        <h2 className="wt-section-title">Session case notes (optional draft)</h2>
-        <p className="wt-note" role="note">
-          Worker draft notes for this session only — typed by you, never
-          filled in from AI output, and never an inspection outcome.
-        </p>
-        {ready && state && state.caseNotes && !caseNotesEditing && (
-          <div data-testid="case-notes-display">
-            <p className="wt-statusline">{state.caseNotes}</p>
-          </div>
-        )}
-        {ready && state && !state.caseNotes && !caseNotesEditing && (
-          <p
-            className="wt-note"
-            role="note"
-            data-testid="case-notes-empty"
-          >
-            No case notes recorded yet. Add a short worker draft if needed.
-          </p>
-        )}
-        {(!ready || !state) && (
-          <p className="wt-note" role="status">
-            Case notes load with the local session.
-          </p>
-        )}
-        {caseNotesNotice && (
-          <p
-            className="wt-statusline"
-            role="status"
-            data-testid="case-notes-notice"
-          >
-            {caseNotesNotice}
-          </p>
-        )}
-        {ready && state && caseNotesEditing && (
-          <div className="wt-field">
-            <label htmlFor="case-notes-input" className="wt-label">
-              Case notes (your own words, up to 2000 characters):
-            </label>
-            <textarea
-              id="case-notes-input"
-              data-testid="case-notes-input"
-              value={caseNotesDraft}
-              onChange={(event) => setCaseNotesDraft(event.target.value)}
-              rows={4}
-              maxLength={2000}
-              className="wt-textarea"
-              placeholder="e.g. Occupant present; will recheck kitchen tap."
-            />
-            {caseNotesError && (
-              <p
-                className="wt-statusline"
-                role="alert"
-                data-testid="case-notes-error"
-              >
-                {caseNotesError}
-              </p>
-            )}
-            <div className="wt-actions wt-no-print">
-              <button
-                type="button"
-                className="wt-btn wt-btn--primary"
-                data-testid="case-notes-save"
-                onClick={() => void handleSaveCaseNotes()}
-              >
-                Save case notes
-              </button>
-              <button
-                type="button"
-                className="wt-btn"
-                data-testid="case-notes-cancel"
-                onClick={() => {
-                  setCaseNotesEditing(false);
-                  setCaseNotesError(null);
-                }}
-              >
-                Cancel
-              </button>
+      {workspaceView === "walkthrough" && (
+        <section className="wt-guided-layout" aria-labelledby="active-area-heading">
+          <aside className="wt-area-sidebar" aria-label="Form 1083 areas">
+            <div className="wt-sidebar-heading">
+              <p className="wt-card-kicker">Walkthrough</p>
+              <h2>{completedCount}/{itemCount} complete</h2>
             </div>
-          </div>
-        )}
-        {ready && state && !caseNotesEditing && (
-          <div className="wt-field">
-            {caseNotesError && (
-              <p
-                className="wt-statusline"
-                role="alert"
-                data-testid="case-notes-error"
+            <ol className="wt-sidebar-list">
+              {catalog.items.map((entry, index) => {
+                const record = state?.items[entry.id] ?? null;
+                const complete = exportSnapshot?.items.find((item) => item.itemId === entry.id)?.completed ?? false;
+                return (
+                  <li key={entry.id}>
+                    <button
+                      type="button"
+                      className={"wt-sidebar-item" + (entry.id === activeItem.id ? " wt-sidebar-item--active" : "")}
+                      aria-current={entry.id === activeItem.id ? "step" : undefined}
+                      data-testid={"area-nav-" + entry.id}
+                      data-item-id={entry.id}
+                      onClick={() => {
+                        setSelectedItemId(entry.id);
+                      }}
+                    >
+                      <span className="wt-area-number">{String(index + 1).padStart(2, "0")}</span>
+                      <span className="wt-sidebar-copy">{entry.label}</span>
+                      <span className={"wt-sidebar-state" + (complete ? " wt-sidebar-state--done" : "")}>
+                        {complete ? "✓" : record?.mediaId ? "•" : "—"}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          </aside>
+
+          <div className="wt-guided-content">
+            <div className="wt-mobile-area-picker">
+              <span className="wt-mobile-area-count">Area {activeItemIndex + 1} of {itemCount}</span>
+              <label className="sr-only" htmlFor="mobile-area-select">Choose a Form 1083 area</label>
+              <select
+                id="mobile-area-select"
+                data-testid="mobile-area-select"
+                value={activeItem.id}
+                onChange={(event) => setSelectedItemId(event.target.value)}
               >
-                {caseNotesError}
-              </p>
-            )}
-            <div className="wt-actions wt-no-print">
-              <button
-                type="button"
-                className="wt-btn"
-                data-testid="case-notes-edit"
-                onClick={() => {
-                  setCaseNotesError(null);
-                  setCaseNotesNotice(null);
-                  setCaseNotesDraft(state.caseNotes ?? "");
-                  setCaseNotesEditing(true);
-                }}
-              >
-                {state.caseNotes ? "Edit case notes" : "Add case notes"}
-              </button>
-              {state.caseNotes && (
+                {catalog.items.map((entry) => (
+                  <option key={entry.id} value={entry.id}>{entry.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="wt-area-header">
+              <div>
+                <p className="wt-card-kicker">Area {activeItemIndex + 1} of {itemCount}</p>
+                <h2 id="active-area-heading">{activeItem.label}</h2>
+                <p className="wt-lede">{activeItem.captureGuidance}</p>
+              </div>
+              <span className={"wt-chip " + chipTone(activeRecord)}>{itemSummary(activeRecord)}</span>
+            </div>
+
+            <div className="wt-guided-columns">
+              <div className="wt-work-column">
+                {isItemQueued(offlineQueue, state?.sessionId ?? SESSION_ID, activeItem.id) && (
+                  <p role="status" className="wt-note" data-testid={`offline-pending-${activeItem.id}`}>{describePendingItem(activeItem.label)}</p>
+                )}
+                {localErrors[activeItem.id] && !activeRecord?.error && (
+                  <p role="alert" className="wt-alert"><strong>Error [{localErrors[activeItem.id].code}]:</strong> {localErrors[activeItem.id].message}</p>
+                )}
+                <div className="wt-panel-heading">
+                  <span className="wt-panel-step">01</span>
+                  <div><h3>Capture evidence</h3><p>Use a clear photo of this area.</p></div>
+                </div>
+                <GuidedCapture
+                  itemId={activeItem.id}
+                  itemLabel={activeItem.label}
+                  captureGuidance={activeItem.captureGuidance}
+                  status={activeRecord?.status ?? "empty"}
+                  previewUrl={manager.previewUrlFor(activeRecord?.mediaId ?? null)}
+                  error={null}
+                  analysisMode={analysisMode}
+                  onSelectFile={(file) => void handleSelectFile(activeItem.id, file)}
+                  onCancelAnalysis={() => void handleCancel(activeItem.id)}
+                  onRemovePhoto={() => void handleRemove(activeItem.id)}
+                  disabled={!ready}
+                />
+                <div className="wt-panel-heading wt-review-heading">
+                  <span className="wt-panel-step">02</span>
+                  <div><h3>Review and check</h3><p>Keep AI notes and your inspection decisions separate.</p></div>
+                </div>
                 <button
                   type="button"
-                  className="wt-btn"
-                  data-testid="case-notes-clear"
-                  onClick={() => void handleClearCaseNotes()}
+                  className="wt-mobile-panel-toggle"
+                  aria-expanded={mobileReviewOpen}
+                  aria-controls="active-item-review"
+                  data-testid="mobile-review-toggle"
+                  onClick={() => setMobileReviewOpen((open) => !open)}
                 >
-                  Clear case notes
+                  <span>Review and physical checks</span>
+                  <span className="wt-mobile-panel-status">{itemSummary(activeRecord)}</span>
                 </button>
-              )}
+                <div className={"wt-mobile-review-content" + (mobileReviewOpen ? " wt-mobile-review-content--open" : "")}>
+                {activeRecord ? (
+                  <div id="active-item-review">
+                    <WorkerReview
+                      item={activeRecord}
+                      catalogItem={activeItem}
+                      sessionId={state?.sessionId ?? SESSION_ID}
+                      catalogVersion={state?.catalogVersion ?? catalog.version}
+                      previewUrl={manager.previewUrlFor(activeRecord.mediaId)}
+                      analysisMode={analysisMode}
+                      onAccept={() => void handleAccept(activeItem.id)}
+                      onAcceptEdited={(revisedText) => void handleAcceptEdited(activeItem.id, revisedText)}
+                      onReject={(reason) => void handleReject(activeItem.id, reason)}
+                      onRecordManualCheck={(checkId, outcome, note) => void handleRecordManualCheck(activeItem.id, activeItem.manualChecks.map((check) => check.id), checkId, outcome, note)}
+                      onRecordDeficiency={(input) => void handleRecordDeficiency(activeItem.id, input)}
+                      onClearDeficiency={() => void handleClearDeficiency(activeItem.id)}
+                      onReanalyze={() => void handleReanalyze(activeItem.id)}
+                      onCancelAnalysis={() => void handleCancel(activeItem.id)}
+                      disabled={!ready}
+                    />
+                  </div>
+                ) : (
+                  <p role="status" className="wt-note">Loading this area’s saved record…</p>
+                )}
+                </div>
+                <div className="wt-area-pager">
+                  <button type="button" className="wt-btn" disabled={activeItemIndex === 0} onClick={() => {
+                    setSelectedItemId(catalog.items[Math.max(0, activeItemIndex - 1)].id);
+                  }}>Previous area</button>
+                  <button type="button" className="wt-btn wt-btn--primary" disabled={activeItemIndex === itemCount - 1} onClick={() => {
+                    setSelectedItemId(catalog.items[Math.min(itemCount - 1, activeItemIndex + 1)].id);
+                  }}>Next area</button>
+                </div>
+              </div>
+
+              <div className="wt-mobile-guide-shell">
+                <button
+                  type="button"
+                  className="wt-mobile-panel-toggle wt-mobile-guide-toggle"
+                  aria-expanded={mobileGuideOpen}
+                  aria-controls="mobile-guide-panel"
+                  data-testid="mobile-guide-toggle"
+                  onClick={() => setMobileGuideOpen((open) => !open)}
+                >
+                  <span>Need help?</span>
+                  <span className="wt-mobile-panel-status">Guide and saved artifacts</span>
+                </button>
+                <div id="mobile-guide-panel" className={"wt-mobile-guide-content" + (mobileGuideOpen ? " wt-mobile-guide-content--open" : "")}>
+                  <GuidePanel
+                    key={activeItem.id}
+                    itemId={activeItem.id}
+                    stage={activeGuideStage}
+                    initialMessage={guideCopy()}
+                  >
+                  <div className="wt-artifact-stack" aria-label="Generated walkthrough artifacts">
+                  <p className="wt-card-kicker">Artifacts</p>
+                  {activeRecord?.draft && !activeRecord.deleted ? (
+                    <article className="wt-artifact-card" data-testid="guide-observation-artifact">
+                      <span className="wt-artifact-label">AI photo observation · draft</span>
+                      <p>{activeRecord.draft.observation}</p>
+                      <button type="button" className="wt-text-button" onClick={() => document.getElementById("active-item-review")?.scrollIntoView({ behavior: "smooth", block: "start" })}>Review observation</button>
+                    </article>
+                  ) : (
+                    <p className="wt-artifact-empty">Your photo observation will appear here after analysis.</p>
+                  )}
+                  {activeRecord?.manualChecks.map((check) => (
+                    <article className="wt-artifact-card wt-artifact-card--check" key={check.checkId}>
+                      <span className="wt-artifact-label">Worker check · {check.outcome === "performed" ? "recorded" : "not performed"}</span>
+                      <p>{check.note}</p>
+                    </article>
+                  ))}
+                  {activeRecord?.deficiency && (
+                    <article className="wt-artifact-card wt-artifact-card--correction" data-testid="guide-correction-artifact">
+                      <span className="wt-artifact-label">Worker correction draft</span>
+                      <p>{activeRecord.deficiency.issueDescription}</p>
+                      <p><strong>Follow-up:</strong> {activeRecord.deficiency.correctiveAction}</p>
+                    </article>
+                  )}
+                  </div>
+                  </GuidePanel>
+                </div>
+              </div>
             </div>
           </div>
-        )}
-      </div>
+        </section>
+      )}
 
-      <div className="wt-section">
-        <h2 className="wt-section-title">Step 3 — Review-only export</h2>
-        <ExportSummary
-          snapshot={exportSnapshot}
-          storageError={storageErrorForExport}
-          onPrint={handlePrint}
-          onDownloadHtml={exportSnapshot ? handleDownloadHtml : undefined}
-          disabled={!ready}
-        />
-      </div>
+      {workspaceView === "notes" && (
+        <section className="wt-utility-view" aria-labelledby="case-notes-heading" data-testid="case-notes-section">
+          <p className="wt-card-kicker">Session workspace</p>
+          <h2 id="case-notes-heading">Case notes</h2>
+          <p className="wt-lede">Worker-authored notes saved locally for this walkthrough. Notes are not filled from AI output and are not inspection outcomes.</p>
+          {ready && state?.caseNotes && !caseNotesEditing && <div className="wt-note-card" data-testid="case-notes-display"><p>{state.caseNotes}</p></div>}
+          {ready && state && !state.caseNotes && !caseNotesEditing && <p className="wt-empty-card" role="note" data-testid="case-notes-empty">No case notes recorded. Add a short worker draft if needed.</p>}
+          {(!ready || !state) && <p className="wt-note" role="status">Case notes load with the local session.</p>}
+          {caseNotesNotice && <p className="wt-statusline" role="status" data-testid="case-notes-notice">{caseNotesNotice}</p>}
+          {ready && state && caseNotesEditing && (
+            <div className="wt-field">
+              <label htmlFor="case-notes-input" className="wt-label">Case notes (your own words, up to 2000 characters):</label>
+              <textarea id="case-notes-input" data-testid="case-notes-input" value={caseNotesDraft} onChange={(event) => setCaseNotesDraft(event.target.value)} rows={5} maxLength={2000} className="wt-textarea" placeholder="Add a worker-authored note for this local session." />
+              {caseNotesError && <p className="wt-statusline" role="alert" data-testid="case-notes-error">{caseNotesError}</p>}
+              <div className="wt-actions wt-no-print">
+                <button type="button" className="wt-btn wt-btn--primary" data-testid="case-notes-save" onClick={() => void handleSaveCaseNotes()}>Save notes</button>
+                <button type="button" className="wt-btn" data-testid="case-notes-cancel" onClick={() => { setCaseNotesEditing(false); setCaseNotesError(null); }}>Cancel</button>
+              </div>
+            </div>
+          )}
+          {ready && state && !caseNotesEditing && (
+            <div className="wt-actions wt-no-print">
+              <button type="button" className="wt-btn wt-btn--primary" data-testid="case-notes-edit" onClick={() => { setCaseNotesError(null); setCaseNotesNotice(null); setCaseNotesDraft(state.caseNotes ?? ""); setCaseNotesEditing(true); }}>{state.caseNotes ? "Edit case notes" : "Add case notes"}</button>
+              {state.caseNotes && <button type="button" className="wt-btn" data-testid="case-notes-clear" onClick={() => void handleClearCaseNotes()}>Clear case notes</button>}
+            </div>
+          )}
+        </section>
+      )}
+
+      {workspaceView === "packet" && (
+        <section className="wt-utility-view" aria-labelledby="packet-heading">
+          <p className="wt-card-kicker">Local export</p>
+          <h2 id="packet-heading">Correction packet</h2>
+          <p className="wt-lede">Print or download a review-only packet with worker-recorded corrections, unresolved physical checks, and evidence provenance. Draft text is omitted for unresolved items.</p>
+          <div className="wt-packet-summary">
+            <div><strong>{exportSnapshot?.deficiencies.length ?? 0}</strong><span>worker correction drafts</span></div>
+            <div><strong>{exportSnapshot?.unresolvedChecks.length ?? itemCount}</strong><span>physical checks still open</span></div>
+            <div><strong>{exportUnresolved}</strong><span>{unresolvedNoun} unresolved</span></div>
+          </div>
+          <ExportSummary snapshot={exportSnapshot} storageError={storageErrorForExport} onPrint={handlePrint} onDownloadHtml={exportSnapshot ? handleDownloadHtml : undefined} disabled={!ready} />
+        </section>
+      )}
+
+      {workspaceView === "settings" && (
+        <section className="wt-utility-view" aria-labelledby="settings-heading">
+          <p className="wt-card-kicker">Local app</p>
+          <h2 id="settings-heading">Offline and settings</h2>
+          <div className="wt-settings-grid">
+            <article className="wt-setting-card">
+              <h3>Connection</h3>
+              <p role="status" className="wt-statusline" data-testid="offline-status">{describeOfflineState({ online, pendingCount })}</p>
+              {queueNotice && <p role="note" className="wt-note" data-testid="offline-queue-notice">{queueNotice}</p>}
+              <p role="status" className="wt-note" data-testid="sw-status">{swMessage}</p>
+            </article>
+            <article className="wt-setting-card" data-testid="pwa-install">
+              <h3>Install for quick access</h3>
+              {installStandalone || installAccepted ? (
+                <p role="note" className="wt-note" data-testid="pwa-install-installed">Installed. Saved local progress opens from your home screen; analysis still needs a connection and an explicit retry.</p>
+              ) : installAffordance.mode === "prompt" ? (
+                <button type="button" className="wt-btn wt-btn--primary" data-testid="pwa-install-button" onClick={() => void handleInstall()}>Install walkthrough</button>
+              ) : (
+                <div data-testid="pwa-install-guidance">
+                  <p className="wt-note">Add this walkthrough to your home screen. When the browser offers no install button, follow these steps:</p>
+                  <ol className="wt-list">{installSteps.map((step) => <li key={step}>{step}</li>)}</ol>
+                </div>
+              )}
+            </article>
+            <article className="wt-setting-card">
+              <h3>Session storage</h3>
+              <p role="status" className="wt-statusline" data-testid="flow-storage-status">{storage.message}</p>
+              <p className="wt-note">Photos, worker notes, and draft records stay in this browser. Reset removes local data only and does not delete provider copies or downloaded exports.</p>
+              <div className="wt-actions wt-no-print">
+                <button type="button" className="wt-btn" onClick={() => void handleRetryLoad()}>Reload local session</button>
+                <button type="button" className="wt-btn wt-btn--danger" onClick={() => void handleResetStorage()}>Delete local session and start fresh</button>
+              </div>
+            </article>
+            <article className="wt-setting-card">
+              <h3>Analysis mode</h3>
+              <p className="wt-statusline">{analysisMode === "fixture" ? "Fixture mode — sample photo observations, no live model call." : "Live mode — real provider analysis for mock-unit photos only."}</p>
+              <p className="wt-note">No addresses, tenant details, or identifying information should be entered or uploaded.</p>
+            </article>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

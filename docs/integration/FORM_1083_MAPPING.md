@@ -1,267 +1,135 @@
-# Form 1083 mapping status and Meta integration contract
+# Form 1083 workflow, video pipeline, and data boundaries
 
-Status: draft for TASK-001. No provider-confirmed Form 1083 mapping exists in this checkout.
-Active form version is unresolved. Do not treat this file as an approved inspection mapping.
+**Form identity:** The project owner confirmed on October 29, 2026 that LAHSA Habitability Standards Inspection Form 1083, FY 2022–23, is the form used and submitted in this workflow. The app embeds the unchanged three-page official form, fills supported fields, flattens it, and appends local evidence/continuation pages. This confirms the source form in the export; it does not establish provider acceptance of the app’s files or an app connection to HMIS.
 
-Access dates: all official Meta and LAHSA links below were accessed 2026-10-27.
+**Product state:** The supplied brief replaces the former photo-first direction with a four-room video walkthrough, an evidence-linked 11-area review, evaluator sign-off, and local/manual exports. Mobile navigation shows Review, Sign-Off, and Profile; Capture is the first step and is reached through contextual back. See [`docs/PRODUCT_BRIEF.md`](../PRODUCT_BRIEF.md) and the current SDD requirements. Historical photo-first work remains in the repository and is not evidence that the new end-to-end workflow is finished.
 
-## 1. Catalog mode
+## 1. Four rooms and 11 modeled elements
 
-### 1.1 Current mode: demo only
+The product guides a staged-unit evaluator through these room videos:
 
-- The app uses a clearly illustrative demo catalog until a participating provider confirms
-  the exact operative Form 1083 copy, version, and 3–4 selected items.
-- Every demo surface (UI, printable export, fixtures) must carry the label:
-  `Demo checklist — not a verified Form 1083 mapping.`
-- Demo catalog shape (implemented in TASK-003 under `src/data/catalog.demo.json`):
-  `schemaVersion`, `catalogId`, `version`, `mode: "demo"`, `source-confirmation`
-  metadata, and 3–4 items each with stable `id`, `label`, `captureGuidance`,
-  and required `manualChecks` (at least one check a photograph cannot establish).
-- Demo item IDs use the `demo-*` prefix (for example `demo-item-01`). They are
-  illustrative placeholders. They are not official Form 1083 numbering, wording,
-  or physical-test requirements.
+| Room | Capture prompts and fixed SAM concepts in the current server contract |
+|---|---|
+| Kitchen | Run the faucet and show drainage; show the kitchen and visible fixtures. SAM concepts: water faucet, ventilation fan, kitchen stove. |
+| Bathroom | Run the faucet or shower; turn on the exhaust fan; show toilet, bath/shower, and door lock. SAM concepts: water faucet, ventilation fan, toilet, door lock, smoke detector. |
+| Bedroom/living area | Show both areas, visible openings, detector, and entry lock. SAM concepts: door lock, smoke detector, heating equipment, ventilation fan. |
+| Hallway | Show the walking path, detector, and unit exit. SAM concepts: exit door, smoke detector, light fixture. |
 
-### 1.2 Provider-confirmation gate (blocks any form-specific claim)
+The local product model has 11 area IDs and concise labels. Those labels support the app workflow; the PDF export uses the official form template rather than reconstructing its printed pages. The official form has separate Fire Safety marks for 11a and 11b, so 11 logical areas yield 12 A/D marks.
 
-No item may claim a mapping to Form 1083 until all of the following are recorded:
+### 1.1 Export field mapping against the bundled source
 
-1. Exact operative Form 1083 copy and version (title, fiscal year, issuer, issue date).
-2. Source and verifier: who supplied the copy, who verified it, and on what date.
-3. Exact mapped fields: official item number/wording plus the app `itemId` it maps to.
-4. Required physical tests and sign-off: which checks require a person/test device,
-   and who must approve or sign the final form.
-5. Accepted output: what worker output (if any) the provider accepts as a draft input,
-   with explicit statement that app export is not an approved inspection or HMIS submission.
+The following mapping was checked against the text and AcroForm widgets in `public/forms/lahsa-form-1083-fy-2022-2023.pdf` (three pages; SHA-256 `9c9faf9039d98aa570017f6bf22bafd5a999c1ba3f25a8f8bee3241546602261`). The form itself is kept unchanged as the PDF base. Its A/D fields are not independent: `Approved or DeficientRow4` contains nine widgets for rows 4 through 11b, so the exporter clears that shared field and draws each result into its own widget after flattening.
 
-Missing confirmation never promotes a demo item. Fake provider confirmation in a test
-must not promote it either (browser check covers this in REQ-001).
-
-### 1.2.1 Public-only source record (2026-10-28 — not a confirmation)
-
-- Source: public LAHSA FY 2022–2023 Form 1083, extracted 2026-10-28 from
-  `https://www.lahsa.org/item.ashx?id=6886` (listing published 10/31/2022,
-  last updated 1/31/2023; PDF footer `12-19-22 FORM 1083`).
-- Source-confirmation for gate purposes: status `unconfirmed`
-  (public listing only — not provider-confirmed as the operative copy);
-  `suppliedBy=null`, `verifiedBy=null`, `verifiedAt=null`.
-- Effect: no demo item is promoted. All `demo-*` IDs stay illustrative
-  placeholders under the §1.1 demo notice. Provider-mapped (non-`demo-*`)
-  IDs and any exact field table remain blocked until every §1.2 gate item
-  is recorded.
-- Open: which provider confirms this copy and the 4 short-listed items in
-  `docs/ITEM_SELECTION.md` (owner question). The 2024-version note from
-  §1.3 is still unresolved — neither the public FY22–23 PDF nor earlier
-  2024 references establish the operative copy.
-
-### 1.3 What is unresolved
-
-- Public LAHSA listing points to an FY 2022–2023 form:
-  https://www.lahsa.org/documents?id=6886--tls-and-hn-fy-2022-2023-form-1083-habitability-standards-form.pdf
-  (listed in `docs/RESEARCH.md`). Earlier project notes refer to a 2024 version.
-  Neither establishes which copy a participating provider uses today.
-- Field counts, official wording, physical-test requirements, and acceptance of any
-  draft workflow are unverified. This file intentionally contains no field table
-  so it cannot be mistaken for a mapping.
-
-## 2. Meta integration contract (checked against official docs)
-
-### 2.1 Endpoint and auth
-
-| Field | Value | Source |
-|---|---|---|
-| Base URL (allowlisted) | `https://api.meta.ai/v1` | Overview, Models, API reference |
-| Text+vision endpoint (primary for this app) | `POST /v1/chat/completions` (OpenAI-compatible) | Chat Completions protocol |
-| Alternate endpoint | `POST /v1/responses` (recommended for agentic/multi-turn; same models/auth) | Responses API, Image understanding |
-| Model catalog endpoint | `GET /v1/models`, `GET /v1/models/{model}` | Models guide |
-| Token-estimate endpoint | `POST /v1/responses/input_tokens` | Image understanding |
-| Auth header | `Authorization: Bearer $MODEL_API_KEY` | Authentication guide |
-| Server env var (official) | `MODEL_API_KEY` | Authentication, Overview |
-| Key format | `LLM_<numeric-id>_<secret>`; created once in Model API dashboard, revocable per key | Authentication guide |
-| Key management | Unique key per app; server-side only; never commit; rotation = create new, migrate, delete old | Authentication safety rules |
-
-Application config (pinned in TASK-002 `.env.example`, names only, no values):
-
-- `META_API_KEY` (server-only; maps to official `MODEL_API_KEY` bearer token —
-  TASK-002/004 must document the alias and use exactly one canonical name).
-- `META_MODEL` (default `muse-spark-1.3`; see §2.2).
-- `META_API_BASE_URL` (checked against allowlist `https://api.meta.ai/v1`; any other
-  host is rejected — REQ-010).
-- `APP_ANALYSIS_MODE=live|fixture` (explicit; no silent fallback — REQ-003).
-- No `NEXT_PUBLIC_*` secret. No client-supplied model ID, system prompt, or fetch URL.
-
-### 2.2 Model identifier
-
-Recommended production model: `muse-spark-1.3` in Standard mode.
-
-- Source: Models guide (`https://dev.meta.ai/docs/models`, accessed 2026-10-27).
-- Input: text, image, video, audio, PDF. Output: text. Context window: 1,048,576 tokens.
-- `muse-spark-1.3` is the latest version, tuned for agentic workflows; recommended
-  for new work. Prior versions `muse-spark-1.2` / `muse-spark-1.1` exist on the same
-  endpoints (model-ID swap only). `muse-wonder-1.0` takes the same requests but is
-  preview, higher-cost, and unnecessary for this bounded draft task.
-- Contributor variants `muse-spark-1.3-contributor` / `muse-spark-1.2-contributor`
-  select discounted Contributor mode (content may train future models). They must
-  not be used for any real pilot or tenant-adjacent data. The app default is the
-  Standard-mode ID. Contributor IDs appear here only to identify what to block.
-- Open-weight `Muse Spark Open` / `Muse Glimmer` are self-hosted and out of scope;
-  they have no Model API endpoint.
-
-### 2.3 Image request payload (Chat Completions)
-
-Images go only in `user`-role messages. One image per analysis request.
-
-```json
-{
-  "model": "muse-spark-1.3",
-  "messages": [
-    { "role": "developer", "content": "<bounded neutral-draft instructions>" },
-    { "role": "user", "content": [
-      { "type": "text", "text": "<item context + strict JSON instruction>" },
-      { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,<bytes>" } }
-    ]}
-  ],
-  "response_format": {
-    "type": "json_schema",
-    "json_schema": {
-      "name": "AnalysisDraft",
-      "schema": {
-        "type": "object",
-        "properties": {
-          "observation": { "type": "string" },
-          "visibleEvidence": { "type": "array", "items": { "type": "string" } },
-          "unknowns": { "type": "array", "items": { "type": "string" } },
-          "suggestedManualChecks": { "type": "array", "items": { "type": "string" } }
-        },
-        "required": ["observation", "visibleEvidence", "unknowns", "suggestedManualChecks"],
-        "additionalProperties": false
-      }
-    }
-  }
-}
-```
-
-Notes from official Image understanding guide (accessed 2026-10-27):
-
-- Chat Completions wraps the image as an `image_url` object with a `url` string
-  (public `https` URL or `data:` URL). The Responses API equivalent is an
-  `input_image` block with a plain-string `image_url`. Same model/capability.
-- This app always sends server-normalized `data:` bytes. It never sends client
-  URLs and the server never fetches client URLs (REQ-002/REQ-010).
-- Official per-image limits: 50 MB inline `image_url`, 1 GiB via Files API,
-  max 50 images per request, supported MIME `image/jpeg`, `image/jpg`,
-  `image/png`, `image/gif`, `image/webp`, `image/x-icon`. Undecodable bytes
-  return HTTP 400. PDF uploads contribute at most first 50 page-images.
-- Application limits are stricter by design (REQ-002/REQ-010): one image per
-  request, 8 MiB and 20 megapixels max, server-side decode/validate, EXIF strip,
-  orientation normalize, resize to 1600px longest edge. Official limits do not
-  relax app limits.
-- `temperature`/`top_p` stay at defaults (1.0); `reasoning_effort: "none"` is
-  rejected by the provider for Muse Spark (HTTP 400).
-
-### 2.4 Output schema (strict, neutral draft)
-
-- Success shape: `choices[0].message.content` holds a JSON string matching the
-  `AnalysisDraft` schema above; `usage` carries token counts; `model` echoes the
-  serving model. The app parses with `JSON.parse` then validates with Zod
-  (TASK-003/004): `observation` 1–600 chars; `visibleEvidence`/`unknowns`/
-  `suggestedManualChecks` each 0–5 strings, ≤200 chars each; no verdict,
-  confidence, pass/fail, or habitability-judgment fields. Extra or missing fields,
-  oversized strings, or unusable empty output are rejected as
-  `INVALID_MODEL_OUTPUT` (HTTP 502 to the client).
-- Structured-output constraints enforced provider-side (accessed 2026-10-27):
-  nesting depth ≤10, ≤5,000 total properties, ≤120,000 chars of names/enums,
-  recursive `$ref` schemas rejected with HTTP 400. The app schema above is
-  intentionally flat to stay well inside these bounds.
-- IDs, timestamps, and provenance (`analysisId`, `mediaHash`, `model`, `mode`,
-  `requestId`, `latencyMs`) are application-generated in the `AnalysisEnvelope`.
-  Model text is never trusted for IDs (design § Contracts).
-
-### 2.5 Data handling and retention
-
-- Standard mode: content (prompts, files, context sent + model responses) is not
-  used to train Meta models. Contributor/Discounted mode: content (inputs +
-  outputs) may be used to train, develop, evaluate, and improve Meta AI models,
-  with disassociation steps before training use but not before safety/abuse review.
-  Customer Data (account/roles/profile) is never used for training.
-  Sources: Pricing and rate limits (`https://dev.meta.ai/docs/pricing-rate-limits`),
-  Models guide, Data Commitments (`https://dev.meta.ai/legal/commitments`) —
-  all accessed 2026-10-27.
-- Standard mode is not a zero-retention guarantee. Retention, safety/abuse
-  processing, legal compliance, and account deletion flows are governed by the
-  Terms of Service and Privacy Policy. Confirm endpoint-specific retention before
-  any real pilot (open question 5 in `docs/RESEARCH.md`). No real tenant, health,
-  address, or identifying data enters hackathon model calls; mock-unit media only.
-- Transport: TLS 1.2+ in transit; PCI-DSS handling for payment data; ISMS and
-  incident-response program described in Data Commitments. Do not infer more than
-  the page states.
-
-Official links (access date 2026-10-27 for all):
-
-- https://dev.meta.ai/docs/overview
-- https://dev.meta.ai/docs/models
-- https://dev.meta.ai/docs/authentication
-- https://dev.meta.ai/docs/image-understanding
-- https://dev.meta.ai/docs/structured-output
-- https://dev.meta.ai/docs/protocols/chat-completions
-- https://dev.meta.ai/docs/pricing-rate-limits
-- https://dev.meta.ai/legal/commitments
-- https://dev.meta.ai/legal/terms-of-service
-
-## 3. Trust boundaries and data flow
-
-```
-capture UI → same-origin POST /api/analyze (multipart: image + sessionId/itemId/catalogVersion/mediaId/analysisId)
-  → server validates origin, version, single-inflight guard
-  → decode/validate/normalize bytes + SHA-256 (authoritative server copy)
-  → server-only Meta adapter (Bearer key, allowlisted base URL, 45s timeout, cancellation)
-  → strict output validation (Zod; reject verdict/extra/oversized/empty)
-  → commit only if session/item/media/attempt still current; else discard (async correctness)
-  → client persists canonical normalized bytes + envelope in IndexedDB; export reads a stable snapshot
-```
-
-- Browser is untrusted: no keys, no provider bodies, no raw media in logs.
-  Server logs only safe IDs, timings, and error codes.
-- Image/narration are untrusted input: bound bytes/dimensions before expensive
-  decode, strip metadata, never fetch client URLs, escape worker/model text in UI
-  and printable HTML.
-- Local deletion removes local media/drafts/revisions/URLs and cancels analysis.
-  It does not claim to delete provider copies or downloaded exports.
-
-## 4. Compatibility
-
-- Provider SDK compatibility: any OpenAI-compatible client works by setting
-  `base_url="https://api.meta.ai/v1"` and `model="muse-spark-1.3"`. Moving between
-  Muse Spark versions (or to `muse-wonder-1.0`) is a model-ID change on the same
-  endpoints. Do not substitute OpenAI credentials or a non-allowlisted base URL.
-- App compatibility: catalog `snapshot` travels with each session so later catalog
-  edits cannot reinterpret old evidence. Schema-versioned IndexedDB with explicit
-  recovery/reset on incompatible data. Printable export is self-contained HTML
-  (embedded normalized media, no remote fetches) printed via browser print-to-PDF.
-
-## 5. Failure modes (client-safe mapping)
-
-| Condition | Client code | HTTP | Retryable |
+| Form order / printed section | Local element ID | Exported mark source | Notes field used |
 |---|---|---|---|
-| Missing/unconfigured server key | `SETUP_REQUIRED` | 503 | no (fix config) |
-| Corrupt/unsupported/oversized/mismatched image | `INVALID_MEDIA` | 400/413/415/422 as applicable | no (recapture) |
-| Unknown item / catalog version mismatch | `ITEM_MISMATCH` | 409 | no (reselect) |
-| Duplicate analysis for same attempt / one active per session | `REQUEST_IN_PROGRESS` | 409 | user-gated |
-| Provider rate limit | `PROVIDER_RATE_LIMIT` | 429 (honor `Retry-After`, backoff+jitter; no automatic billed retry) | user-gated |
-| Provider timeout (45s) / cancellation | `PROVIDER_TIMEOUT` | 504 | user-gated |
-| Provider unavailable / error | `PROVIDER_UNAVAILABLE` | 502 | user-gated |
-| Output fails strict validation | `INVALID_MODEL_OUTPUT` | 502 | user-gated |
+| 1. Structure and materials | `demo-item-05` | Its evaluator A/D decision | `Notes1 Structure and materials…` |
+| 2. Access | `demo-item-06` | Its evaluator A/D decision | `Notes2 Access…` |
+| 3. Space and security | `demo-item-07` | Its evaluator A/D decision | `Notes3 Space and security…` |
+| 4. Interior air quality | `demo-interior-air` | Its evaluator A/D decision | `Notes4 Interior air quality…` |
+| 5. Water Supply | `demo-water-supply` | Its evaluator A/D decision | `5 Water Supply…` |
+| 6. Sanitary Facilities | `demo-item-08` | Its evaluator A/D decision | `6 Sanitary Facilities…` |
+| 7. Thermal environment | `demo-item-09` | Its evaluator A/D decision | `7 Thermal environment…` |
+| 8. Lighting and electricity | `demo-lighting-electric` | Its evaluator A/D decision | `8 Lighting and electricity…` |
+| 9. Food preparation and refuse disposal | `demo-item-10` | Its evaluator A/D decision | `9 Food preparation and refuse disposal…` |
+| 10. Sanitary condition | `demo-item-11` | Its evaluator A/D decision | `10 Sanitary condition…` |
+| 11a. Unit fire-safety criteria | `demo-smoke-co` | `fireSafetyAssessment.unitDetectors` | `11 a. Fire safety…` |
+| 11b. Public/common-area smoke detectors | `demo-smoke-co` | `fireSafetyAssessment.publicAreaDetectors` | `11 b The public areas…` |
 
-Rate-limit headers (`x-ratelimit-*`) and `usage` token counts are server-observed;
-keys on the same team share limits (per-team RPM/TPM table in Pricing guide).
+The local aggregate Fire safety decision is included in the attached evaluator record and determines the app result. It is never copied into both official marks. Official section 11a covers the full unit criteria printed on the form, including smoke and carbon-monoxide detectors; section 11b is the separate public-area smoke-detector criterion. A still or model suggestion alone cannot supply either mark.
 
-## 6. Credential availability (no values)
+Administrative mappings are intentionally limited to supported values:
 
-- As of 2026-10-27 in this checkout: no Meta API key is provisioned or stored.
-  `.env.example` will carry names only. No key, secret, or full provider body
-  appears in this file, in logs, or in evidence.
-- Generic scaffold work (TASK-002 onward: app shell, domain schemas, fixture
-  adapters, unit/browser checks) is permitted while a live smoke is pending.
-- Live smoke (`npm run test:live`, rights-cleared mock-unit media, real
-  `muse-spark-1.3` call) remains a separate, explicitly recorded check. It must
-  fail clearly when credentials are absent — never pass via fixtures. No live
-  success is claimed by this document.
+| Official field / printed location | Source |
+|---|---|
+| `Participant Name & HMIS #` and `Unit Address incl unit number` | Left blank for staged/mock-unit exports. The pseudonym appears only in the appended local supporting record. |
+| `Evaluator and Agency Name` | Evaluator name and agency name, joined in this field. |
+| `Discussed with LL` and its `Date` widget | Required human YES/NO choice and, for YES, the recorded discussion date. The source form's default is cleared before filling. |
+| `Evaluator's Signature` and `Date 2` | Typed evaluator signature and signed date. The full required attestation is included in the appended record. |
+| `Agency Leadership Printed Name and Title`, `Leadership Signature`, and the other `Date` widget | Recorded leadership details when the agency requires leadership sign-off. |
+| Six official deficiency rows | Evaluator-confirmed D area, correction, planned completion date, and notes with planned reinspection date. `Date Reinspection Completed` is left blank; additional deficiencies continue in the appended record. |
+
+The JSON is the app's local draft schema, not a confirmed HMIS import schema. Participant/HMIS identity and unit-address mappings, external submission, and recipient acceptance remain unsupported or unverified and are therefore not inferred from the official form's wording.
+
+| Local element ID | Product label | Rooms that can contribute evidence |
+|---|---|---|
+| `demo-item-05` | Structure and materials | Kitchen, bathroom, bedroom/living, hallway |
+| `demo-item-06` | Access | Hallway |
+| `demo-item-07` | Space and security | Bedroom/living, hallway |
+| `demo-interior-air` | Interior air quality and ventilation | All four rooms |
+| `demo-water-supply` | Water supply | Kitchen, bathroom |
+| `demo-item-08` | Sanitary facilities | Bathroom |
+| `demo-item-09` | Thermal environment | All four rooms |
+| `demo-lighting-electric` | Lighting and electricity | All four rooms |
+| `demo-item-10` | Food preparation and refuse disposal | Kitchen |
+| `demo-item-11` | Sanitary condition | All four rooms |
+| `demo-smoke-co` | Fire safety (independent 11a unit-detector and 11b public/common-area outcomes) | All four rooms |
+
+These room associations guide capture and review; they are not an official LAHSA mapping or proof that a visual object satisfies an element. A video cannot establish conditions that require a physical check, such as water temperature, ventilation operation, safe electrical operation, detector operation, or a usable escape route. The evaluator records those checks separately.
+
+Funding type is selected at intake. This build supports the LAHSA/Form 1083 path. HUD-funded units receive an HQS-required route notice; the app must not present an HQS result or let the HUD route produce a Form 1083 export.
+
+## 2. SAM and Muse request contract
+
+### 2.1 Intended sequence and current limits
+
+1. The browser captures or imports a room clip, previews it, extracts actual decoded source-frame stills for local review, and saves the clip and local review stills in versioned IndexedDB.
+2. Only after an explicit analysis action does the browser send the clip bytes once to the same-origin `stage=segment` route. The client does not send a URL for the server to fetch.
+3. The capture client normalizes supported MOV to MP4 with a size-bounded local packet-copy remux, then checks the resulting duration and required tracks. The server checks the exact multipart shape, actual MP4 container bytes and supported codec. Current limits are 60 MiB and 30 seconds, plus bounded frame count. Filename and MIME type alone are not trusted. The server rejects MOV; conversion failure preserves the prior local clip and blocks live analysis.
+4. For MP4, the server requests one expiring provider file upload and sends fixed, one-concept prompts to Meta SAM 3.1 using streamed `POST /v1/responses` calls. The server parses frame-indexed box/mask records with `@meta-sam/parser`; it returns bounded geometry, prompt/element IDs, and the source-video hash. SAM output is segmentation evidence only.
+5. Before completing `stage=segment`, the server computes SHA-256 over the uploaded bytes and checks it against the request's expected video hash, matches every SAM candidate frame index to the validated source timeline, and uses FFmpeg to decode those candidate frames plus one actual source frame near the center of each second (at most 30) for Muse context. It bounds the JPEGs and caches them in the in-memory one-time mapping lease associated with the candidate token and full video identity. The server returns candidate metadata, the signed sample schedule, and the token; it does not return image bytes. If there are no SAM candidates, no mapping lease is created.
+6. The browser's follow-on `stage=map` request sends only room/media identity and the signed candidate token. It sends neither another copy of the clip nor candidate/context image bytes. The server claims the lease once and supplies its server-derived candidate and context JPEGs to Muse Spark. Muse may cite only actual SAM candidate IDs; the per-second stills provide additional visual context and cannot become fabricated candidate evidence. It returns unreviewed suggestions for the 11 modeled elements. Suggestions need a resolvable current-video candidate still. Without one, the item remains “needs human check.” If Meta Muse returns an eligible provider failure and `BASETEN_API_KEY` is configured, the server may retry mapping once with Baseten Muse Spark Open; this fallback receives the same leased stills/context and never handles the video or replaces SAM.
+7. The evaluator reviews the actual still and timestamp, records an independent A, D, or needs-human-check decision, completes required correction/reinspection details, and signs. Fire Safety 11a and 11b are recorded separately: aggregate Fire Safety is D if either is D, A only if both are A, and otherwise unresolved. Model output never writes an evaluator decision or final result.
+
+The current source wires both stages through `/api/video/segment`: the phone uploads the normalized clip once for `stage=segment`; the server runs SAM and derives/hash-binds the selected JPEGs from that same clip before creating its one-time lease. The subsequent `stage=map` request contains only identity and token. Server-side frame bytes remain in bounded process memory for the lease and are released after mapping, cancellation, or expiry; the browser does not upload a second clip or send mapping stills. The Capture/Review/Sign-Off/Profile flow consumes the proposals and creates local exports. This describes implementation present in the checkout; it does not establish that a live provider call, the complete flow, or visual QA passed. The existing `/api/analyze` route remains a separate still-image path. The current `npm run test:live` runner exercises one video segment request with the synthetic MP4 by default and calls Muse mapping at most once only when SAM returns valid candidates. Do not infer video accuracy from package installation, mocked tests, or this connectivity smoke.
+
+### 2.2 Models, routes, and video libraries
+
+- **SAM 3.1:** model ID `sam-3.1`; hosted via Meta Responses API (`POST https://api.meta.ai/v1/responses`). Meta documents streaming for video segmentation; its Files API currently lists `video/mp4` as its supported video MIME. The implementation uses fixed one-concept prompts and the official `@meta-sam/parser` to parse the streamed geometry grammar. [Meta SAM segmentation](https://dev.meta.ai/docs/sam/segmenting) · [SAM client libraries](https://dev.meta.ai/docs/sam/client-libraries) · [Meta file handling](https://dev.meta.ai/docs/file-handling)
+- **Muse Spark:** model ID `muse-spark-1.3` in Standard mode for server-side visual draft/mapping calls. The live smoke uses Muse only if its SAM segment response contains structurally valid candidate evidence; it does not measure mapping quality. [Meta model catalog](https://dev.meta.ai/docs/models) · [Meta API overview](https://dev.meta.ai/docs/overview)
+- **Phone video decode/remux:** `@meta-sam/video` and Mediabunny 1.63.0 are used from browser-only helpers for frame-aware WebCodecs decoding, local-review still extraction, and bounded MOV-to-MP4 packet-copy remux; native HTML video/canvas remains a codec fallback. Encoded frames are not re-encoded during MOV normalization. The packages do not make provider calls from the browser. [SAM client libraries](https://dev.meta.ai/docs/sam/client-libraries)
+- **Server still provenance:** Node's `src/server/video/source-stills.ts` uses FFmpeg 9.0.2 during `stage=segment` to decode candidate frames and scheduled context frames from the hash-verified MP4. Build it from the signed upstream source with `scripts/install-ffmpeg-runtime.sh` and set `FFMPEG_PATH` to the generated absolute path. Missing FFmpeg returns a safe setup error before Muse mapping. This is server tooling and adds no FFmpeg/WebAssembly package to the phone.
+- **Format policy:** keep supported MP4/MOV clips available for capture/review, but permit only MP4 for live Meta processing. Supported MOV is packet-copy remuxed locally under a byte cap; unsupported media and failed/oversized outputs remain blocked. No full-frame-rate ffmpeg WebAssembly runtime is shipped to the phone.
+- **Mapping fallback:** Meta Muse remains primary. The optional Baseten endpoint/model are fixed in server code and require `BASETEN_API_KEY`; only retryable Meta Muse provider failures use it. Validation, setup, schema, cancellation, and safety errors never trigger the fallback. The UI explains that the selected clip's actual stills may be sent to Baseten. [Baseten Muse Spark Open](https://www.baseten.co/library/muse-spark-open/)
+
+### 2.3 Configuration and the live video smoke
+
+The server reads configuration from `APP_ANALYSIS_MODE`, `META_API_KEY` (or `MODEL_API_KEY`), `META_MODEL`, the allowlisted `META_API_BASE_URL`, optional `BASETEN_API_KEY`, and optional `FFMPEG_PATH`. The Meta model ID is `muse-spark-1.3`; the Baseten model and endpoint are fixed server-side. `FFMPEG_PATH` must point to a compatible executable; when omitted, `ffmpeg` must be on the server's `PATH`. Contributor model IDs are excluded for this mock-unit workflow. Keep secrets server-only. Never add `NEXT_PUBLIC_*` keys, include keys/provider bodies in logs or exports, or trust a client-provided model, prompt, or remote fetch URL.
+
+`npm run test:live` starts a production Next server in live mode and sends one MP4 to `/api/video/segment`. The default is the bundled synthetic fixture; `SMOKE_VIDEO` may select a regular `.mp4` staged/mock-unit file with no tenant or personal data. It loads `.env` through Next.js's env loader without printing values, fails closed without `META_API_KEY`, and emits sanitized metadata only. If SAM returns structurally valid candidate evidence, it sends one token-only `stage=map` request; otherwise it skips Muse and releases the pending lease with `stage=cancel` when possible. It makes no retry and removes `BASETEN_API_KEY` from the smoke server environment to prevent fallback calls. A successful run establishes only connectivity for the exercised API path. It does **not** establish video tracking, Form 1083 mapping quality, or the 30-second evaluation gate. Mock-unit tests are not live provider evidence.
+
+## 3. Human decisions and export mapping
+
+AI observations and SAM detections are unreviewed proposals. Muse may suggest A or D, but no model proposal may:
+
+- mark a manual check performed;
+- record or substitute for the evaluator’s A or D decision;
+- set an inspection result;
+- create a confirmed landlord deficiency; or
+- restore approval after the source clip changes.
+
+A clip replacement/removal/reanalysis must invalidate evidence tied to its prior identity and clear affected human decisions. A deficiency requires actual source-frame evidence plus the evaluator’s issue description, proposed correction, completion date, and reinspection date. The evaluator signs and attests: “I understand that I am not a HUD-certified inspector. I evaluated this unit to the best of my ability and completed and reviewed this inspection based on my own assessment. AI suggestions are not my decisions.” Capture agency leadership sign-off where the agency requires it.
+
+The app prepares these local downloads only after its required evaluator decisions and sign-off are complete:
+
+1. **Client-file PDF** — full local inspection record with source-frame evidence and timestamps.
+2. **Landlord fix-list PDF** — evaluator-confirmed deficient items only, with issue, correction, dates, and linked evidence.
+3. **Official Form 1083 PDF and JSON** — the unchanged official FY 2022–23 three-page Form 1083 is filled for supported fields and flattened; local evidence/continuation pages are appended. The 11a unit-detector and 11b public/common-area marks come from their corresponding evaluator outcomes, not from a copied aggregate. Planned reinspection dates appear in notes while the official “Date Reinspection Completed” field stays blank. The companion JSON carries agency, landlord-discussion, leadership-sign-off, attestation, and recorded human decision data. Staged/mock-only participant/HMIS identity and unit-address fields intentionally remain blank, so this is not case-ready. It is a local/manual-upload file, not an HMIS submission, and provider acceptance is unverified.
+
+The PDFs and JSON are local files for manual handling. There is no direct HMIS upload, landlord delivery, or LAHSA submission, and no claim that a provider accepts these files or that the JSON matches an external HMIS schema. Deleting local app data does not delete downloaded exports or claim provider-file deletion.
+
+## 4. Privacy and retention boundary
+
+- Use staged/mock-unit footage and a pseudonym in the demo. Keep tenant details, faces, documents, addresses, and real case notes out of clips and prompts.
+- Captured clips, source stills, evaluator decisions, and signatures remain local in versioned IndexedDB unless the evaluator explicitly requests live analysis. The service worker caches the app shell only.
+- A live SAM action transmits the selected video to the server and then to Meta. The current upload request asks the provider Files API for a one-hour expiry; this is not a promise of immediate deletion or a substitute for reviewing provider retention terms.
+- On explicit analysis, the browser sends the selected video once to the same-origin server. The server derives candidate and one-per-second context JPEGs from the same hash-verified bytes, then holds bounded stills in an expiring one-time lease for mapping. The browser's map request sends identity and token only; it contains no video or image bytes. Muse receives the leased frames through the server. On an eligible primary-provider failure, those same stills can be sent to Baseten when the optional key is configured. Consent copy identifies this fallback. Provider keys and raw request/response bodies remain server-side. No client URLs are fetched.
+- Live video segmentation and image mapping may incur charges under the configured Meta account. The app does not estimate per-inspection cost; check current pricing and account billing before live use. “Live mode enabled; connection untested” reports server mode only; it does not confirm that a provider request ran or succeeded.
+- Local delete removes local records and object URLs only; it does not claim provider deletion, remove copies the evaluator already downloaded, or establish zero provider retention.
+- Keep the standard `muse-spark-1.3` model ID; contributor mode is excluded. Review current provider terms and the agency’s privacy/security requirements before any tenant-adjacent pilot.
+
+## 5. Sources and verification gate
+
+- LAHSA: [FY 2022–2023 Form 1083 listing](https://www.lahsa.org/documents?id=6886--tls-and-hn-fy-2022-2023-form-1083-habitability-standards-form.pdf). The project owner’s confirmation establishes which form the workflow uses; the embedded PDF is the official source form. Its participant/HMIS identity and unit-address fields remain blank in this staged demo, and provider acceptance remains unverified.
+- Meta: [Models](https://dev.meta.ai/docs/models), [SAM segmentation](https://dev.meta.ai/docs/sam/segmenting), [SAM client libraries](https://dev.meta.ai/docs/sam/client-libraries), and [File handling](https://dev.meta.ai/docs/file-handling). Accessed 2026-10-29.
+- **Open release/evaluation blocker:** the owner supplied staged/mock kitchen and bathroom videos and authorized provider processing on 2026-10-31, but neither attempt produced a reviewable result; kitchen timed out and bathroom was canceled before saving. Muse mapping and all quality checks remain unmeasured. See `docs/evaluation/video-clip-gate.md`. Keep this gate distinct from fixture checks, unit tests, the JPEG Muse smoke, and visual UI QA.

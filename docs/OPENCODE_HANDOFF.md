@@ -1,52 +1,85 @@
-# OpenCode SDD handoff
+# Native SDD tool status (historical OpenCode handoff)
 
-## Target plugin and files
+This file remains to satisfy the SDD documentation contract. It is a status
+note, not an instruction to open or use OpenCode. Codex owns implementation and
+coordination for this project.
 
-This package targets the installed **OpenCode SDD Autopilot** from [jd-chiles/opencode-v2-sdd-plugin](https://github.com/jd-chiles/opencode-v2-sdd-plugin), whose source uses docs/sdd/features/<slug>/ and .sdd/config.json. The separate [opencode-sdd-v2](https://github.com/jd-chiles/opencode-sdd-v2) repository uses different JSON contracts; do not interchange configurations.
+## Current implementation
 
-Feature slug: habitability-walkthrough-mvp.
+Feature slug: `habitability-walkthrough-mvp`. The authored request,
+requirements, design, task map, and verification plan are in
+`docs/sdd/features/habitability-walkthrough-mvp/`. The owner confirmed this
+workflow uses LAHSA Form 1083 and supplied the three-screen mobile concept.
 
-Read all eight artifacts in [the feature folder](sdd/features/habitability-walkthrough-mvp/00-request.md), plus [tasks.json](sdd/features/habitability-walkthrough-mvp/tasks.json). Each task object is an input to sdd_delegate, not runtime state. Configured routing inherits the initiating OpenCode model and uses one worker at a time; no provider/model purchase or account change is configured.
+The current worktree contains the mobile Capture / Draft Review / Sign-Off &
+Export / Profile flow, room-scoped video capture and local storage, a server-side
+SAM/Muse video path, evaluator-only decisions and sign-off, local PDF/JSON
+exports, and the installable/offline PWA shell. Video processing uses pinned
+Mediabunny and FFmpeg runtime tooling. This is a code inventory, not an SDD
+approval, provider-quality result, or release verdict.
 
-## Prepared state
+## Native SDD coordination status
 
-The installed plugin's initialize function created .sdd/project.json and .sdd/state/habitability-walkthrough-mvp.json at draft stage with empty historical evidence. Keep those plugin-generated draft files when transferring this package: the initializer intentionally refuses existing artifacts without corresponding state. No native coordinator run, workers, approvals or independent reviews have been started.
+This Codex work did not reconcile native SDD plugin state or edit
+`.sdd/state/` or `.sdd/evidence/`. The current feature documents and
+implementation have not received native spec, plan, implementation, QA,
+security, or release reviews. `node scripts/verify-sdd.mjs` is structural
+traceability validation only; it is not application verification or plugin
+evidence.
 
-Do not hand-edit state or fabricate evidence. The plugin will register a native run when sdd_start is called from OpenCode. It should reuse the initialized draft, import tasks and perform its normal transitions.
+An earlier `/sdd-doctor` attempt through `opencode run` started a generic agent
+session; it reported that SDD run context was unavailable and denied edits and
+shell. No native doctor, coordinator transition, or review completed. This is
+historical context and does not block Codex implementation. Do not hand-edit
+generated plugin state or evidence to make a native run appear current.
 
-## Start in OpenCode v2
+## Historical handoff notes
 
-Open this project on the machine running OpenCode. Confirm your installed plugin with /sdd-doctor. Do not register a duplicate plugin entry. Then use:
+The earlier workflow proposed running `/sdd-doctor` and `/sdd-status` in
+OpenCode and asking its coordinator to reconcile the feature/task graph. That
+workflow is not active. Keep native plugin state unchanged unless its supported
+tooling is available and explicitly invoked.
+4. Keep the live Meta check separate from fixture CI. Do not rerun the live
+   smoke as a substitute for the staged-video quality gate; one synthetic
+   connectivity smoke is already recorded in the evaluation notes.
 
-```text
-/sdd-plan Load the existing habitability-walkthrough-mvp feature from docs/sdd/features/habitability-walkthrough-mvp/. Reuse its initialized draft state; do not overwrite the authored documents with scaffolds. Start/register the native run with that exact slug and planOnly=true. Read all eight artifacts, register each tasks.json entry through sdd_delegate, and configure the named checks from .sdd/config.json. Obtain independent spec and plan review. Report implementation prerequisites and the required approval action.
-```
-
-The installed plugin requires user approval for standard/deep runs: its configuration reference says to invoke /sdd-approve yourself after reviewing the plan. This document setup does not approve a later implementation baseline. A plan-only run must be promoted through the plugin's resume operation with delivery=true and the latest revision; plain /sdd-resume does not clear planOnly. Ask the coordinator to perform that supported promotion after approval. Inspect /sdd-status and use /sdd-verify for current evidence. Do not edit state or create a duplicate run to bypass planOnly.
-
-For a full build rather than a planning-only session, the alternative start prompt is:
-
-```text
-/sdd-start Build the existing habitability-walkthrough-mvp feature. Use the exact existing feature slug, reuse its plugin-initialized draft and authored artifacts, register tasks.json via sdd_delegate, configure .sdd/config.json checks, and follow its independent spec/plan review and approval gates before dispatch. Preserve all product boundaries and keep live Meta proof separate from fixture CI. Stop at evidence-backed release readiness.
-```
-
-## Known prerequisites
-
-- Application scaffold/dependencies do not exist yet. TASK-002 creates them and all app scripts. Only the docs check runs now.
-- Repository: https://github.com/jd-chiles/meta-inspector. Clone it on the build host for a normal Git checkout. This managed workspace's .git directory is read-only; publication uses a separate temporary checkout rather than overwriting it.
-- META_API_KEY and the current Meta endpoint/model must be configured securely before live verification; no key is requested or written by this setup.
-- Provider Form 1083 confirmation is unresolved. Build the explicit illustrative catalog meanwhile.
-- Automatic Codex GitHub reviews require a connected repository and settings activation; see [review and CI](REVIEW_AND_CI.md).
-
-## Verification responsibilities
-
-The plugin requires current independent spec/plan and final code/QA/gate reviews, plus security review for the high-risk API/workflow paths. Codex PR review is additional feedback; it does not automatically insert native plugin verdicts. Never lower rigor or bypass a required review merely because CI is green.
-
-Commands for structural validation now:
+Named local checks in `.sdd/config.json`:
 
 ```sh
 node scripts/verify-sdd.mjs
-node scripts/ci-app.mjs
+npm run lint
+npm run typecheck
+npm run test:unit
+npm run test:e2e
+npm run build
+npm run test:live
 ```
 
-Application commands and live-smoke definitions are in [04-verification.md](sdd/features/habitability-walkthrough-mvp/04-verification.md). Their absence/failure before implementation is expected; it is not passing application evidence.
+`test:e2e` builds the production app before running the browser suite. The
+current Playwright host needs the installed Chromium path supplied through
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`; see the current check record in
+`docs/REVIEW_AND_CI.md`. Use mock-unit inputs for non-live checks.
+
+## Remaining evidence gates
+
+- Native SDD reconciliation, check evidence, independent reviews, and release
+  verdict are open.
+- A rights-cleared staged kitchen/bathroom video is still needed for SAM/Muse
+  quality evaluation. The synthetic live smoke established only that the SAM
+  route connected; it returned no candidates, did not call Muse, and assessed
+  no mapping or inspection quality. See `docs/evaluation/video-clip-gate.md`.
+- The rendering's populated Draft Review and signed export states have not
+  been recreated for visual comparison. The browser review used a synthetic
+  clip and left all evaluator decisions and sign-off empty.
+- The official FY 2022–23 Form 1083 PDF is embedded unchanged, filled for
+  supported fields, flattened, and extended with evidence pages. Staged-only
+  participant/HMIS identity and unit address remain blank, so this export is
+  not case-ready. Provider acceptance and HMIS submission are not claimed;
+  exports remain local files for the existing manual workflow.
+
+## Preview
+
+The app is currently served at
+`https://vps-27b87dbf-1.taile8712d.ts.net:3100/` through Tailscale Serve.
+The phone must be connected to the same tailnet. The loopback preview is
+`http://127.0.0.1:3100/`.

@@ -48,9 +48,9 @@ const T1 = "2026-10-27T12:01:00.000Z";
 const CATALOG: Catalog = {
   schemaVersion: 1,
   catalogId: "demo-habitability-walkthrough",
-  version: "0.2.0-demo.1",
+  version: "0.3.0-demo.3",
   mode: "demo",
-  demoNotice: "Demo checklist — not a verified Form 1083 mapping.",
+  demoNotice: "Project owner confirms this workflow uses LAHSA Form 1083. This local app prepares a draft; it does not submit to HMIS.",
   sourceConfirmation: {
     status: "unconfirmed",
     suppliedBy: null,

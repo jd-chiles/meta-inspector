@@ -290,5 +290,402 @@
     ],
     "risk": "medium",
     "description": "Verify 03-plan.md + tasks.json TASK-069-073 (+076) against REQ-001-013, 02-design, 04-verification, .sdd/config.json. Replaces dead TASK-075 (dep on failed 074). No edits, no shell."
+  },
+  {
+    "id": "TASK-103",
+    "title": "Owner-confirmed Form 1083 workspace foundation",
+    "description": "Align the 11-area workspace, catalog/session identity, and verification behavior to the supplied Capture/Review/Sign-Off/Profile brief after TASK-113 and its Codex-owned docs gate. Guide chat and prior photo-first views are outside the primary flow. Historical TASK-069–TASK-073 are not active prerequisites; the only prerequisite is TASK-113. Ownership is phase-based; shared-file amendments by dependent TASK-107/TASK-108 occur only after prior owners complete, never concurrently.",
+    "profile": "implementer",
+    "difficulty": "medium",
+    "rationale": "The owner confirmed the operative form and reported major interaction and feature gaps; align scope, presentation, and guide behavior while preserving existing data boundaries. Historical dependency IDs cannot be referenced because they are not in the active runtime graph.",
+    "requirements": [
+      "REQ-001",
+      "REQ-003",
+      "REQ-005",
+      "REQ-006",
+      "REQ-007",
+      "REQ-008",
+      "REQ-009",
+      "REQ-010",
+      "REQ-012",
+      "REQ-013",
+      "REQ-014",
+      "REQ-015"
+    ],
+    "dependencies": ["TASK-113"],
+    "files": [
+      "docs/sdd/features/habitability-walkthrough-mvp/01-requirements.md",
+      "docs/sdd/features/habitability-walkthrough-mvp/02-design.md",
+      "docs/sdd/features/habitability-walkthrough-mvp/03-plan.md",
+      "docs/sdd/features/habitability-walkthrough-mvp/04-verification.md",
+      "src/data/catalog.demo.json",
+      "src/domain/catalog.ts",
+      "src/features/walkthrough/session.ts",
+      "src/features/walkthrough/move-in-ready-flow.tsx",
+      "src/features/walkthrough/inspection-store.ts",
+      "src/server/meta/adapter.ts",
+      "src/app/flow.tsx",
+      "src/app/page.tsx",
+      "src/app/globals.css",
+      "src/app/walkthrough.css",
+      "src/export/summary.ts",
+      "tests/unit/catalog-11.test.ts",
+      "tests/unit/domain/catalog.test.ts",
+      "tests/unit/integration/flow.test.ts",
+      "tests/e2e/move-in-ready.spec.ts",
+      "docs/PRODUCT_BRIEF.md",
+      "docs/DECISIONS.md",
+      "docs/integration/FORM_1083_MAPPING.md"
+    ],
+    "acceptance": [
+      "The bundled catalog names all 11 owner-confirmed Form 1083 areas and contains no generic filler item.",
+      "A changed saved catalog is held behind explicit reset so evidence cannot silently attach to renamed areas.",
+      "The phone workspace opens on Capture and keeps three safe-area-aware bottom items visible (Review, Sign-Off, Profile); Capture is the first/default screen with contextual back paths and a clear next-step action. Draft Review provides a compact four-row overview with View all 11.",
+      "Model proposals, physical checks, and evaluator decisions remain separate and the HUD-funded branch blocks this Form 1083 flow.",
+      "Existing export, deletion, offline, async identity, and human-review guarantees remain intact; Codex records actual local check results and never fabricates native SDD approval or evidence."
+    ],
+    "risk": "medium",
+    "checkIDs": [
+      "docs",
+      "lint",
+      "typecheck",
+      "unit",
+      "browser",
+      "build"
+    ]
+  },
+  {
+    "id": "TASK-104",
+    "title": "Move-in Ready domain and intake contracts",
+    "description": "Define the stable four-room and eleven-element model, strict evidence-linked model proposals, separate evaluator decisions, funding route, and human-only sign-off/result rules.",
+    "profile": "implementer",
+    "difficulty": "medium",
+    "rationale": "These rules protect the boundary between AI observations and evaluator decisions and can be implemented independently of the interface and provider route.",
+    "requirements": [
+      "REQ-001",
+      "REQ-004",
+      "REQ-005",
+      "REQ-006",
+      "REQ-015"
+    ],
+    "dependencies": ["TASK-113"],
+    "files": [
+      "src/domain/move-in-ready.ts",
+      "tests/unit/domain/move-in-ready.test.ts"
+    ],
+    "acceptance": [
+      "Room and element IDs are stable and match the supplied brief/catalog.",
+      "Model proposals cannot mutate evaluator decisions or derive an inspection result.",
+      "Evidence-less D, incomplete correction fields, and invalid sign-off are rejected.",
+      "HUD funding exits to the HQS-required state."
+    ],
+    "checkIDs": [
+      "typecheck",
+      "unit"
+    ],
+    "risk": "medium"
+  },
+  {
+    "id": "TASK-105",
+    "title": "Mobile room video capture and local clips",
+    "description": "Build room-scoped video recording/upload, actual timestamped still extraction, bounded MP4/MOV handling with local packet-copy normalization for supported MOV, replacement/removal, and local IndexedDB recovery.",
+    "profile": "frontend",
+    "difficulty": "high",
+    "rationale": "Mobile browser recording and codec support vary; keep the upload fallback clear and validate saved media without weakening server-side validation.",
+    "requirements": [
+      "REQ-002",
+      "REQ-006",
+      "REQ-007",
+      "REQ-009",
+      "REQ-013"
+    ],
+    "dependencies": ["TASK-113"],
+    "files": [
+      "src/features/walkthrough/video-capture.tsx",
+      "src/features/walkthrough/video-capture.module.css",
+      "src/features/walkthrough/video-store.ts",
+      "src/features/walkthrough/video-utils.ts"
+    ],
+    "acceptance": [
+      "The four brief-defined rooms have concise matching filming prompts.",
+      "On phones, the current room and saved-clip count stay visible while the other room choices remain behind a closed-by-default Change room control; desktop keeps its room shortcuts visible.",
+      "Captured/uploaded clips are bounded and preview/replace/remove works per room.",
+      "Supported MOV clips are normalized to bounded MP4 bytes without re-encoding before the live path; conversion failure preserves the prior clip.",
+      "Derived stills come from actual decoded frames and show their clip offsets.",
+      "Local storage rejects mismatched session/room rows and recovers after reload."
+    ],
+    "checkIDs": [
+      "typecheck",
+      "unit",
+      "browser"
+    ],
+    "risk": "high"
+  },
+  {
+    "id": "TASK-106",
+    "title": "Server-side Meta SAM video processing",
+    "description": "Implement the bounded same-origin video route, actual-byte validation, MP4-only temporary Meta upload after local normalization, streamed SAM segmentation parsing, FFmpeg derivation of hash-verified candidate and 1 fps context stills during stage=segment, bounded JPEGs in a one-time in-memory lease, identity/token-only stage=map without a duplicate phone upload, optional Baseten Muse fallback, sanitized response, timeout, and cancellation behavior.",
+    "profile": "backend",
+    "difficulty": "high",
+    "rationale": "The Meta video path is provider- and format-sensitive; keep credentials, provider bodies, file IDs, and media out of browser state and logs.",
+    "requirements": [
+      "REQ-003",
+      "REQ-004",
+      "REQ-006",
+      "REQ-010"
+    ],
+    "dependencies": ["TASK-113"],
+    "files": [
+      "src/app/api/video/segment/route.ts",
+      "src/server/video/errors.ts",
+      "src/server/video/meta-sam.ts",
+      "src/server/video/operation-guard.ts",
+      "src/server/video/README.md",
+      "src/server/video/source-stills.ts",
+      "src/server/video/validate.ts",
+      "tests/unit/server/video/operation-guard.test.ts",
+      "tests/unit/server/video/segment.test.ts",
+      "tests/unit/server/video/source-stills.test.ts"
+    ],
+    "acceptance": [
+      "Unsupported container/codec, bad bytes, oversized/overlong media, extra prompts, and stale identity fail closed before provider processing; validated MOV reaches this route only as normalized MP4.",
+      "SAM events are parsed with the official parser and only sanitized frame references reach the client.",
+      "FFmpeg derives candidate and signed 1 fps context JPEGs from the hash-verified segment upload and caches them under the one-time bounded lease; map accepts only identity and token and rejects client-supplied still/video bytes.",
+      "Muse receives only the server-leased stills and context; output is strict-schema validated against current elements and source-frame references.",
+      "Missing FFmpeg or unsupported source-frame decoding fails closed before Muse; deployment uses ffmpeg from PATH or server-only FFMPEG_PATH.",
+      "Optional Baseten fallback runs only after an eligible Meta Muse provider failure, never after setup, validation, safety, or output-schema failures.",
+      "Provider failures never silently fall back to fixture output or expose raw bodies/keys/file IDs."
+    ],
+    "checkIDs": [
+      "typecheck",
+      "unit",
+      "build"
+    ],
+    "risk": "high"
+  },
+  {
+    "id": "TASK-107",
+    "title": "Capture, draft review, sign-off, and export integration",
+    "description": "Integrate room capture, evidence records, the Meta route, funding gate, evaluator decisions, and local persistence into a screenshot-aligned mobile workflow with distinct Capture, compact Review, All Elements, Add Note, and Sign-Off screens; generate the required PDFs and HMIS-ready JSON. Ownership is phase-based: after TASK-103 completes, TASK-107 may amend its established flow/store/page/styles. Shared files are never edited concurrently. Viewport implementation is owned by this frontend task; subsequent QA code defects require an explicitly owned Codex frontend amendment and a QA rerun before pass.",
+    "profile": "frontend",
+    "difficulty": "high",
+    "rationale": "This is the end-to-end product surface and must preserve human-only decision rules while turning the independent capture/domain/API slices into a coherent phone workflow.",
+    "requirements": [
+      "REQ-001",
+      "REQ-005",
+      "REQ-008",
+      "REQ-009",
+      "REQ-014",
+      "REQ-015"
+    ],
+    "dependencies": [
+      "TASK-103",
+      "TASK-104",
+      "TASK-105",
+      "TASK-106"
+    ],
+    "files": [
+      "src/features/walkthrough/move-in-ready-flow.tsx",
+      "src/features/walkthrough/move-in-ready-flow.module.css",
+      "src/features/walkthrough/inspection-store.ts",
+      "src/export/move-in-ready-pdf.ts",
+      "src/app/page.tsx",
+      "src/app/globals.css",
+      "src/app/walkthrough.css"
+    ],
+    "acceptance": [
+      "The app opens on Capture; phone widths show three safe-area-aware bottom items (Review, Sign-Off, Profile) and contextual back paths return to Capture; desktop uses the same three items in sticky navigation.",
+      "At 360×640 and 390×844 CSS-pixel viewports, implement Capture with a measured gap from the last visible prompt/action to the top of safe-area bottom navigation of at most 32 CSS px when content fits; otherwise only the main pane scrolls and no actionable control is obscured. Document scroll width must not exceed viewport width at either size.",
+      "Phone Capture keeps the selected room, camera preview, and record/upload actions prominent; room switching starts collapsed, the current prompt and two nearby steps are scannable, and the remaining prompts are behind View all.",
+      "Profile presents Unit & Funding, Evaluator, and Landlord & Agency as one-at-a-time setup panels with per-section completion state; the landlord-discussion date appears only after YES and is required when shown.",
+      "Draft Review shows four compact rows; View all opens a dedicated list; an element opens a focused detail; header back from All Elements restores the compact summary and clears focused detail; Add Note opens a focused editor whose bounded local note persists without changing decisions or entering exports/provider requests.",
+      "Progress remains visible in the all-elements list and focused review; mobile focused review has one primary Save action in the fixed footer; collapsed clip details remain reachable above mobile navigation.",
+      "Funding/pseudonym and Form 1083 administrative fields, room progress, review proposals, evaluator decisions, and typed sign-off work end to end.",
+      "Replacing a clip invalidates attached proposals/decisions and stale responses cannot restore them.",
+      "The HMIS-ready PDF fills and flattens the unchanged official form, keeps mock-only participant/HMIS identity and unit address blank, maps Fire Safety 11a/11b independently, and appends local evidence/continuation pages; companion JSON and all local files are available only under the stated review/sign-off rules."
+    ],
+    "checkIDs": [
+      "docs",
+      "typecheck",
+      "unit",
+      "browser",
+      "build"
+    ],
+    "risk": "high"
+  },
+  {
+    "id": "TASK-108",
+    "title": "Move-in Ready flow verification",
+    "description": "Add focused browser and exporter coverage for the integrated mobile video workflow, human decision gate, failure states, and local export set. Ownership is phase-based: TASK-108 may extend tests established by completed prior implementation tasks, including TASK-103, after TASK-107 completes. No tasks edit shared files concurrently.",
+    "profile": "tests",
+    "difficulty": "high",
+    "rationale": "The new flow crosses browser media, IndexedDB, provider-route mocks, and export rules; the test suite must exercise the actual user path without treating fixtures as live proof.",
+    "requirements": [
+      "REQ-001",
+      "REQ-002",
+      "REQ-003",
+      "REQ-004",
+      "REQ-005",
+      "REQ-006",
+      "REQ-007",
+      "REQ-008",
+      "REQ-009",
+      "REQ-010",
+      "REQ-011",
+      "REQ-012",
+      "REQ-013",
+      "REQ-014",
+      "REQ-015"
+    ],
+    "dependencies": [
+      "TASK-107"
+    ],
+    "files": [
+      "tests/e2e/move-in-ready.spec.ts",
+      "tests/e2e/mobile-capture-viewport.spec.ts",
+      "tests/unit/export/move-in-ready-pdf.test.ts"
+    ],
+    "acceptance": [
+      "Browser flow covers intake, clip capture/upload, replacement, review, sign-off gate, and exports.",
+      "Tests reject unsupported clips, client-supplied map images, missing evidence, stale responses, and HUD completion; one-time lease limits and cleanup are covered.",
+      "PDF/JSON output is checked for correct item scope, official form identity/template hash, independent 11a/11b marks, blank mock-only identity/address, completed-date handling, escaping, evidence references, and manual-upload notice.",
+      "No existing assertion is removed or weakened to pass the new flow."
+    ],
+    "checkIDs": [
+      "unit",
+      "browser",
+      "build"
+    ],
+    "risk": "high"
+  },
+  {
+    "id": "TASK-109",
+    "title": "Mobile design QA and preview refresh",
+    "description": "Documentation/QA only: compare Capture, Draft Review, and Sign-Off with the reference, record P0/P1/P2 findings and screenshots. Do not edit application code. Viewport implementation belongs to frontend TASK-107; Codex handles a Tailscale preview refresh only under the owner's existing request. Additional P0/P1 code defects require an explicitly owned frontend amendment and a QA rerun before pass.",
+    "profile": "documentation",
+    "difficulty": "medium",
+    "rationale": "The QA profile is read-only in this tool policy; documentation is the closest writable profile for the task's existing design record and screenshot ownership. This is phone-first visual QA and owns no application source.",
+    "requirements": [
+      "REQ-009",
+      "REQ-011",
+      "REQ-012"
+    ],
+    "dependencies": [
+      "TASK-108"
+    ],
+    "files": [
+      "design-qa.md",
+      "artifacts/design-qa/capture-360.png",
+      "artifacts/design-qa/capture-fit-390x844-layout.json",
+      "artifacts/design-qa/capture-fit-360x640-layout.json",
+      "artifacts/design-qa/capture-fit-390x844.png",
+      "artifacts/design-qa/capture-fit-360x640.png",
+      "artifacts/design-qa/capture-comparison.png",
+      "artifacts/design-qa/capture-current-390.png",
+      "artifacts/design-qa/capture-final-390.jpg",
+      "artifacts/design-qa/capture-prompts-360.png",
+      "artifacts/design-qa/profile-360.png",
+      "artifacts/design-qa/review-360.png",
+      "artifacts/design-qa/review-comparison.png",
+      "artifacts/design-qa/review-current-390.png",
+      "artifacts/design-qa/review-final-390.jpg",
+      "artifacts/design-qa/signoff-360.png",
+      "artifacts/design-qa/signoff-comparison.png",
+      "artifacts/design-qa/signoff-current-390.png",
+      "artifacts/design-qa/signoff-final-390.jpg"
+    ],
+    "acceptance": [
+      "Screenshots show Capture, Draft Review, and Sign-Off at phone width; Capture has an obvious current prompt and next-step action, and every required field remains reachable.",
+      "At 360–959px, the review overview and focused assessment are separate states; the three phone navigation items remain visible and controls do not cover content.",
+      "At 360×640 and 390×844, measure the vertical gap from the last visible Capture prompt/action to the top of the safe-area bottom navigation: the gap is at most 32 CSS px when content fits; if content exceeds the pane, only the main pane scrolls and no actionable control is obscured. Horizontal overflow is zero at both viewport sizes.",
+      "At 960px and wider, desktop shows a sticky three-item navigation, side-by-side video/prompts, and a split, independently scrollable overview and selected assessment that fit the viewport.",
+      "Record P0/P1/P2 findings and screenshots only. If another P0/P1 code defect is found, Codex must create an explicitly owned frontend amendment to TASK-107, serialize shared-file edits, and require a QA rerun before a pass.",
+      "The preview opens on the new capture-first flow and has an accurate live/fixture label."
+    ],
+    "checkIDs": [
+      "browser",
+      "docs"
+    ],
+    "risk": "medium"
+  },
+  {
+    "id": "TASK-110",
+    "title": "Real staged-video evaluation gate",
+    "description": "Score the owner-supplied staged/mock kitchen and bathroom footage for faucet, fan, lock, and detector track identity, element mapping, actual timestamp/still coverage, and indoor-light misses. The 2026-10-31 attempts did not produce a reviewable result: kitchen timed out and bathroom was canceled before saving. The supplied clips total about 32.8 seconds and do not establish all cues under the current single-clip, 30-second gate. A gate pass requires qualifying footage and a completed scorecard or an explicit authorized SDD scope update.",
+    "profile": "documentation",
+    "difficulty": "high",
+    "rationale": "QA is read-only in this tool policy; documentation is the closest writable profile for the gate record. Provider video tracking and Form 1083 mapping cannot be validated by fixtures or still-image smoke tests.",
+    "requirements": [
+      "REQ-003",
+      "REQ-004",
+      "REQ-011"
+    ],
+    "dependencies": [
+      "TASK-106"
+    ],
+    "files": [
+      "docs/evaluation/video-clip-gate.md"
+    ],
+    "acceptance": [
+      "The single evaluation clip is staged mock-unit footage with no tenant identity or personal data, is no more than 30 seconds, and visibly covers faucet, fan, lock, and detector cues.",
+      "Every required prompt and mapped item is scored against actual timestamps and decoded frames.",
+      "Misses and prompt decisions are recorded before any demo-script or mapping-quality claim.",
+    "No gate pass is submitted until a reviewable result covers the required cues and the scorecard is complete; fixtures and historical evidence do not satisfy this gate."
+    ],
+    "checkIDs": [
+      "docs"
+    ],
+    "risk": "high"
+  },
+  {
+    "id": "TASK-111",
+    "title": "Independent refreshed spec review",
+    "description": "Read-only spec review of requirements/design and planned active-graph docs repair. Preserve all safety requirements; do not claim TASK-113 implemented or any checks executed.",
+    "profile": "spec-reviewer",
+    "difficulty": "low",
+    "rationale": "Bounded read-only review of existing safety contracts and planned validation boundary; no implementation.",
+    "requirements": ["REQ-004", "REQ-005", "REQ-006", "REQ-009", "REQ-010", "REQ-011"],
+    "dependencies": [],
+    "files": [],
+    "checkIDs": ["docs"],
+    "acceptance": ["Confirm identical room-scoped saved-clip prompt semantics and elementId/revision identity.", "Report independent spec verdict without executed-check or approval claims."],
+    "risk": "low"
+  },
+  {
+    "id": "TASK-112",
+    "title": "Independent refreshed plan review",
+    "description": "Read-only review of the TASK-113 validator/active manifest and its ordering before TASK-103–106. Inspect the implemented validator and manifest, distinguish local check results from native plugin evidence, and report any remaining contract or ordering issues. The owner has delegated implementation to Muse Code through the handoff; do not fabricate native evidence.",
+    "profile": "plan-reviewer",
+    "difficulty": "medium",
+    "rationale": "Cross-artifact review of active/history validation, dependency ordering, ownership and verification contracts.",
+    "requirements": ["REQ-001", "REQ-002", "REQ-003", "REQ-004", "REQ-005", "REQ-006", "REQ-007", "REQ-008", "REQ-009", "REQ-010", "REQ-011", "REQ-012", "REQ-013", "REQ-014", "REQ-015"],
+    "dependencies": ["TASK-111"],
+    "files": [],
+    "checkIDs": ["docs"],
+    "acceptance": ["Verify TASK-103 depends on TASK-113 and historical TASK-069–073 are not active prerequisites.", "Verify active graph coverage, acyclic dependencies, phase ownership and Capture-fit criteria.", "Verify TASK-113 strict active manifest rejection rules, history preservation and the ordered docs gate.", "Submit planning verdict without falsely claiming implemented validator, docs pass or approval."],
+    "risk": "medium"
+  },
+  {
+    "id": "TASK-113",
+    "title": "Active graph-aware SDD docs check",
+    "description": "Implement active-tasks.json as a nonempty JSON array listing exactly TASK-103 through TASK-113 and distinguish all-record schema validation from strict active graph validation. Preserve historical task/evidence records. The owner explicitly authorized a Muse Code handoff for the implementation sprint; use the handoff and production-MVP roadmap without treating it as native task acceptance or approval. Require docs and focused unit checks for this task. Do not hand-edit or fabricate native SDD evidence.",
+    "profile": "implementer",
+    "difficulty": "medium",
+    "rationale": "Connected validator/manifest contract with historical compatibility and strict dependency/ownership validation; bounded tooling change.",
+    "requirements": ["REQ-012"],
+    "dependencies": [],
+    "files": ["scripts/verify-sdd.mjs", "scripts/sdd-validation.mjs", "tests/unit/sdd/verify-sdd.test.ts", "docs/sdd/features/habitability-walkthrough-mvp/active-tasks.json", "docs/sdd/features/habitability-walkthrough-mvp/tasks.json", "docs/sdd/features/habitability-walkthrough-mvp/03-plan.md", "docs/sdd/features/habitability-walkthrough-mvp/04-verification.md", "AGENTS.md", "docs/BUILD_PLAN.md", "docs/DEMO.md", "docs/REVIEW_AND_CI.md", "docs/OPENCODE_HANDOFF.md", "docs/MUSE_CODE_HANDOFF.md", "docs/PRODUCTION_MVP_ROADMAP.md", "docs/sdd/features/habitability-walkthrough-mvp/00-request.md", "docs/sdd/features/habitability-walkthrough-mvp/06-release.md"],
+    "checkIDs": ["docs", "unit"],
+    "acceptance": [
+      "Preserve every historical TASK-069–TASK-076 record and all other historical task/evidence records without deleting or reinterpreting them.",
+      "Introduce active-tasks.json as a nonempty JSON array containing only the eleven unique canonical IDs TASK-103 through TASK-113; reject missing/malformed manifest, empty array, duplicate, unknown or noncanonical entries.",
+      "Validate schema and unique IDs across every tasks.json record; apply plan-checkbox/current REQ coverage/dependency/DAG/shared-path ownership checks only to active IDs, retaining all strict active checks.",
+      "Reject active dependencies outside the manifest, unknown dependencies, cycles, absent active requirement/check coverage, missing plan checkboxes and unserialized shared ownership; history cannot satisfy active coverage.",
+      "TASK-103, TASK-104, TASK-105 and TASK-106 depend on TASK-113; preserve remaining dependencies and serialized phase ownership.",
+      "The delegated implementation owner executes the docs check and focused validator unit tests; local results do not alter or impersonate native SDD plugin evidence.",
+      "Project instructions identify the owner-authorized Muse Code handoff for implementation; OpenCode is not assumed to be running the project.",
+      "The handoff and production roadmap describe current code, clip attempts, verification gaps, and production launch gates without changing native SDD evidence."
+    ],
+    "risk": "medium"
   }
 ]

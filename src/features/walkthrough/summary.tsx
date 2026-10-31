@@ -188,7 +188,7 @@ export default function ExportSummary(props: ExportSummaryProps) {
           key={item.itemId}
           data-testid={`export-item-${item.itemId}`}
           data-completed={item.completed ? "true" : "false"}
-          className="wt-card wt-export-item"
+          className="wt-panel wt-export-item"
         >
           <p className="wt-note" role="note">
             {EXPORT_REVIEW_BANNER}
@@ -205,6 +205,8 @@ export default function ExportSummary(props: ExportSummaryProps) {
           </p>
           {item.photoDataUrl ? (
             <figure className="wt-figure">
+              {/* Embedded data URLs are printable local evidence; next/image cannot optimize them. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={item.photoDataUrl}
                 alt={`Normalized photo for ${item.label}`}
@@ -251,7 +253,7 @@ export default function ExportSummary(props: ExportSummaryProps) {
           )}
           <dl
             data-testid={`export-provenance-${item.itemId}`}
-            className="wt-card"
+            className="wt-panel"
           >
             <dt className="wt-label">Evidence provenance</dt>
             <dd className="wt-kv">

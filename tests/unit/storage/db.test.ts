@@ -43,7 +43,7 @@ import {
 
 const CATALOG = {
   catalogId: "demo-habitability-walkthrough",
-  catalogVersion: "0.2.0-demo.1",
+  catalogVersion: "0.3.0-demo.3",
   itemIds: ["item-a", "item-b"],
 };
 

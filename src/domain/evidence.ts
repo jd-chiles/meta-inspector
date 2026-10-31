@@ -1269,7 +1269,7 @@ export function commitDraftPayload(
     analysisId,
     sessionId: overrides.sessionId ?? "session-1",
     itemId,
-    catalogVersion: overrides.catalogVersion ?? "0.2.0-demo.1",
+    catalogVersion: overrides.catalogVersion ?? "0.3.0-demo.3",
     mediaId,
     mediaHash,
     model: overrides.model ?? "muse-spark-1.3",

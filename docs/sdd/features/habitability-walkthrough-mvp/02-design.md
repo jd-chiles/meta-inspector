@@ -1,58 +1,67 @@
-# Design — 11-item catalog + installable PWA (epoch 3)
+# Design — Move-in Ready video capture, draft review, and sign-off
 
-Epochs 1–2 architecture is retained and extended. All existing modules are reused unchanged (see reuse table in 03-plan); only the catalog data, PWA shell, offline queue states, and PDF acceptance are new.
+## Product surface
 
-```mermaid
-flowchart LR
-  C[Versioned 11-item checklist] --> U[Capture and review UI]
-  U --> I[IndexedDB session + saved progress]
-  U --> A[Same-origin analyze route]
-  A --> V[Image validation and normalization]
-  V --> M[Server-only Meta adapter]
-  M --> O[Strict output validation]
-  O --> U --> E[Reviewed printable/PDF summary]
-  PWA[Manifest + SW app-shell cache] --> U
-  Q[Offline analysis queue: pending only] --> U
-```
+The mobile primary navigation follows the supplied reference with Review, Sign-Off, and Profile visible in a safe-area bottom bar. Capture is the first/default screen, reached directly when the app opens and from contextual back actions in Profile and Review. Its phone layout is camera-first: show one selected room and its saved-clip count, with other rooms behind a closed “Change room” picker. Keep the preview and record/upload actions together, then show the current filming prompt and two nearby steps as compact rows; the full checklist stays behind “View all prompts.” A filming prompt is complete only when its associated room clip is successfully saved locally after recording, or when an existing saved clip for that same room is opened in review. An unsaved recording and a clip from another room or session never complete the prompt. Saved-clip evidence and provider details remain in expandable sections, and live mode is not shown as persistent mobile chrome. Review in the bottom bar is the visible transition from Capture to Draft Review; Capture has no second fixed action bar.
 
-## Reused paths
+On phones, Capture, Draft Review, and Sign-Off & Export are separate screens, never a stacked long page. The shell fits the viewport, the main pane is the only scrolling region, and the bottom area shows either the three tabs or focused review actions. At 360×640 and 390×844 CSS-pixel viewports, measure the gap from the last visible Capture prompt/action to the top of the safe-area bottom navigation: it is at most 32 CSS px when content fits; if content exceeds the available pane, only the main pane scrolls and no actionable control is obscured. Document scroll width must not exceed viewport width at either size. The empty camera state is deliberate and never shows sample footage.
 
-| Path | Responsibility (unchanged) |
-|---|---|
-| src/app/ | Shell, routes, layout (walkthrough.css adopted) |
-| src/features/walkthrough/ | Capture, review, summary, session manager |
-| src/domain/ | Catalog/evidence schemas, reducer, review rules |
-| src/data/catalog.demo.json | Catalog data file (v0.2.x, 11 items; unconfirmed wording labeled OPEN) |
-| src/storage/ | IndexedDB versioning/deletion (saved progress rides on it) |
-| src/server/meta/ | Provider adapter/config/validation/timeout |
-| src/server/media/ | Decode limits and normalization |
-| src/export/ | Safe printable summary (+ PDF acceptance via print CSS) |
-| fixtures/ | Rights-cleared media and response fixtures (11-item coverage) |
-| tests/unit/, tests/e2e/ | Boundary/state/API/browser tests (extended, not rewritten) |
+Review opens with four compact Form 1083 rows and a “View all 11 elements” action; selecting an element opens its focused detail with the unreviewed AI proposal, confidence, actual timestamped still, and separate worker choice. Through 959px, review keeps overview and assessment in separate focused states. At 960px and wider, desktop uses the same three navigation items in a sticky bar above the workspace, a side-by-side room video/prompt layout, and a split review list with one selected assessment. Sign-Off derives Approved / Not Approved / Needs human review only from evaluator decisions. Profile and setup controls remain accessible and do not displace the primary three-step flow.
 
-## New paths
+The visual direction uses the reference's white/light-gray surfaces, dark text, blue actions, restrained green/red result badges, room/video hero, and thumb-reachable safe-area bottom bar. On desktop the same steps use a centered workspace and two-column evidence/review layout.
+
+## Data model
+
+One versioned local InspectionRecord owns intake, selected room, per-room media identity, extracted stills, the 11 model proposals, worker decisions, corrections/dates, and signatures. Fire Safety stores separate 11a unit-detector and 11b public/common-area detector outcomes. Each may be A, D, or needs-human-check; aggregate Fire Safety is D if either is D, A only if both are A, and otherwise unresolved. A proposal and evaluator decision are separate fields and have separate timestamps/revisions. Every A/D decision stores an inPersonCheckAcknowledgment containing evaluator name and completion timestamp; validation requires the name to match the decision and the check to be completed by decision time. Unreviewed and needs-human-check decisions do not carry this acknowledgment. The schema migration resets older A/D decisions without a valid acknowledgment to unreviewed and clears dependent sign-off, while retaining clip identities and model proposals.
+
+Evidence identity is (sessionId, roomId, elementId, clipId, clipHash, stillId, frameIndex, timestampMs, schemaVersion, catalogVersion, analysisAttempt, revision). Schema version and catalog version are separate dimensions, never a combined or interchangeable version. Each clip, segmentation response, suggestion, and evaluator decision is bound to this identity. Before applying any async response or attaching evidence, match schemaVersion and catalogVersion independently and exactly against both the request identity and the current session/evidence identity, alongside every other applicable identity field. Missing or mismatched versions fail closed: discard the stale response, do not attach evidence, do not update decisions, and never restore a deleted session. Changing either version during migration/reset/catalog replacement invalidates outstanding analysis and affected prior suggestions/decisions/sign-off; renewed analysis and human review are required. Preserved historical clips are not silently rebound to a new identity. Changing or removing a clip invalidates suggestions and human decisions for affected elements; cancellation or deletion invalidates outstanding work. The local database holds blobs; React state holds serializable metadata and object URLs are transient.
+
+The deriveInspectionResult function has no provider/model input. It reads only evaluator decisions and correction requirements. A model D without an actual still/time parses as needs-human-check; it cannot be exported as a worker deficiency. Any unresolved human decision blocks completed sign-off. HUD funding exits to the HQS notice state.
+
+## Video and inference path
+
+1. Capture or upload MP4/MOV; validate actual local media bytes, container, size, duration, tracks, and session/room identity.
+2. Packet-copy remux supported MOV to MP4 without re-encoding; preserve the prior clip on failure; store media locally in versioned IndexedDB.
+3. Extract supplementary actual stills locally for manual review.
+4. Send the selected validated MP4 once to the same-origin stage=segment route. Validate actual server-received bytes and fixed server-owned room prompts.
+5. Upload temporarily to the fixed Meta Files endpoint, run SAM per concept, and parse Responses SSE.
+6. Decode candidate frames and 1-fps source-context stills (at most 30) from the hash-verified upload using server FFmpeg. Keep bounded server-derived JPEGs in an expiring one-time process-local mapping lease.
+7. Send stage=map identity and signed token only; reject client-supplied media/stills. Map leased stills with Muse; optional Baseten Muse fallback is permitted only for eligible retryable Meta Muse provider failures.
+8. Strictly validate the response and return sanitized bounded evidence for draft review. Persist only local evidence and separate evaluator decisions/sign-off. Generate local PDFs and HMIS-ready JSON under human review/sign-off rules.
+
+The server uses @meta-sam/parser for SAM's Responses SSE grammar. Client-side video uses @meta-sam/video (Mediabunny/WebCodecs) to seek to packet-exact frames and extract supplementary stills for manual local review; native HTML video/canvas remains a browser fallback. These browser stills are not submitted in the map request. During the original segment request, the server verifies the uploaded clip hash and uses FFmpeg to decode authoritative candidate and context JPEGs from those exact bytes. The one-time map response returns bounded candidate JPEG bytes, dimensions, SHA-256, and frame identity for the exact stills Muse received. The client verifies each returned JPEG hash and full candidate identity against the segment response, then persists and displays those same bytes as model-cited evidence. A byte or identity mismatch removes that citation and forces needs-human-check. Responses are no-store and capped at 12 MiB; context stills are not returned. No still is generated or enhanced.
+
+Meta's current Files API documents video/mp4 as its video MIME. The hosted media path accepts MP4 only. Supported QuickTime MOV clips are normalized locally with a size-bounded packet-copy remux through Mediabunny/WebCodecs; encoded video and audio are copied without re-encoding. Conversion must preserve required tracks and duration and remain under the output limit. Conversion failure keeps the previous clip intact and blocks live analysis. Other unsupported containers/codecs remain local-only; no full-frame-rate transcode is performed.
+
+SAM prompts are server-owned, one concept per request, tied to the selected room. The browser sends the selected video once for stage=segment. After SAM returns, the server computes SHA-256 over uploaded bytes, verifies it against the expected video hash, matches candidate frame indexes to the validated video timeline, and decodes candidate JPEGs plus actual context frames sampled at 1 fps (at most 30) with FFmpeg. It stores bounded JPEG bytes in an in-memory, one-time mapping lease with full video identity and signed candidate token. The follow-on stage=map request carries identity and token only; it is rejected if it includes additional image/video fields and never uploads a second phone clip. The lease is capped at 16 MiB per operation and 64 MiB per server process and expires with the 15-minute token; mapping completion, cancellation, and expiry release it. Deployments must keep both stages on the same Node process while the lease is live.
+
+Muse Spark receives leased candidate/context frames, catalog IDs/labels, and bounded room context. Meta Muse is primary. On a retryable Meta Muse provider failure only, an optional server-configured Baseten Muse Spark Open fallback may receive the same leased stills/context; it does not process video or replace SAM. Validation/setup/schema/safety failures do not trigger fallback. The UI discloses the optional provider and data transfer and only reports which provider returned a validated response. Every response is strictly validated against the allowlisted 11 IDs and actual frame/still references. No provider response body, key, or file ID reaches the client or logs. The app labels live upload as temporary provider processing with automatic expiry; local deletion does not claim to erase a provider copy.
+
+Live server-side frame verification uses the maintained FFmpeg 9.0.2 runtime, built from signed upstream source with only supported MP4/MOV decoder and selected-frame JPEG features enabled. Install it with scripts/install-ffmpeg-runtime.sh and point server-only FFMPEG_PATH to the generated executable. If FFmpeg is unavailable or cannot verify selected frame timestamps, the request fails closed before Muse mapping. Temporary input/output files are removed after decode; only bounded JPEG bytes remain in the expiring process-local lease. FFmpeg is not shipped to the phone.
+
+## Local PDF and JSON generation
+
+Use pdf-lib to generate three separate self-contained local PDFs. Client-file export contains evaluator decisions and relevant stills; landlord export contains only evaluator-confirmed D items. The HMIS-ready PDF starts with the unchanged official LAHSA FY 2022–23 Form 1083, fills supported fields, flattens the form, and appends local evidence/continuation pages; a sibling JSON carries the local record. Export section 11a and 11b independently from corresponding evaluator outcomes, for 12 printed A/D marks across 11 logical areas. Planned reinspection dates appear in notes; the official completed-reinspection date remains blank until completion is recorded. The staged/mock-only export leaves participant/HMIS identity and unit address blank and is not case-ready. It is not an HMIS submission and provider acceptance is unverified. Each page carries a local/manual-upload notice. Pending, failed, rejected, and needs-human-check model proposals do not appear as approved findings. There is no direct HMIS route.
+
+## Components and trust boundaries
 
 | Path | Responsibility |
 |---|---|
-| public/manifest.webmanifest | PWA manifest: name, icons, display standalone, theme (REQ-013) |
-| public/icons/* | Install icons (maskable + any, rights-cleared) |
-| public/sw.js | Service worker: app-shell precache + offline fallback; caches shell/assets only, never evidence bytes, provider payloads, keys, or full-resolution media (REQ-007/013) |
-| src/features/walkthrough/offline.ts | Offline queue: analysis intents stored as pending with attempt identity; explicit sync on reconnect; UI pending states (REQ-007) |
+| src/app/page.tsx | Compact Move-in Ready shell and server-computed analysis mode |
+| src/features/walkthrough/move-in-ready-flow.tsx | Capture/review/sign-off/profile states, focused review/list/note screens, intake gate, local recovery |
+| src/features/walkthrough/video-capture.tsx | Camera/file capture, preview, room prompts and replacement |
+| src/features/walkthrough/video-store.ts | Versioned IndexedDB clips/stills/session |
+| src/features/walkthrough/video-utils.ts | Bound video metadata, actual frame extraction and hashing |
+| src/domain/move-in-ready.ts | Fixed elements/rooms, strict proposal parsing, human-result rules |
+| src/app/api/video/segment/route.ts | Same-origin multipart request, route limits and sanitized response |
+| src/server/video/ | Actual-byte MP4 validation, FFmpeg source-frame decode, signed 1-fps schedule, bounded one-time in-memory still lease, temporary Meta upload/SAM/Muse calls, optional Baseten Muse fallback, SSE parser and safe error mapping |
+| src/export/move-in-ready-pdf.ts | Three PDF exports, official Form 1083 fill/flatten, and HMIS-ready JSON |
+| public/sw.js | Shell-only cache; no evidence bytes |
 
-## Catalog v0.2 contract (attested existence, OPEN details)
+## Versioning and compatibility
 
-`catalogId` stays `demo-habitability-walkthrough` until mapping details confirm; version is `0.2.x` (prerelease `0.2.0-demo.1` accepted; later `0.2.x` patches keep IDs). Exactly 11 items with stable `demo-*` IDs and capture guidance; every item requires `photoCannotEstablish=true` AND `requiresPhysicalTest=true`.
+This scope change advances the local inspection schema and catalog. Old image-only sessions remain in their prior store and are not silently reinterpreted as video evidence or moved into the new sign-off flow. Migration is explicit, recoverable, and preserves an export path for prior records. Local clear removes all current product-owned local records and clips; it cannot revoke prior provider calls or downloaded files.
 
-Confirmation uses the REQ-001 two-field model. The source-confirmation record reads `attested: true` (owner statement Oct 28, 2026) with `verifier: null`, `verifiedAt: null`, and all detail fields `OPEN`. The fail-closed gate keys on missing verifier/details — NOT on attested existence: validation rejects any operative mapping claim while `verifier`/detail fields are absent, even though the 11-item scope itself is attested. Display keeps the demo-checklist label on every surface until verifier + details confirm. This resolves the epoch-3 spec finding: attested existence and unconfirmed details coexist without contradiction, and TASK-071 implements exactly this gate.
+## Verification focus
 
-## Offline and pending semantics
-
-Connectivity loss never synthesizes a draft. Queued analyses show `pending` with the staged photo and item; worker may edit/cancel/delete while offline. On reconnect, each queued item requires explicit analysis action (button or explicit retry); attempt counters resume without collision with pre-offline attempts. `stillCurrent`/generation guards from epoch 2 cover reconnect races identically to replace/cancel races.
-
-## PDF output
-
-No new renderer: the existing print stylesheet produces the PDF via browser print-to-PDF. New work is acceptance only — PDF carries the identical banner, unresolved policy, escaping, and data-URL-only media as HTML (verified by export-snapshot tests plus one browser print-CSS pass).
-
-## Trust boundaries (unchanged, PWA adds none)
-
-Service worker must not cache POST /api/analyze, IndexedDB evidence, provider payloads, keys, or full-resolution media. Installability changes no server boundary (REQ-010 holds). Offline queue stores only staged capture bytes already held in memory/IDB, never new exfiltration paths.
+Test the exact three-step experience at 360px and desktop; the 360×640/390×844 Capture fit, HUD gate, recording replacement/deletion identity, duration/byte/container bounds, MOV packet-copy remux and failure preservation, actual extracted frame timestamp identity, server-side source hash/frame decode and 1-fps sample validation, map requests with identity/token only, rejection of client-supplied stills/video, one-time lease release/expiry/capacity behavior, strict SAM/Muse output, fallback only on eligible Meta Muse provider errors, no-evidence-to-D downgrade, race/cancel behavior, human-only result derivation, signed completion gate, landlord D-only export, JSON/PDF parity, escaping, offline persistence, and non-leakage of provider secrets/file IDs. Include independent schemaVersion-only and catalogVersion-only mismatches and missing-version responses, plus invalidation after either version changes; no stale attachment/decision/sign-off or deleted-session restoration is allowed. A real 30-second staged clip is required before claiming the SAM-to-Form mapping gate passed.

@@ -1,0 +1,89 @@
+import { mkdir } from "node:fs/promises";
+import path from "node:path";
+
+import { test, expect } from "@playwright/test";
+
+test.use({
+  storageState: { cookies: [], origins: [] },
+  viewport: { width: 1365, height: 900 },
+});
+
+test("desktop Capture uses three-tab navigation and places prompts beside the video", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
+  await expect(page.getByTestId("analysis-mode")).toHaveText("Sample only");
+
+  const navigation = page.getByRole("navigation", { name: "Main navigation" });
+  await expect(navigation.getByRole("button")).toHaveCount(3);
+  for (const label of ["Review", "Sign-Off", "Profile"]) {
+    await expect(navigation.getByRole("button", { name: label, exact: true })).toBeVisible();
+  }
+  await expect(navigation).toHaveCSS("position", "sticky");
+
+  const captureSetup = page.getByRole("button", { name: /Inspection setup/ });
+  if (await captureSetup.getAttribute("aria-expanded") !== "true") await captureSetup.click();
+  await page.getByLabel("Unit pseudonym").fill("Staged Desktop Layout Unit");
+  await page.getByLabel("Funding type").selectOption("lahsa");
+
+  const capture = page.getByTestId("walkthrough-video-capture");
+  await expect(page.getByRole("heading", { level: 1, name: "Video Capture" })).toBeVisible();
+  await expect(capture.getByRole("heading", { name: "Live Filming Prompts" })).toBeVisible();
+  await expect(capture.getByRole("button", { name: "Upload video", exact: true })).toBeVisible();
+  await expect(capture.getByText("Run faucet; show water flow and drainage.", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("0 of 4 captured", { exact: true })).toBeVisible();
+
+  const geometry = await capture.evaluate((root) => {
+    const bounds = (element: Element | null) => {
+      if (!(element instanceof HTMLElement)) throw new Error("Expected desktop Capture layout element was missing.");
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width };
+    };
+    const template = getComputedStyle(root).gridTemplateColumns;
+    const styles = getComputedStyle(root);
+    const horizontalInsets = Number.parseFloat(styles.paddingLeft) + Number.parseFloat(styles.paddingRight) +
+      Number.parseFloat(styles.borderLeftWidth) + Number.parseFloat(styles.borderRightWidth);
+    return {
+      columns: template.trim().split(/\s+/).length,
+      container: bounds(root),
+      horizontalInsets,
+      roomHeader: bounds(root.querySelector('[class*="roomHeader"]')),
+      preview: bounds(root.querySelector('[class*="previewFrame"]')),
+      prompts: bounds(root.querySelector('[class*="prompts"]')),
+    };
+  });
+  expect(geometry.columns).toBe(2);
+  expect(Math.abs(geometry.roomHeader.width - (geometry.container.width - geometry.horizontalInsets))).toBeLessThan(2);
+  expect(geometry.prompts.left).toBeGreaterThan(geometry.preview.right);
+  expect(Math.abs(geometry.prompts.top - geometry.preview.top)).toBeLessThan(8);
+  expect(geometry.prompts.right).toBeLessThanOrEqual(1365);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  await expect(capture.getByRole("listitem")).toHaveCount(4);
+  await expect(capture.getByText("Show sink, counters, outlets, and the running fan.", { exact: true })).toBeVisible();
+  await expect(capture.getByText("Show the smoke or CO detector and its indicator.", { exact: true })).toBeVisible();
+
+  await mkdir(path.join(process.cwd(), "artifacts/design-qa"), { recursive: true });
+  await page.screenshot({ path: "artifacts/design-qa/capture-desktop-final-1365.png" });
+
+  await navigation.getByRole("button", { name: "Review", exact: true }).click();
+  const elementList = page.locator("#element-overview-list");
+  await page.getByRole("button", { name: "View all 11 elements", exact: true }).click();
+  await elementList.getByRole("button", { name: /Structure and materials/ }).click();
+  await expect(elementList.locator("button[aria-pressed='true']")).toHaveCount(1);
+  await expect(page.getByRole("heading", { level: 1, name: "All review elements", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back to review summary", exact: true })).toBeVisible();
+  await page.getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Review", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Draft Review", exact: true })).toBeVisible();
+  await elementList.getByRole("button", { name: /Structure and materials/ }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Draft Review", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back to Capture", exact: true })).toBeVisible();
+  await expect(page.getByTestId("review-element-demo-item-05")).toBeVisible();
+  await expect(elementList.locator("button[aria-pressed='true']")).toHaveCount(1);
+  await page.getByRole("button", { name: "Back to Capture", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Review", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Draft Review", exact: true })).toBeVisible();
+  await expect(elementList.locator("button[aria-pressed='true']")).toHaveCount(1);
+  await expect(page.getByTestId("review-element-demo-item-05")).toBeVisible();
+});

@@ -384,6 +384,24 @@ export class WalkthroughSessionManager {
       this.notify();
       return this.snapshot();
     }
+    const savedItemIds = Object.keys(loaded.state.items).sort();
+    const expectedItemIds = [...catalog.itemIds].sort();
+    if (
+      loaded.state.catalogId !== catalog.catalogId ||
+      loaded.state.catalogVersion !== catalog.catalogVersion ||
+      savedItemIds.length !== expectedItemIds.length ||
+      savedItemIds.some((itemId, index) => itemId !== expectedItemIds[index])
+    ) {
+      this.session = null;
+      this.storage = {
+        kind: "needs-reset",
+        message:
+          "The Form 1083 checklist was updated. This saved session uses a different checklist, so its photos and drafts are held aside to prevent them from appearing under the wrong item. Reset local storage to start a fresh mock walkthrough; the reset deletes those saved local photos and drafts.",
+        inMemory: this.inMemoryFallback,
+      };
+      this.notify();
+      return this.snapshot();
+    }
     this.session = ensureSessionShape(loaded.state);
     this.setReadyAfterLoad();
     // A reload kills every inflight fetch, so a persisted "analyzing" item can

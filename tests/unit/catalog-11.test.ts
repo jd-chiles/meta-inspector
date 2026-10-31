@@ -74,7 +74,7 @@ function fakePng(): Uint8Array {
   return new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 }
 
-/** The four carried demo IDs from epochs 1–2, in catalog order. */
+/** Existing item identities preserved from the initial demo catalog. */
 const CARRIED_IDS = [
   "demo-interior-air",
   "demo-water-supply",
@@ -82,7 +82,7 @@ const CARRIED_IDS = [
   "demo-smoke-co",
 ];
 
-/** The seven reserved placeholders added for the 11-item scope. */
+/** Earlier generic slots now have the named Form 1083 areas. */
 const RESERVED_IDS = [
   "demo-item-05",
   "demo-item-06",
@@ -217,34 +217,43 @@ function fakeStorage(initial: Record<string, string> = {}): StorageLike & {
 }
 
 describe("11-item versioned catalog contract (REQ-001)", () => {
-  it("loads exactly 11 stable items: 4 carried plus 7 reserved placeholders", () => {
+  it("loads all 11 named Form 1083 areas with stable demo IDs", () => {
     const result = validateCatalog(demoCatalogJson);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.items.length).toBe(11);
     const ids = result.value.items.map((item) => item.id);
-    expect(ids.slice(0, 4)).toEqual(CARRIED_IDS);
-    expect(ids.slice(4)).toEqual(RESERVED_IDS);
+    expect(ids).toEqual([
+      ...RESERVED_IDS.slice(0, 3),
+      CARRIED_IDS[0],
+      CARRIED_IDS[1],
+      RESERVED_IDS[3],
+      RESERVED_IDS[4],
+      CARRIED_IDS[2],
+      RESERVED_IDS[5],
+      RESERVED_IDS[6],
+      CARRIED_IDS[3],
+    ]);
     expect(new Set(ids).size).toBe(11);
     for (const id of ids) {
       expect(id.startsWith("demo-")).toBe(true);
     }
   });
 
-  it("keeps the demo contract: version 0.2.0-demo.1, mode demo, verbatim notice", () => {
+  it("keeps the demo contract: version 0.3.0-demo.3, mode demo, verbatim notice", () => {
     const catalog = validatedCatalog();
     expect(catalog.catalogId).toBe("demo-habitability-walkthrough");
-    expect(catalog.version).toBe("0.2.0-demo.1");
+    expect(catalog.version).toBe("0.3.0-demo.3");
     expect(catalog.mode).toBe("demo");
     expect(catalog.demoNotice).toBe(DEMO_NOTICE);
-    expect(catalog.sourceConfirmation.status).toBe("unconfirmed");
+    expect(catalog.sourceConfirmation.status).toBe("owner-attested");
     expect(isDemoCatalog(catalog)).toBe(true);
     expect(canClaimFormMapping(catalog)).toBe(false);
   });
 
-  it("accepts a 0.2.x patch version with the same 11 stable IDs", () => {
+  it("accepts a 0.3.x patch version with the same 11 stable IDs", () => {
     const catalog = validatedCatalog();
-    const patched = validateCatalog({ ...catalog, version: "0.2.7" });
+    const patched = validateCatalog({ ...catalog, version: "0.3.7" });
     expect(patched.ok).toBe(true);
     if (!patched.ok) return;
     expect(patched.value.items.map((item) => item.id)).toEqual(
@@ -337,7 +346,7 @@ describe("11-item capture, review, and manual-check flows (REQ-002, REQ-004, REQ
   it("creates a session covering all 11 items with no shared identity", () => {
     const state = elevenItemSession();
     expect(Object.keys(state.items).length).toBe(11);
-    expect(state.currentItemId).toBe(CARRIED_IDS[0]);
+    expect(state.currentItemId).toBe(RESERVED_IDS[0]);
     for (const id of [...CARRIED_IDS, ...RESERVED_IDS]) {
       expect(state.items[id].status).toBe("empty");
     }
@@ -536,7 +545,7 @@ describe("reconnect-race guards across the offline boundary (REQ-006)", () => {
         analysisId: "analysis-bad",
         sessionId: "session-1",
         itemId,
-        catalogVersion: "0.2.0-demo.1",
+        catalogVersion: "0.3.0-demo.3",
         mediaId: `media-${itemId}`,
         mediaHash: hashFor(8),
         model: "muse-spark-1.3",
@@ -875,6 +884,12 @@ describe("service-worker cache boundary twin (REQ-010, REQ-013)", () => {
     expect(
       shouldServiceWorkerCache("https://walkthrough.local/icons/icon-192.svg", "GET"),
     ).toBe(true);
+    expect(
+      shouldServiceWorkerCache(
+        "https://walkthrough.local/fonts/public-sans-latin-400-normal.woff2",
+        "GET",
+      ),
+    ).toBe(true);
     // API traffic is never cached and never served from cache.
     expect(
       shouldServiceWorkerCache("https://walkthrough.local/api/analyze", "GET"),
@@ -989,7 +1004,7 @@ describe("export snapshot and PDF/print parity across 11 items (REQ-008)", () =>
     const bannerCount = html.split(EXPORT_REVIEW_BANNER).length - 1;
     expect(bannerCount).toBeGreaterThanOrEqual(snapshot.items.length + 2);
     expect(html).toContain('<div class="export-print-banner"');
-    expect(html).toContain("Demo checklist — not a verified Form 1083 mapping.");
+    expect(html).toContain("Project owner confirms this workflow uses LAHSA Form 1083. This local app prepares a draft; it does not submit to HMIS.");
     expect(html).toContain("Analysis mode: fixture (mock output — not live inference)");
     expect(html).not.toContain('src="http');
     expect(html).not.toContain("src='http");

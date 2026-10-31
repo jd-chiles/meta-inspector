@@ -303,7 +303,7 @@ const TINY_PNG = () => buildPng(1, 1);
 const GOOD_FIELDS = () => ({
   sessionId: "session-1",
   itemId: "demo-water-supply",
-  catalogVersion: "0.2.0-demo.1",
+  catalogVersion: "0.3.0-demo.3",
   analysisId: "analysis-1",
   image: { bytes: TINY_PNG(), name: "photo.png", type: "image/png" },
 });

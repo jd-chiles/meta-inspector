@@ -1,0 +1,45 @@
+import { expect, type Page } from "@playwright/test";
+
+/** Capture is the first step but is reached by contextual back on mobile. */
+export async function goToCapture(page: Page): Promise<void> {
+  const captureHeading = page.getByRole("heading", { level: 1, name: "Video Capture" });
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (await captureHeading.isVisible()) return;
+
+    const backButtons = [
+      page.getByRole("button", { name: "Back to Capture", exact: true }),
+      page.getByRole("button", { name: "Back to review summary", exact: true }),
+      page.getByRole("button", { name: "Back to all 11 elements", exact: true }),
+      page.getByRole("button", { name: "Back to review overview", exact: true }),
+      page.getByRole("button", { name: "Back to Review", exact: true }),
+    ];
+    let navigated = false;
+    for (const button of backButtons) {
+      if (!(await button.isVisible())) continue;
+      await button.click();
+      navigated = true;
+      break;
+    }
+    if (!navigated) break;
+  }
+
+  await expect(captureHeading).toBeVisible();
+}
+
+export async function openProfilePanel(page: Page, panelName: "Unit & Funding" | "Evaluator" | "Landlord & Agency"): Promise<void> {
+  const panelToggle = page.getByRole("button", { name: panelName, exact: true });
+  await expect(panelToggle).toBeVisible();
+  if (await panelToggle.getAttribute("aria-expanded") !== "true") await panelToggle.click();
+  await expect(panelToggle).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("region", { name: panelName, exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Profile setup" }).getByRole("region")).toHaveCount(1);
+}
+
+/** Select one room step from the mobile Capture walkthrough. */
+export async function selectRoom(page: Page, roomId: "kitchen" | "bathroom" | "bedroom-living" | "hallway"): Promise<void> {
+  const roomPicker = page.getByTestId("room-picker-toggle");
+  if (await roomPicker.isVisible() && await roomPicker.getAttribute("aria-expanded") !== "true") {
+    await roomPicker.click();
+  }
+  await page.getByTestId(`room-step-${roomId}`).click();
+}

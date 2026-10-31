@@ -1,11 +1,11 @@
 /**
  * Versioned illustrative catalog contracts (REQ-001, REQ-004).
  *
- * The app ships a clearly illustrative demo catalog until a provider confirms
- * the operative Form 1083 copy. Every demo surface must carry DEMO_NOTICE.
- * Missing (or fabricated) confirmation never promotes a demo item: demo-mode
- * catalogs reject provider-mapping fields, and only confirmed catalogs may
- * carry exact Form 1083 references.
+ * The app ships mock-unit demo media and fixture model output. The project
+ * owner has confirmed that LAHSA Form 1083 is the form used and submitted in
+ * this workflow. That confirms the form identity, not exact source wording,
+ * provider acceptance of this app's exports, or an HMIS connection. Every
+ * demo surface keeps that distinction visible.
  *
  * Validation is strict and dependency-free so it runs identically in the app,
  * the API route, and unit tests: unknown keys, verdict-like fields, bad
@@ -19,7 +19,7 @@ export const DEMO_CATALOG_ID = "demo-habitability-walkthrough";
 
 /** Verbatim label required on every demo surface (UI, export, fixtures). */
 export const DEMO_NOTICE =
-  "Demo checklist — not a verified Form 1083 mapping.";
+  "Project owner confirms this workflow uses LAHSA Form 1083. This local app prepares a draft; it does not submit to HMIS.";
 
 export type CatalogMode = "demo" | "confirmed";
 
@@ -38,7 +38,7 @@ export interface CatalogItem {
 }
 
 export interface CatalogSourceConfirmation {
-  status: "unconfirmed" | "confirmed";
+  status: "unconfirmed" | "owner-attested" | "confirmed";
   suppliedBy: string | null;
   verifiedBy: string | null;
   verifiedAt: string | null;
@@ -319,13 +319,21 @@ export function validateCatalog(value: unknown): ValidationResult<Catalog> {
     );
     const { status, suppliedBy, verifiedBy, verifiedAt, notes } =
       sourceConfirmation;
-    if (status !== "unconfirmed" && status !== "confirmed") {
+    if (
+      status !== "unconfirmed" &&
+      status !== "owner-attested" &&
+      status !== "confirmed"
+    ) {
       errors.push(
-        `catalog.sourceConfirmation: "status" must be "unconfirmed" or "confirmed"`,
+        `catalog.sourceConfirmation: "status" must be "unconfirmed", "owner-attested", or "confirmed"`,
       );
-    } else if (catalogMode === "demo" && status !== "unconfirmed") {
+    } else if (
+      catalogMode === "demo" &&
+      status !== "unconfirmed" &&
+      status !== "owner-attested"
+    ) {
       errors.push(
-        `catalog.sourceConfirmation: demo catalogs must stay "unconfirmed" (missing confirmation never promotes a demo item)`,
+        `catalog.sourceConfirmation: demo catalogs can only be "unconfirmed" or "owner-attested"; provider confirmation is a separate mode`,
       );
     } else if (
       catalogMode === "confirmed" &&
@@ -375,6 +383,7 @@ export function validateCatalog(value: unknown): ValidationResult<Catalog> {
     }
     if (
       status === "unconfirmed" ||
+      status === "owner-attested" ||
       status === "confirmed"
     ) {
       confirmation = {
@@ -515,20 +524,21 @@ export function effectiveManualChecks(
   return effective;
 }
 
-/** True when the value is the illustrative demo catalog (never a mapping). */
+/** True when the value is the mock-media / fixture-analysis catalog. */
 export function isDemoCatalog(catalog: Catalog): boolean {
   return (
     catalog.mode === "demo" &&
-    catalog.sourceConfirmation.status === "unconfirmed" &&
+    (catalog.sourceConfirmation.status === "unconfirmed" ||
+      catalog.sourceConfirmation.status === "owner-attested") &&
     catalog.demoNotice === DEMO_NOTICE
   );
 }
 
 /**
- * Guard the provider-confirmation gate (REQ-001): only a confirmed catalog
- * with recorded verifier/date may claim a Form 1083 mapping. Demo content,
- * and any test double that merely *says* it is confirmed, fails here unless
- * the confirmation record is complete.
+ * Guard exact provider-mapping claims: owner confirmation establishes the
+ * form identity but does not verify exact field wording or provider approval
+ * of this app's output. Only a separately reviewed catalog with recorded
+ * verifier/date may claim that level of mapping.
  */
 export function canClaimFormMapping(catalog: Catalog): boolean {
   const confirmation = catalog.sourceConfirmation;

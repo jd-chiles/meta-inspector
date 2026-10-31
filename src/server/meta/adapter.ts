@@ -22,6 +22,12 @@
  * images as user-role image_url data URLs, strict json_schema output.
  */
 import { validateAnalysisDraft, type AnalysisDraft, type AnalysisMode } from "../../domain/evidence";
+import {
+  validateGuideDraft,
+  type GuideAction,
+  type GuideDraft,
+  type GuideStage,
+} from "../../domain/guide";
 import type { AllowedImageMime } from "../media/validate";
 
 /** Exact allowlist for the Meta Model API base URL (REQ-010). */
@@ -31,6 +37,7 @@ export const DEFAULT_META_MODEL = "muse-spark-1.3";
 
 /** Single-session analysis budget: 45 seconds including provider round trip. */
 export const META_TIMEOUT_MS = 45_000;
+const MAX_META_RESPONSE_BYTES = 64 * 1024;
 
 const CONTRIBUTOR_PATTERN = /contributor/i;
 
@@ -162,6 +169,67 @@ export interface ChatCompletionsImageInput {
   imageBase64: string;
 }
 
+export interface ChatCompletionsGuideInput {
+  model: string;
+  action: GuideAction;
+  stage: GuideStage;
+  itemLabel: string;
+  captureGuidance: string;
+  manualCheck: string;
+}
+
+const GUIDE_DEVELOPER_INSTRUCTIONS =
+  "You are a practical guide for a housing worker using LAHSA Form 1083. " +
+  "Give the next procedural step for the selected area using only the supplied catalog guidance and progress stage. " +
+  "Never judge habitability, compliance, pass/fail, deficiency, safety, eligibility, or approval. " +
+  "Do not invent inspection rules, physical tests, deadlines, or sign-offs. " +
+  "The worker makes all decisions. Do not ask for or echo identifying information. " +
+  "Return JSON only: a concise message and one to three short actions. Avoid inspection-verdict wording.";
+
+const GUIDE_ACTION_LABELS: Record<GuideAction, string> = {
+  next: "Explain the worker's next step",
+  photo: "Give photo-framing tips",
+  check: "Explain the required in-person check",
+  correction: "Explain how to record a worker correction",
+};
+
+/** Build a text-only guide request; it contains no photos or session data. */
+export function buildChatCompletionsGuidePayload(
+  input: ChatCompletionsGuideInput,
+): Record<string, unknown> {
+  return {
+    model: input.model,
+    messages: [
+      { role: "developer", content: GUIDE_DEVELOPER_INSTRUCTIONS },
+      {
+        role: "user",
+        content:
+          `Area: ${input.itemLabel}. Progress: ${input.stage}. ` +
+          `Requested help: ${GUIDE_ACTION_LABELS[input.action]}. ` +
+          `Capture guidance: ${input.captureGuidance}. ` +
+          `Required in-person check: ${input.manualCheck}. ` +
+          "Create a brief, state-aware response and action card.",
+      },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "WalkthroughGuideDraft",
+        strict: true,
+        schema: {
+          type: "object",
+          properties: {
+            message: { type: "string" },
+            actionPlan: { type: "array", items: { type: "string" } },
+          },
+          required: ["message", "actionPlan"],
+          additionalProperties: false,
+        },
+      },
+    },
+  };
+}
+
 const DEVELOPER_INSTRUCTIONS =
   "You are preparing a neutral visual observation for a housing walkthrough draft. " +
   "Describe only what is visible in the single photo. " +
@@ -232,6 +300,7 @@ export type FetchImpl = (
   ok: boolean;
   status: number;
   headers: { get(name: string): string | null };
+  body?: ReadableStream<Uint8Array> | null;
   json(): Promise<unknown>;
 }>;
 
@@ -248,6 +317,14 @@ export interface MetaCallParams {
 
 export interface MetaCallSuccess {
   draft: AnalysisDraft;
+  model: string;
+  mode: "live";
+  requestId: string;
+  latencyMs: number;
+}
+
+export interface MetaGuideSuccess {
+  guide: GuideDraft;
   model: string;
   mode: "live";
   requestId: string;
@@ -300,6 +377,37 @@ function extractRequestId(payload: unknown, headers: { get(name: string): string
     if (typeof bodyId === "string" && bodyId.trim().length > 0) return bodyId.trim();
   }
   return `req-${Date.now().toString(36)}`;
+}
+
+/** Bound provider response parsing before JSON decoding and schema validation. */
+async function readBoundedJson(response: Awaited<ReturnType<FetchImpl>>): Promise<unknown> {
+  // The optional fallback preserves lightweight test adapters; native fetch
+  // responses always expose a body and are read through the byte limit below.
+  if (!response.body) return response.json();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_META_RESPONSE_BYTES) {
+        await reader.cancel();
+        throw new Error("Provider response exceeded the supported size.");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
 }
 
 /**
@@ -357,7 +465,7 @@ export async function callMetaDraft(params: MetaCallParams): Promise<MetaCallSuc
         if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
       }
     }
-  } catch (error) {
+  } catch (error: unknown) {
     if (error instanceof MetaCallError && error.code === "PROVIDER_TIMEOUT") {
       throw error;
     }
@@ -403,7 +511,7 @@ export async function callMetaDraft(params: MetaCallParams): Promise<MetaCallSuc
   }
   let body: unknown;
   try {
-    body = await response.json();
+    body = await readBoundedJson(response);
   } catch {
     throw new MetaCallError(
       "INVALID_MODEL_OUTPUT",
@@ -443,6 +551,93 @@ export async function callMetaDraft(params: MetaCallParams): Promise<MetaCallSuc
   }
   return {
     draft: draft.value,
+    model: params.config.model,
+    mode: "live",
+    requestId: extractRequestId(body, response.headers),
+    latencyMs,
+  };
+}
+
+/** A bounded, text-only guide call. No photo, worker note, or session ID is sent. */
+export async function callMetaGuide(params: {
+  config: ResolvedMetaConfig & { apiKey: string };
+  action: GuideAction;
+  stage: GuideStage;
+  itemLabel: string;
+  captureGuidance: string;
+  manualCheck: string;
+  signal?: AbortSignal | null;
+  fetchImpl?: FetchImpl;
+  now?: () => number;
+}): Promise<MetaGuideSuccess> {
+  const fetchImpl = params.fetchImpl ?? (globalThis.fetch as unknown as FetchImpl);
+  const startedAt = (params.now ?? Date.now)();
+  const url = `${params.config.baseUrl}/chat/completions`;
+  if (!(META_API_ALLOWLIST as readonly string[]).some((entry) => url === `${entry}/chat/completions`)) {
+    throw setupFailure("Meta API base URL is not allowlisted.");
+  }
+  const payload = buildChatCompletionsGuidePayload({
+    model: params.config.model,
+    action: params.action,
+    stage: params.stage,
+    itemLabel: params.itemLabel,
+    captureGuidance: params.captureGuidance,
+    manualCheck: params.manualCheck,
+  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), META_TIMEOUT_MS);
+  const onAbort = (): void => controller.abort();
+  if (params.signal?.aborted) controller.abort();
+  else params.signal?.addEventListener("abort", onAbort, { once: true });
+  let response: Awaited<ReturnType<FetchImpl>>;
+  try {
+    response = await fetchImpl(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${params.config.apiKey}`,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } catch {
+    if (controller.signal.aborted) {
+      throw new MetaCallError("PROVIDER_TIMEOUT", 504, "The guide request timed out or was cancelled. Try again when the connection is ready.", true);
+    }
+    throw new MetaCallError("PROVIDER_UNAVAILABLE", 502, "The guide service is unavailable. Your walkthrough progress is unchanged.", true);
+  } finally {
+    clearTimeout(timeout);
+    params.signal?.removeEventListener("abort", onAbort);
+  }
+  const latencyMs = Math.max(0, (params.now ?? Date.now)() - startedAt);
+  if (response.status === 429) {
+    throw new MetaCallError("PROVIDER_RATE_LIMIT", 429, "The guide service is busy. Wait before trying again.", true);
+  }
+  if (response.status === 401 || response.status === 403) {
+    throw setupFailure("Live guide credentials were rejected by the provider. Ask the operator to check the server key.");
+  }
+  if (!response.ok) {
+    throw new MetaCallError("PROVIDER_UNAVAILABLE", 502, "The guide service is unavailable. Your walkthrough progress is unchanged.", true);
+  }
+  let body: unknown;
+  try {
+    body = await readBoundedJson(response);
+  } catch {
+    throw new MetaCallError("INVALID_MODEL_OUTPUT", 502, "The guide returned an unusable response. Your walkthrough progress is unchanged.", true);
+  }
+  const content = extractContentText(body);
+  let parsed: unknown;
+  try {
+    parsed = content === null ? null : JSON.parse(content);
+  } catch {
+    parsed = null;
+  }
+  const guide = validateGuideDraft(parsed);
+  if (!guide.ok) {
+    throw new MetaCallError("INVALID_MODEL_OUTPUT", 502, "The guide returned an unusable response. Your walkthrough progress is unchanged.", true);
+  }
+  return {
+    guide: guide.value,
     model: params.config.model,
     mode: "live",
     requestId: extractRequestId(body, response.headers),

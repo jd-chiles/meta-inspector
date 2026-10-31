@@ -2,6 +2,56 @@
 
 Status: Not ready
 
+## Current status update — 2026-10-31
+
+The owner supplied staged/mock kitchen and bathroom video clips and authorized
+provider processing. The kitchen segment request returned HTTP 504 after about
+211 seconds. The bathroom segment endpoint returned HTTP 200 after about 93
+seconds, but the browser request was canceled before saving its result; Muse
+mapping and quality scoring did not occur. No automatic retry was made. The
+supplied clips total about 32.8 seconds and do not establish all required
+faucet/fan/lock/detector moments under the current single-clip, 30-second gate.
+See `docs/evaluation/video-clip-gate.md` for the sanitized run record.
+
+The owner explicitly directed an implementation handoff to Muse Code; the
+paste-ready package is `docs/MUSE_CODE_HANDOFF.md`, with the staged launch
+sequence in `docs/PRODUCTION_MVP_ROADMAP.md`. This handoff is not task
+acceptance, native SDD approval/evidence, CI, or a release decision. The current
+worktree has not had its configured checks rerun after the latest changes. No
+app server or Tailscale daemon was running when checked. Release remains Not
+ready pending current verification, live video quality, physical phone checks,
+exact form/recipient acceptance, production hosting/authentication and retention
+controls, independent reviews, and native SDD evidence.
+
+## Move-in Ready video brief and rendering — October 29, 2026 (REQ-001–REQ-015)
+
+The project owner supplied a new product brief and a three-phone mobile
+rendering for a video-first LAHSA Form 1083 workflow. This supersedes the
+photo-first application surface and the earlier photo-only product brief.
+The current checkout contains separate Capture, Draft Review, Sign-Off & Export,
+and Profile screens, local room-video handling, a server-side SAM/Muse path,
+evaluator-only decisions and sign-off, and local PDFs plus HMIS-ready JSON for
+manual handling. The mobile navigation follows the supplied three-tab layout;
+Capture is the first screen, Review uses separate overview/detail states, and
+Profile is a guided setup with secondary settings grouped out of the main flow.
+Phone/desktop visual and interaction acceptance passed at 360 × 640, 390 × 844,
+and 1365 px. The clean first-run screen includes the honest empty Capture state
+and keeps recording disabled until required unit setup is complete. See
+`design-qa.md` for screenshots, measured layout, and local check results.
+
+Code presence and a connectivity response do not establish provider quality or
+release readiness. A historical 2026-10-27 still-image smoke is recorded below.
+Separately, the 2026-10-29 synthetic-video smoke reached SAM but returned no
+candidates, so Muse mapping was not called and no video quality was assessed.
+Current native SDD check/review evidence is not recorded for this worktree.
+Codex does not hand-edit plugin state or claim absent native evidence.
+
+Status remains Not ready. The real 30-second staged kitchen/bathroom clip needed
+to score tracking, mapping, and timestamp/still coverage was not attached, so
+the evaluation gate stays open. Exact printed-form transcription and recipient
+acceptance, native iOS/Android device checks, and native SDD review/evidence
+also remain open. This Codex work does not fabricate or edit plugin state.
+
 ## TASK-073 demo/release/docs pointers — October 28, 2026 (REQ-011, REQ-012)
 
 Status stays Not ready. Documentation-only update under TASK-073; no

@@ -55,7 +55,7 @@ const T1 = "2026-10-27T12:01:00.000Z";
 
 const CATALOG = {
   catalogId: "demo-habitability-walkthrough",
-  catalogVersion: "0.2.0-demo.1",
+  catalogVersion: "0.3.0-demo.3",
   itemIds: ["item-a", "item-b"],
 };
 
@@ -453,13 +453,13 @@ describe("review panel helpers (REQ-004, REQ-006, REQ-009)", () => {
     const rows = reviewProvenanceRows(
       state.items["item-a"],
       "session-1",
-      "0.2.0-demo.1",
+      "0.3.0-demo.3",
       "fixture",
     );
     const byLabel = new Map(rows.map((row) => [row.label, row.value]));
     expect(byLabel.get("Session")).toBe("session-1");
     expect(byLabel.get("Item")).toBe("item-a");
-    expect(byLabel.get("Catalog version")).toBe("0.2.0-demo.1");
+    expect(byLabel.get("Catalog version")).toBe("0.3.0-demo.3");
     expect(byLabel.get("Media ID")).toBe("media-1");
     expect(byLabel.get("Media digest")).toBe(HASH_A);
     expect(byLabel.get("Attempt")).toBe(

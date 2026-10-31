@@ -19,7 +19,8 @@
 
 /* global self, caches, fetch, Response, URL */
 
-var SHELL_CACHE = "habitability-walkthrough-shell-v1";
+var SHELL_CACHE = "habitability-walkthrough-shell-v2";
+var APP_CACHE_PREFIX = "habitability-walkthrough-";
 
 /** Core shell: required for an honest offline launch. */
 var CORE_PRECACHE = ["/", "/manifest.webmanifest"];
@@ -35,6 +36,17 @@ var ICON_PRECACHE = [
   "/icons/icon-maskable-512.svg",
 ];
 
+/**
+ * Best-effort precache (self-hosted Public Sans subsets). Same-origin shell
+ * typography: failures are tolerated so a missing font never breaks boot —
+ * every surface falls back to the system stack by design.
+ */
+var FONT_PRECACHE = [
+  "/fonts/public-sans-latin-400-normal.woff2",
+  "/fonts/public-sans-latin-600-normal.woff2",
+  "/fonts/public-sans-latin-700-normal.woff2",
+];
+
 function isApiRequest(url) {
   return url.pathname.indexOf("/api/") === 0;
 }
@@ -43,6 +55,7 @@ function isShellAsset(url) {
   if (url.pathname === "/manifest.webmanifest") return true;
   if (url.pathname.indexOf("/_next/static/") === 0) return true;
   if (url.pathname.indexOf("/icons/") === 0) return true;
+  if (url.pathname.indexOf("/fonts/") === 0) return true;
   return false;
 }
 
@@ -84,7 +97,7 @@ self.addEventListener("install", function (event) {
       })
       .then(function (cache) {
         return Promise.allSettled(
-          ICON_PRECACHE.map(function (url) {
+          ICON_PRECACHE.concat(FONT_PRECACHE).map(function (url) {
             return cache.add(url);
           }),
         );
@@ -102,7 +115,12 @@ self.addEventListener("activate", function (event) {
       .then(function (names) {
         return Promise.all(
           names.map(function (name) {
-            if (name !== SHELL_CACHE) return caches.delete(name);
+            // CacheStorage is shared by every app on this origin. Remove only
+            // caches owned by this PWA so activation cannot erase unrelated
+            // same-origin offline data.
+            if (name.indexOf(APP_CACHE_PREFIX) === 0 && name !== SHELL_CACHE) {
+              return caches.delete(name);
+            }
             return Promise.resolve(false);
           }),
         );
@@ -157,17 +175,21 @@ self.addEventListener("fetch", function (event) {
   // background. Anything else same-origin (including media-like paths) goes
   // to the network only and is never cached.
   if (isShellAsset(url)) {
-    event.respondWith(
-      caches.match(request).then(function (cached) {
-        var network = fetch(request).then(function (response) {
-          if (response && response.status === 200) {
-            var copy = response.clone();
-            caches.open(SHELL_CACHE).then(function (cache) {
-              cache.put(request, copy);
-            });
-          }
+    var network = fetch(request).then(function (response) {
+      if (response && response.status === 200) {
+        return caches.open(SHELL_CACHE).then(function (cache) {
+          return cache.put(request, response.clone());
+        }).then(function () {
           return response;
         });
+      }
+      return response;
+    });
+    // Keep the worker alive until the static-shell cache write finishes,
+    // including when a cached response lets the page return immediately.
+    event.waitUntil(network.then(function () {}, function () {}));
+    event.respondWith(
+      caches.match(request).then(function (cached) {
         return cached || network;
       }),
     );

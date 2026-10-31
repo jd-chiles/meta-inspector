@@ -1,0 +1,37 @@
+TASK ID: t_bcb38e0e
+TASK TITLE: Add ceiling-detector sample as dev fixture with manifest row
+OBJECTIVE: Commit the normalized dev fixture image into fixtures/media/dev-ceiling-detector-01.jpg, update fixtures/README.md with final SHA256 and dimensions, and run lint/typecheck/unit tests.
+
+REPOSITORY: /home/hermes/workspace/meta-inspect
+
+SPECIFICATION:
+- Normalize /home/hermes/.hermes/attachments/IMG_8511.jpeg to fixtures/media/dev-ceiling-detector-01.jpg
+  following src/server/media/validate.ts and src/server/analyze.ts rules: 1600px longest edge,
+  strip all EXIF including GPS/model/software, verify size <8 MiB and <20 MP, compute SHA-256,
+  never log raw EXIF/GPS. Leave provenance manifest row in fixtures/README.md updated with
+  final SHA256 and dimensions. Commit the binary and README change as a single commit.
+
+REQUIREMENTS:
+- Preserve original attachment in kanban scratch workspace; do not include raw EXIF/GPS in logs or repo.
+- Update fixtures/README.md manifest SHA256 and dimensions to match the normalized binary.
+- Label fixture as mode:fixture / Set: dev. Do not add to evaluation.
+
+CONSTRAINTS:
+- Do not edit .sdd state or evidence files directly.
+- Do not wire live inference or test:live from the fixture.
+- Binary bytes must be added only after user APPROVE_COMMIT (already provided in task thread).
+
+ACCEPTANCE CRITERIA:
+- fixtures/media/dev-ceiling-detector-01.jpg exists in the repo with EXIF stripped and valid dimensions.
+- fixtures/README.md contains manifest row updated with SHA256 and dimensions and dev-set membership.
+- Vision/content check passed by reviewer (no people, PII, sensitive content).
+- npm run lint, npm run typecheck, npm run test:unit pass with exit code 0.
+
+REQUIRED VALIDATION:
+- Show git commit that adds the binary and README change.
+- Provide the computed SHA256 and final image dimensions in the run receipt.
+
+RETURN FORMAT:
+- JSON with keys: commit, sha256, width, height, lint_ok, typecheck_ok, tests_ok
+
+

@@ -2,9 +2,9 @@
   "schema_version": 1,
   "slug": "habitability-walkthrough-mvp",
   "title": "Habitability Walkthrough MVP",
-  "stage": "verifying",
+  "stage": "draft",
   "created_at": "2026-10-26T22:53:46.892Z",
-  "updated_at": "2026-10-28T17:21:39.154Z",
+  "updated_at": "2026-10-30T00:29:23.596Z",
   "history": [
     {
       "at": "2026-10-26T22:53:46.892Z",
@@ -64,6 +64,60 @@
       "from": "implementing",
       "to": "verifying",
       "operation_id": "b1496efd-feb2-4c43-b7b1-27622cfe2e28"
+    },
+    {
+      "at": "2026-10-29T21:38:41.564Z",
+      "from": "verifying",
+      "to": "draft",
+      "reason": "Re-declare the active-worktree task graph TASK-103–TASK-110 after the runtime registry was recreated empty; no historical evidence from /home/hermes/workspace/meta-inspect is imported and no code checks run while Codex audits are in flight."
+    },
+    {
+      "at": "2026-10-29T23:46:45.562Z",
+      "from": "draft",
+      "to": "draft",
+      "reason": "Refresh the stale TASK-103 acceptance contract from the updated authored requirements; make mobile viewport fit measurable in REQ-009, TASK-109, and verification; preserve prior evidence/history and re-declare current TASK-103–TASK-110 from the feature tasks.json. No app code checks or source edits are included."
+    },
+    {
+      "at": "2026-10-30T00:00:29.318Z",
+      "from": "draft",
+      "to": "specified",
+      "operation_id": "5ed626e9-e764-41fb-b025-df65f58fd132"
+    },
+    {
+      "at": "2026-10-30T00:02:22.224Z",
+      "from": "specified",
+      "to": "draft",
+      "reason": "Reconcile the two open non-blocking independent-review findings and correct stale TASK-103 dependency wording in authored SDD documents. Preserve all prior evidence/history, reset review baselines, and re-register active tasks with TASK-103 dependencies=[] before fresh spec/plan reviews. No application-source changes or code checks."
+    },
+    {
+      "at": "2026-10-30T00:14:21.275Z",
+      "from": "draft",
+      "to": "draft",
+      "reason": "Repair documentation-only QA boundaries and serialized phase ownership; assign measured Capture-fit implementation to frontend TASK-107, preserve legacy evidence/history, and require fresh independent spec/plan reviews without app work, checks, or approval."
+    },
+    {
+      "at": "2026-10-30T00:20:23.588Z",
+      "from": "draft",
+      "to": "draft",
+      "reason": "Plan TASK-113 active graph-aware docs validator repair before TASK-103–106, preserve all historical records/evidence, keep implementation and docs checks unexecuted, and obtain fresh spec/plan reviews without approval."
+    },
+    {
+      "at": "2026-10-30T00:22:55.069Z",
+      "from": "draft",
+      "to": "draft",
+      "reason": "Finalize TASK-113 ordered docs gate and align TASK-103 description with its new prerequisite before fresh read-only reviews; no validator, manifest or application implementation and no checks/approval."
+    },
+    {
+      "at": "2026-10-30T00:26:41.240Z",
+      "from": "draft",
+      "to": "draft",
+      "reason": "Correct only TASK-112 acceptance: TASK-103 depends on TASK-113 and historical TASK-069–073 are not active prerequisites. Preserve history/evidence and unchanged plan/requirements; obtain fresh independent reviews without implementation, checks or approval."
+    },
+    {
+      "at": "2026-10-30T00:29:23.596Z",
+      "from": "draft",
+      "to": "draft",
+      "reason": "Repair REQ-006/design schemaVersion omission: name schema version and catalog version separately across four authored artifacts and TASK-111. Preserve TASK-113 ordering/history/evidence; no implementation, checks or approval; fresh independent spec then plan reviews required."
     }
   ]
 }

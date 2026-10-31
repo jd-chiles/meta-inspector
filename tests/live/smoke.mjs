@@ -1,764 +1,794 @@
 #!/usr/bin/env node
 /**
- * Live Meta smoke runner (REQ-003, REQ-010, REQ-011).
+ * Live video API smoke (REQ-003, REQ-010, REQ-011).
  *
- * Default (live) path — coordinator-side only, exactly one authorized call:
- *   1. Reads META_API_KEY from process env only (never from .env files,
- *      never logged, never echoed).
- *   2. Starts a production-build Next.js server in live mode
- *      (APP_ANALYSIS_MODE=live) on 127.0.0.1.
- *   3. POSTs one rights-cleared JPEG as multipart to /api/analyze for the
- *      demo-smoke-co item (same-origin: no Origin header is sent).
- *   4. Asserts HTTP 200 plus a strictly valid draft envelope whose mode is
- *      "live" and which carries no verdict fields.
- *   5. Prints SANITIZED evidence only (model, mode, requestId, latencyMs,
- *      sha256 of the canonical bytes, image dimensions) and exits 0.
+ * The default input is the synthetic, rights-cleared MP4 fixture. An explicit
+ * SMOKE_VIDEO may point to a regular .mp4 file prepared from staged/mock-unit
+ * media with no tenant or personal data. The runner makes exactly one HTTP
+ * stage=segment request. It calls stage=map at most once, and only if SAM
+ * returns structurally valid candidate evidence; Muse is never retried and
+ * the optional Baseten fallback is disabled for this smoke. Unconsumed map
+ * leases are released with stage=cancel when possible.
  *
- * Fail-closed behavior: without META_API_KEY the runner exits 1 with an
- * explicit message. There is no fixture fallback and no fixture success
- * claim. A missing/unreadable smoke image is also a hard failure.
+ * This is provider connectivity evidence only. It does not assess video
+ * quality, tracking, Form 1083 mapping quality, or the 30-second clip gate.
  *
- * Self-test path (no network, no key required):
- *   node tests/live/smoke.mjs --self-test
- * Verifies the fail-closed key gate and the strict response-shape validator
- * with pure in-memory cases only. Never spawns a server, never fetches.
- *
- * Coordinator live execution:
- *   server command : this runner starts `npx next start` on 127.0.0.1
- *                    (production build required; run `npm run build` first)
- *   env inputs     : META_API_KEY (names only; value stays in process env),
- *                    APP_ANALYSIS_MODE is forced to "live" by the runner,
- *                    SMOKE_IMAGE (optional JPEG path),
- *                    SMOKE_PORT (optional server port)
- *   sanitized output fields: model, mode, requestId, latencyMs, sha256,
- *                    width, height
- *
- * Logging discipline: never logs key material, key presence, provider
- * request/response bodies, or image bytes. Error output carries status
- * codes and field-name reasons only.
+ * `--self-test` is pure/offline: it does not load .env, read media, start a
+ * server, or make any network/provider call.
  */
 
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
+import { createServer } from "node:net";
+import { createRequire } from "node:module";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-// ---------------------------------------------------------------------------
-// Constants (names only; no secret values anywhere in this file).
-// ---------------------------------------------------------------------------
+const require = createRequire(import.meta.url);
+const { loadEnvConfig } = require("@next/env");
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const ITEM_ID = "demo-smoke-co";
-const DEFAULT_IMAGE_PATH = "/tmp/live-smoke-detector.jpg";
-const DEFAULT_PORT = 3200;
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const NEXT_CLI = path.join(REPO_ROOT, "node_modules", "next", "dist", "bin", "next");
+const DEFAULT_VIDEO_PATH = path.join(REPO_ROOT, "tests", "fixtures", "synthetic-h264-test-pattern.mp4");
+const DEFAULT_ROOM = "kitchen";
+const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
+const MAX_JSON_BYTES = 2 * 1024 * 1024;
 const SERVER_READY_TIMEOUT_MS = 30_000;
 const SERVER_POLL_INTERVAL_MS = 500;
-const ANALYZE_TIMEOUT_MS = 60_000;
-
-const DRAFT_KEYS = new Set([
-  "observation",
-  "visibleEvidence",
-  "unknowns",
-  "suggestedManualChecks",
+const REQUEST_TIMEOUT_MS = 155_000;
+const CANCEL_TIMEOUT_MS = 10_000;
+const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const APP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const CANDIDATE_ID_PATTERN = /^cand-\d{4}$/;
+const TOKEN_MAX_LENGTH = 48 * 1024;
+const MAPPING_TTL_MS = 15 * 60 * 1000;
+const SAFE_VIDEO_ERROR_CODES = new Set([
+  "INVALID_MODEL_OUTPUT", "INVALID_REQUEST", "INVALID_VIDEO", "OPERATION_BUSY", "PROCESSING_BUSY",
+  "PROVIDER_FAILURE", "PROVIDER_TIMEOUT", "SETUP_REQUIRED", "STALE_REQUEST", "UNSUPPORTED_VIDEO",
+  "VIDEO_TOO_LARGE", "VIDEO_TOO_LONG",
 ]);
-
-const ENVELOPE_KEYS = new Set([
-  "analysisId",
-  "sessionId",
-  "itemId",
-  "catalogVersion",
-  "mediaId",
-  "mediaHash",
-  "model",
-  "mode",
-  "requestId",
-  "latencyMs",
-  "draft",
-]);
-
-const RESPONSE_KEYS = new Set([
-  "envelope",
-  "normalizedMedia",
-  "mode",
-  "model",
-  "requestId",
-  "latencyMs",
-]);
-
-const NORMALIZED_MEDIA_KEYS = new Set([
-  "mediaId",
-  "mime",
-  "width",
-  "height",
-  "digest",
-  "base64",
-  "targetWidth",
-  "targetHeight",
-  "resampleRequired",
-  "pixelTransposeRequired",
-]);
-
-/** Verdict-like fields rejected everywhere (REQ-004). */
-const FORBIDDEN_KEYS = new Set([
-  "verdict",
-  "confidence",
-  "approved",
-  "deficient",
-  "deficiency",
-  "pass",
-  "fail",
-  "habitability",
-  "habitable",
-  "compliant",
-  "nonCompliant",
-  "score",
-  "rating",
-  "decision",
-  "certification",
-  "formVerdict",
-]);
-
-const ALLOWED_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
-const MEDIA_HASH_PATTERN = /^[0-9a-f]{64}$/;
-const VERSION_PATTERN = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
-
-// ---------------------------------------------------------------------------
-// Pure helpers (also exercised by --self-test; no I/O, no network).
-// ---------------------------------------------------------------------------
+const FORBIDDEN_DRAFT_TEXT = /\b(?:approved|deficient|compliant|noncompliant|pass(?:ed)?|fail(?:ed)?|meets?\s+(?:the\s+)?standards?)\b/i;
+const MOVE_IN_READY_SCHEMA_VERSION = 5;
 
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isNonEmptyString(value) {
-  return typeof value === "string" && value.trim().length > 0;
+function exactKeys(value, keys) {
+  if (!isRecord(value)) return false;
+  const expected = new Set(keys);
+  return Object.keys(value).length === expected.size && Object.keys(value).every((key) => expected.has(key));
 }
 
-/**
- * Read the live bearer from process env only. Returns the trimmed key or
- * null when absent/blank. Never logs anything; callers must not log the
- * return value or whether it was present outside the fail-closed message.
- */
-export function readLiveKey(env) {
-  const raw = env?.META_API_KEY;
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  return trimmed.length > 0 ? trimmed : null;
+function sameIdentity(actual, expected) {
+  const keys = [
+    "sessionId", "schemaVersion", "videoId", "videoRevision", "analysisId", "attempt", "catalogVersion", "expectedVideoSha256",
+  ];
+  return exactKeys(actual, keys) &&
+    [actual.sessionId, actual.videoId, actual.analysisId].every((value) => typeof value === "string" && APP_ID_PATTERN.test(value)) &&
+    actual.schemaVersion === MOVE_IN_READY_SCHEMA_VERSION &&
+    typeof actual.catalogVersion === "string" && VERSION_PATTERN.test(actual.catalogVersion) &&
+    SHA256_PATTERN.test(actual.expectedVideoSha256) &&
+    Number.isSafeInteger(actual.videoRevision) && actual.videoRevision > 0 &&
+    Number.isSafeInteger(actual.attempt) && actual.attempt >= 0 &&
+    keys.every((key) => actual[key] === expected[key]);
 }
 
-/** Fail-closed gate: null when the live call may proceed, else the reason. */
-export function liveBlockedReason(env) {
-  return readLiveKey(env) === null ? "missing-key" : null;
+function hasLiveKey(env) {
+  return [env?.META_API_KEY, env?.MODEL_API_KEY].some((key) => typeof key === "string" && key.trim().length > 0);
 }
 
-function checkStringList(errors, where, value) {
-  if (!Array.isArray(value)) {
-    errors.push(`${where}: must be an array of 0-5 strings`);
-    return null;
+function resolveSmokeVideoPath(override) {
+  const selected = typeof override === "string" && override.trim() ? override.trim() : DEFAULT_VIDEO_PATH;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(selected)) {
+    return { ok: false, error: "SMOKE_VIDEO must name a local MP4 file, not a URL." };
   }
-  if (value.length > 5) {
-    errors.push(`${where}: must hold at most 5 entries`);
-    return null;
+  const resolved = path.isAbsolute(selected) ? path.normalize(selected) : path.resolve(REPO_ROOT, selected);
+  if (path.extname(resolved).toLowerCase() !== ".mp4") {
+    return { ok: false, error: "SMOKE_VIDEO must name an MP4 file." };
   }
-  for (let index = 0; index < value.length; index += 1) {
-    const entry = value[index];
-    if (typeof entry !== "string" || entry.length > 200) {
-      errors.push(`${where}[${index}]: must be a string of at most 200 characters`);
+  return { ok: true, path: resolved, isDefault: !override?.trim() };
+}
+
+function readSmokeVideo(override) {
+  const selected = resolveSmokeVideoPath(override);
+  if (!selected.ok) return selected;
+  try {
+    const stat = lstatSync(selected.path);
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      return { ok: false, error: "SMOKE_VIDEO must be a regular, non-symlink file." };
+    }
+    if (stat.size < 16 || stat.size > MAX_VIDEO_BYTES) {
+      return { ok: false, error: "SMOKE_VIDEO must be between 16 bytes and 60 MiB." };
+    }
+    const bytes = readFileSync(selected.path);
+    if (bytes.length !== stat.size || bytes.toString("ascii", 4, 8) !== "ftyp") {
+      return { ok: false, error: "SMOKE_VIDEO is not a readable ISO BMFF MP4 file." };
+    }
+    return { ok: true, bytes, isDefault: selected.isDefault };
+  } catch {
+    return { ok: false, error: "SMOKE_VIDEO could not be read." };
+  }
+}
+
+function readCatalogInfo() {
+  try {
+    const raw = readFileSync(path.join(REPO_ROOT, "src", "data", "catalog.demo.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    if (!isRecord(parsed) || typeof parsed.version !== "string" || !VERSION_PATTERN.test(parsed.version) || !Array.isArray(parsed.items)) {
       return null;
     }
-  }
-  return value;
-}
-
-function validateDraftShape(errors, draft) {
-  if (!isRecord(draft)) {
-    errors.push("envelope.draft: must be an object");
-    return null;
-  }
-  for (const key of Object.keys(draft)) {
-    if (FORBIDDEN_KEYS.has(key)) {
-      errors.push(`envelope.draft: forbidden field "${key}" (no verdict fields)`);
-    } else if (!DRAFT_KEYS.has(key)) {
-      errors.push(`envelope.draft: unexpected field "${key}"`);
-    }
-  }
-  let observation = null;
-  let visible = null;
-  let unknowns = null;
-  let suggested = null;
-  if (
-    typeof draft.observation !== "string" ||
-    draft.observation.trim().length === 0 ||
-    draft.observation.length > 600
-  ) {
-    errors.push('envelope.draft: "observation" must be 1-600 characters');
-  } else {
-    observation = draft.observation;
-  }
-  visible = checkStringList(errors, 'envelope.draft: "visibleEvidence"', draft.visibleEvidence);
-  unknowns = checkStringList(errors, 'envelope.draft: "unknowns"', draft.unknowns);
-  suggested = checkStringList(
-    errors,
-    'envelope.draft: "suggestedManualChecks"',
-    draft.suggestedManualChecks,
-  );
-  if (
-    errors.length === 0 &&
-    visible !== null &&
-    unknowns !== null &&
-    suggested !== null &&
-    visible.length === 0 &&
-    unknowns.length === 0 &&
-    suggested.length === 0
-  ) {
-    errors.push("envelope.draft: unusable empty output");
-  }
-  if (errors.length > 0 || observation === null || visible === null || unknowns === null || suggested === null) {
-    return null;
-  }
-  return { observation, visibleEvidence: visible, unknowns, suggestedManualChecks: suggested };
-}
-
-/**
- * Strictly validate a live /api/analyze success body. Live-only: top-level
- * and envelope mode must both be "live", and fixtureNotice must be absent
- * (fixture output must never stand in for live inference). Returns
- * { ok, errors, evidence } where evidence holds sanitized fields only.
- * Error strings reference field names, never provider content.
- */
-export function validateLiveResponse(body) {
-  const errors = [];
-  if (!isRecord(body)) {
-    return { ok: false, errors: ["response: must be an object"] };
-  }
-  for (const key of Object.keys(body)) {
-    if (!RESPONSE_KEYS.has(key)) {
-      errors.push(`response: unexpected field "${key}"`);
-    }
-  }
-  if ("fixtureNotice" in body) {
-    errors.push("response: fixtureNotice present (fixture output is not live inference)");
-  }
-  if (body.mode !== "live") {
-    errors.push('response: "mode" must be "live"');
-  }
-  if (!isNonEmptyString(body.model)) {
-    errors.push('response: "model" must be a non-empty string');
-  }
-  if (!isNonEmptyString(body.requestId)) {
-    errors.push('response: "requestId" must be a non-empty string');
-  }
-  if (typeof body.latencyMs !== "number" || !Number.isFinite(body.latencyMs) || body.latencyMs < 0) {
-    errors.push('response: "latencyMs" must be a finite number >= 0');
-  }
-
-  const envelope = body.envelope;
-  if (!isRecord(envelope)) {
-    errors.push("response: envelope must be an object");
-    return { ok: false, errors };
-  }
-  for (const key of Object.keys(envelope)) {
-    if (FORBIDDEN_KEYS.has(key)) {
-      errors.push(`envelope: forbidden field "${key}" (no verdict fields)`);
-    } else if (!ENVELOPE_KEYS.has(key)) {
-      errors.push(`envelope: unexpected field "${key}"`);
-    }
-  }
-  for (const key of ["analysisId", "sessionId", "itemId", "mediaId", "model", "requestId"]) {
-    if (!isNonEmptyString(envelope[key])) {
-      errors.push(`envelope: "${key}" must be a non-empty string`);
-    }
-  }
-  if (typeof envelope.catalogVersion !== "string" || !VERSION_PATTERN.test(envelope.catalogVersion)) {
-    errors.push('envelope: "catalogVersion" must look like "1.2.3"');
-  }
-  if (typeof envelope.mediaHash !== "string" || !MEDIA_HASH_PATTERN.test(envelope.mediaHash)) {
-    errors.push('envelope: "mediaHash" must be a SHA-256 hex digest (64 hex characters)');
-  }
-  if (envelope.mode !== "live") {
-    errors.push('envelope: "mode" must be "live"');
-  }
-  if (
-    typeof envelope.latencyMs !== "number" ||
-    !Number.isFinite(envelope.latencyMs) ||
-    envelope.latencyMs < 0
-  ) {
-    errors.push('envelope: "latencyMs" must be a finite number >= 0');
-  }
-  if (envelope.itemId !== ITEM_ID) {
-    errors.push(`envelope: "itemId" must be "${ITEM_ID}"`);
-  }
-  const draft = validateDraftShape(errors, envelope.draft);
-  if (errors.length > 0 || draft === null) {
-    return { ok: false, errors };
-  }
-
-  const media = body.normalizedMedia;
-  if (!isRecord(media)) {
-    return { ok: false, errors: ["response: normalizedMedia must be an object"] };
-  }
-  for (const key of Object.keys(media)) {
-    if (!NORMALIZED_MEDIA_KEYS.has(key)) {
-      errors.push(`normalizedMedia: unexpected field "${key}"`);
-    }
-  }
-  if (!isNonEmptyString(media.mediaId)) {
-    errors.push('normalizedMedia: "mediaId" must be a non-empty string');
-  }
-  if (typeof media.mime !== "string" || !ALLOWED_MIMES.has(media.mime)) {
-    errors.push('normalizedMedia: "mime" must be an allowed image MIME');
-  }
-  for (const key of ["width", "height"]) {
-    if (typeof media[key] !== "number" || !Number.isInteger(media[key]) || media[key] <= 0) {
-      errors.push(`normalizedMedia: "${key}" must be a positive integer`);
-    }
-  }
-  if (typeof media.digest !== "string" || !MEDIA_HASH_PATTERN.test(media.digest)) {
-    errors.push('normalizedMedia: "digest" must be a SHA-256 hex digest (64 hex characters)');
-  }
-  if (typeof media.base64 !== "string" || media.base64.length === 0) {
-    errors.push('normalizedMedia: "base64" must be a non-empty string');
-  }
-  if (errors.length > 0) {
-    return { ok: false, errors };
-  }
-
-  // Cross-field consistency (IDs and provenance must agree).
-  if (media.mediaId !== envelope.mediaId) {
-    errors.push("response: normalizedMedia.mediaId must match envelope.mediaId");
-  }
-  if (media.digest.toLowerCase() !== envelope.mediaHash.toLowerCase()) {
-    errors.push("response: normalizedMedia.digest must match envelope.mediaHash");
-  }
-  if (body.requestId !== envelope.requestId) {
-    errors.push("response: top-level requestId must match envelope.requestId");
-  }
-  if (body.model !== envelope.model) {
-    errors.push("response: top-level model must match envelope.model");
-  }
-  if (errors.length > 0) {
-    return { ok: false, errors };
-  }
-
-  // Canonical-bytes digest: decode once, hash, compare. The bytes themselves
-  // are never logged; only the hex digest leaves this function.
-  let canonical;
-  try {
-    canonical = Buffer.from(media.base64, "base64");
+    const elementIds = new Set(parsed.items.map((item) => item?.id).filter((id) => typeof id === "string"));
+    if (elementIds.size !== 11) return null;
+    return { version: parsed.version, elementIds };
   } catch {
-    return { ok: false, errors: ["response: normalizedMedia.base64 is not decodable"] };
+    return null;
   }
-  if (canonical.length === 0) {
-    return { ok: false, errors: ["response: canonical bytes are empty"] };
-  }
-  const sha256 = createHash("sha256").update(canonical).digest("hex");
-  if (sha256 !== media.digest.toLowerCase()) {
-    return { ok: false, errors: ["response: sha256 of canonical bytes must match digest"] };
-  }
+}
 
+function validateVideoCandidate(candidate, elementIds) {
+  if (!exactKeys(candidate, ["candidateId", "elementId", "concept", "evidence"]) ||
+      !CANDIDATE_ID_PATTERN.test(candidate.candidateId) || !elementIds.has(candidate.elementId) ||
+      typeof candidate.concept !== "string" || candidate.concept.trim().length === 0 || candidate.concept.length > 80) {
+    return false;
+  }
+  const evidence = candidate.evidence;
+  if (!isRecord(evidence)) return false;
+  const evidenceKeys = evidence.samConfidence === undefined
+    ? ["frameIndex", "timestampMs", "objectOrdinal", "box"]
+    : ["frameIndex", "timestampMs", "objectOrdinal", "box", "samConfidence"];
+  const box = evidence.box;
+  return exactKeys(evidence, evidenceKeys) &&
+    Number.isSafeInteger(evidence.frameIndex) && evidence.frameIndex >= 0 &&
+    Number.isSafeInteger(evidence.timestampMs) && evidence.timestampMs >= 0 && evidence.timestampMs <= 30_000 &&
+    Number.isSafeInteger(evidence.objectOrdinal) && evidence.objectOrdinal >= 0 &&
+    exactKeys(box, ["left", "top", "right", "bottom"]) &&
+    [box.left, box.top, box.right, box.bottom].every((coordinate) =>
+      typeof coordinate === "number" && Number.isFinite(coordinate) && coordinate >= 0 && coordinate <= 100_000) &&
+    box.right > box.left && box.bottom > box.top &&
+    (evidence.samConfidence === undefined ||
+      (typeof evidence.samConfidence === "number" && Number.isFinite(evidence.samConfidence) && evidence.samConfidence >= 0 && evidence.samConfidence <= 1));
+}
+
+function validateSegmentResponse(body, { identity, videoSha256, elementIds, now = Date.now() }) {
+  const errors = [];
+  const responseKeys = [
+    "ok", "stage", "models", "room", "media", "identity", "candidates", "sampleTimestampsMs",
+    "candidateToken", "mappingExpiresAt", "mappingRequired", "humanReviewRequired", "conditionAssessment",
+  ];
+  const emptyCandidates = isRecord(body) && Array.isArray(body.candidates) && body.candidates.length === 0;
+  if (!isRecord(body) || Object.keys(body).some((key) => !responseKeys.includes(key)) ||
+      responseKeys.filter((key) => key !== "candidateToken" && key !== "mappingExpiresAt").some((key) => !Object.hasOwn(body, key)) ||
+      (emptyCandidates ? (Object.hasOwn(body, "candidateToken") || Object.hasOwn(body, "mappingExpiresAt")) :
+        (!Object.hasOwn(body, "candidateToken") || !Object.hasOwn(body, "mappingExpiresAt")))) {
+    return { ok: false, errors: ["segment response has an unexpected shape"] };
+  }
+  if (body.ok !== true || body.stage !== "segmented") errors.push("segment response status is invalid");
+  if (!exactKeys(body.models, ["segmentation"]) || body.models.segmentation !== "sam-3.1") errors.push("segmentation model is invalid");
+  if (body.room !== DEFAULT_ROOM) errors.push("segment room is invalid");
+  if (!exactKeys(body.media, ["container", "sourceVideoSha256"]) || body.media.container !== "mp4" || body.media.sourceVideoSha256 !== videoSha256) {
+    errors.push("segment media identity is invalid");
+  }
+  if (!sameIdentity(body.identity, identity)) errors.push("segment request identity changed");
+  if (body.mappingRequired !== (Array.isArray(body.candidates) && body.candidates.length > 0) || body.humanReviewRequired !== true || body.conditionAssessment !== "not_assessed") {
+    errors.push("segment review boundary is invalid");
+  }
+  if (!Array.isArray(body.candidates) || body.candidates.length > 12) {
+    errors.push("segment candidates are invalid");
+  } else {
+    const candidateIds = new Set();
+    for (const candidate of body.candidates) {
+      if (!validateVideoCandidate(candidate, elementIds) || candidateIds.has(candidate.candidateId)) {
+        errors.push("segment candidate evidence is invalid");
+        break;
+      }
+      candidateIds.add(candidate.candidateId);
+    }
+  }
+  const samples = body.sampleTimestampsMs;
+  if (!Array.isArray(samples) || samples.length < 1 || samples.length > 30 ||
+      samples.some((timestamp, index) => !Number.isSafeInteger(timestamp) || timestamp < 0 || timestamp > 30_000 ||
+        (index > 0 && timestamp <= samples[index - 1]))) {
+    errors.push("segment context schedule is invalid");
+  }
+  if (!emptyCandidates) {
+    if (typeof body.candidateToken !== "string" || body.candidateToken.length < 16 || body.candidateToken.length > TOKEN_MAX_LENGTH) {
+      errors.push("segment mapping token is invalid");
+    }
+    if (!Number.isSafeInteger(body.mappingExpiresAt) || body.mappingExpiresAt <= now || body.mappingExpiresAt > now + MAPPING_TTL_MS + 5_000) {
+      errors.push("segment lease expiry is invalid");
+    }
+  }
+  if (errors.length > 0) return { ok: false, errors };
   return {
     ok: true,
-    errors: [],
-    evidence: {
-      model: envelope.model,
-      mode: "live",
-      requestId: envelope.requestId,
-      latencyMs: envelope.latencyMs,
-      sha256,
-      width: media.width,
-      height: media.height,
-    },
+    candidateCount: body.candidates.length,
+    candidateToken: body.candidateToken ?? null,
+    mappingExpiresAt: body.mappingExpiresAt,
+    candidates: body.candidates,
   };
 }
 
-// ---------------------------------------------------------------------------
-// --self-test (pure, no network, no key required).
-// ---------------------------------------------------------------------------
+function validateMappedEvidence(evidence, candidatesById) {
+  if (!exactKeys(evidence, ["candidateId", "elementId", "concept", "evidence", "still"])) return false;
+  const candidate = candidatesById.get(evidence.candidateId);
+  if (!candidate || evidence.elementId !== candidate.elementId || evidence.concept !== candidate.concept ||
+      JSON.stringify(evidence.evidence) !== JSON.stringify(candidate.evidence)) return false;
+  return exactKeys(evidence.still, ["sha256", "mimeType"]) && SHA256_PATTERN.test(evidence.still.sha256) &&
+    (evidence.still.mimeType === "image/jpeg" || evidence.still.mimeType === "image/png");
+}
 
-function selfTestEnvelope(overrides = {}) {
-  const mediaHash = createHash("sha256").update("canonical-bytes").digest("hex");
+function validateMappedResponse(body, { identity, videoSha256, candidates, elementIds }) {
+  const errors = [];
+  const responseKeys = ["ok", "stage", "models", "room", "media", "identity", "proposals", "humanReviewRequired", "conditionAssessment"];
+  if (!exactKeys(body, responseKeys)) return { ok: false, errors: ["mapping response has an unexpected shape"] };
+  if (body.ok !== true || body.stage !== "mapped") errors.push("mapping response status is invalid");
+  if (!exactKeys(body.models, ["segmentation", "mapping"]) || body.models.segmentation !== "sam-3.1" || body.models.mapping !== "muse-spark-1.3") {
+    errors.push("mapping model is invalid");
+  }
+  if (body.room !== DEFAULT_ROOM || !sameIdentity(body.identity, identity) ||
+      !exactKeys(body.media, ["container", "sourceVideoSha256"]) || body.media.container !== "mp4" || body.media.sourceVideoSha256 !== videoSha256) {
+    errors.push("mapping media identity is invalid");
+  }
+  if (body.humanReviewRequired !== true || body.conditionAssessment !== "not_assessed") errors.push("mapping review boundary is invalid");
+  const candidatesById = new Map(candidates.map((candidate) => [candidate.candidateId, candidate]));
+  if (!Array.isArray(body.proposals) || body.proposals.length > 11) {
+    errors.push("mapping proposals are invalid");
+  } else {
+    const proposalElementIds = new Set();
+    for (const proposal of body.proposals) {
+      const keys = ["elementId", "state", "modelSuggestion", "observation", "confidence", "evidenceCandidateIds", "evidence"];
+      if (proposal?.modelSuggestion === "D") keys.push("deficiencySuggestion");
+      if (!exactKeys(proposal, keys) || !elementIds.has(proposal.elementId) || proposalElementIds.has(proposal.elementId) ||
+          proposal.state !== "draft-proposal" || (proposal.modelSuggestion !== "A" && proposal.modelSuggestion !== "D") ||
+          typeof proposal.observation !== "string" || proposal.observation.trim().length === 0 || proposal.observation.length > 600 ||
+          FORBIDDEN_DRAFT_TEXT.test(proposal.observation) ||
+          typeof proposal.confidence !== "number" || !Number.isFinite(proposal.confidence) || proposal.confidence < 0 || proposal.confidence > 100 ||
+          !Array.isArray(proposal.evidenceCandidateIds) || proposal.evidenceCandidateIds.length < 1 || proposal.evidenceCandidateIds.length > 5 ||
+          !Array.isArray(proposal.evidence) || proposal.evidence.length !== proposal.evidenceCandidateIds.length) {
+        errors.push("mapping proposal is invalid");
+        break;
+      }
+      const usedCandidateIds = new Set();
+      let evidenceValid = true;
+      for (let index = 0; index < proposal.evidenceCandidateIds.length; index += 1) {
+        const candidateId = proposal.evidenceCandidateIds[index];
+        const evidence = proposal.evidence[index];
+        if (typeof candidateId !== "string" || usedCandidateIds.has(candidateId) || evidence?.candidateId !== candidateId ||
+            evidence?.elementId !== proposal.elementId || !validateMappedEvidence(evidence, candidatesById)) {
+          evidenceValid = false;
+          break;
+        }
+        usedCandidateIds.add(candidateId);
+      }
+      if (!evidenceValid) {
+        errors.push("mapping evidence is invalid");
+        break;
+      }
+      if (proposal.modelSuggestion === "D") {
+        const deficiency = proposal.deficiencySuggestion;
+        if (!exactKeys(deficiency, ["deficientArea", "correction", "completionDate", "reinspectionDate"]) ||
+            typeof deficiency.deficientArea !== "string" || deficiency.deficientArea.trim().length === 0 || deficiency.deficientArea.length > 300 ||
+            typeof deficiency.correction !== "string" || deficiency.correction.trim().length === 0 || deficiency.correction.length > 600 ||
+            !/^\d{4}-\d{2}-\d{2}$/.test(deficiency.completionDate) || !/^\d{4}-\d{2}-\d{2}$/.test(deficiency.reinspectionDate)) {
+          errors.push("mapping correction suggestion is invalid");
+          break;
+        }
+      }
+      proposalElementIds.add(proposal.elementId);
+    }
+  }
+  if (errors.length > 0) return { ok: false, errors };
+  return { ok: true, proposalCount: body.proposals.length };
+}
+
+function liveBlockedReason(env) {
+  return hasLiveKey(env) ? null : "missing-key";
+}
+
+async function readJsonBody(response, maxBytes = MAX_JSON_BYTES) {
+  const reader = response.body?.getReader();
+  if (!reader) return null;
+  const chunks = [];
+  let length = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > maxBytes) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return null;
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return null;
+  }
+}
+
+function safeFailureCode(body) {
+  const code = isRecord(body) && isRecord(body.error) ? body.error.code : null;
+  return typeof code === "string" && SAFE_VIDEO_ERROR_CODES.has(code) ? code : "UNKNOWN";
+}
+
+function makeIdentity(catalogVersion, videoSha256) {
   return {
-    analysisId: "analysis-selftest-1",
-    sessionId: "session-selftest-1",
-    itemId: ITEM_ID,
-    catalogVersion: "0.2.0-demo.1",
-    mediaId: "media-selftest-1",
-    mediaHash,
-    model: "muse-spark-1.3",
-    mode: "live",
-    requestId: "req-selftest-1",
-    latencyMs: 123,
-    draft: {
-      observation: "A small white alarm unit is mounted on the ceiling.",
-      visibleEvidence: ["round unit on the ceiling"],
-      unknowns: ["Whether the alarm sounds cannot be told from the photo."],
-      suggestedManualChecks: ["Press the test button and confirm the alarm sounds."],
-    },
-    ...overrides,
+    sessionId: `live-smoke-${randomUUID()}`,
+    schemaVersion: MOVE_IN_READY_SCHEMA_VERSION,
+    videoId: `live-smoke-video-${randomUUID()}`,
+    videoRevision: 1,
+    analysisId: `live-smoke-analysis-${randomUUID()}`,
+    attempt: 0,
+    catalogVersion,
+    expectedVideoSha256: videoSha256,
   };
 }
 
-function selfTestBody(overrides = {}) {
-  const mediaHash = createHash("sha256").update("canonical-bytes").digest("hex");
-  const canonicalB64 = Buffer.from("canonical-bytes").toString("base64");
-  const envelope = selfTestEnvelope();
-  return {
-    envelope,
-    normalizedMedia: {
-      mediaId: envelope.mediaId,
-      mime: "image/jpeg",
-      width: 800,
-      height: 600,
-      digest: mediaHash,
-      base64: canonicalB64,
-      targetWidth: 800,
-      targetHeight: 600,
-      resampleRequired: false,
-      pixelTransposeRequired: false,
-    },
-    mode: "live",
-    model: envelope.model,
-    requestId: envelope.requestId,
-    latencyMs: envelope.latencyMs,
-    ...overrides,
-  };
+function fillIdentity(form, identity) {
+  for (const [key, value] of Object.entries(identity)) form.set(key, String(value));
+}
+
+async function requestJson(url, form, origin, timeoutMs) {
+  const response = await fetch(url, {
+    method: "POST",
+    body: form,
+    headers: { origin },
+    redirect: "error",
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const body = await readJsonBody(response);
+  return { response, body };
+}
+
+async function releasePendingLease(baseUrl, identity, candidateToken) {
+  const form = new FormData();
+  form.set("stage", "cancel");
+  fillIdentity(form, identity);
+  if (typeof candidateToken === "string" && candidateToken.length <= TOKEN_MAX_LENGTH) {
+    form.set("candidateToken", candidateToken);
+  }
+  try {
+    const { response, body } = await requestJson(
+      `${baseUrl}/api/video/segment?stage=cancel`, form, baseUrl, CANCEL_TIMEOUT_MS,
+    );
+    if (!response.ok || !isRecord(body) || body.ok !== true || body.stage !== "cancelled" || typeof body.released !== "boolean") return null;
+    return body.released;
+  } catch {
+    return null;
+  }
+}
+
+function reserveSmokePort(requestedPort) {
+  const parsed = requestedPort === undefined || requestedPort.trim() === "" ? 0 : Number(requestedPort);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65_535) return Promise.reject(new Error("invalid-port"));
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", () => reject(new Error("port-unavailable")));
+    server.listen(parsed, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : null;
+      server.close((error) => {
+        if (error || typeof port !== "number") reject(new Error("port-unavailable"));
+        else resolve(port);
+      });
+    });
+  });
+}
+
+async function waitForServerReady(baseUrl, child, didSpawnFail) {
+  const deadline = Date.now() + SERVER_READY_TIMEOUT_MS;
+  while (Date.now() < deadline && child.exitCode === null && !didSpawnFail()) {
+    try {
+      const response = await fetch(baseUrl, {
+        method: "GET",
+        redirect: "error",
+        signal: AbortSignal.timeout(3_000),
+      });
+      await response.body?.cancel().catch(() => undefined);
+      if (response.ok) return true;
+    } catch {
+      // Poll only the locally spawned production server until it is ready.
+    }
+    await delay(SERVER_POLL_INTERVAL_MS);
+  }
+  return false;
+}
+
+function stopServer(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      resolve();
+    }, 5_000);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    child.kill("SIGTERM");
+  });
 }
 
 function runSelfTest() {
   const results = [];
   const check = (name, fn) => {
     try {
-      const detail = fn();
-      results.push({ name, pass: detail === true, detail: detail === true ? "" : String(detail) });
-    } catch (error) {
-      results.push({ name, pass: false, detail: error instanceof Error ? error.message : String(error) });
+      results.push({ name, pass: fn() === true });
+    } catch {
+      results.push({ name, pass: false });
     }
   };
+  const expected = {
+    sessionId: "live-smoke-session",
+    schemaVersion: MOVE_IN_READY_SCHEMA_VERSION,
+    videoId: "live-smoke-video",
+    videoRevision: 1,
+    analysisId: "live-smoke-analysis",
+    attempt: 0,
+    catalogVersion: "0.3.0-demo.3",
+    expectedVideoSha256: "a".repeat(64),
+  };
+  const elementIds = new Set(["demo-water-supply"]);
+  const candidate = {
+    candidateId: "cand-0001",
+    elementId: "demo-water-supply",
+    concept: "water faucet",
+    evidence: {
+      frameIndex: 1,
+      timestampMs: 1_000,
+      objectOrdinal: 0,
+      box: { left: 10, top: 12, right: 80, bottom: 90 },
+      samConfidence: 0.9,
+    },
+  };
+  const segmentBody = (overrides = {}) => ({
+    ok: true,
+    stage: "segmented",
+    models: { segmentation: "sam-3.1" },
+    room: "kitchen",
+    media: { container: "mp4", sourceVideoSha256: expected.expectedVideoSha256 },
+    identity: expected,
+    candidates: [candidate],
+    sampleTimestampsMs: [500, 1_500, 2_500, 3_500],
+    candidateToken: "signed-candidate-token-for-self-test",
+    mappingExpiresAt: Date.now() + 60_000,
+    mappingRequired: true,
+    humanReviewRequired: true,
+    conditionAssessment: "not_assessed",
+    ...overrides,
+  });
 
-  // Fail-closed gate: no key (or blank key) blocks; a set key proceeds.
-  // Assertions compare gate outcomes only — key values are never printed.
   check("fail-closed: missing key blocks", () => liveBlockedReason({}) === "missing-key");
-  check("fail-closed: blank key blocks", () => liveBlockedReason({ META_API_KEY: "   " }) === "missing-key");
-  check("fail-closed: non-string key blocks", () => liveBlockedReason({ META_API_KEY: 42 }) === "missing-key");
-  check("fail-closed: set key proceeds", () => liveBlockedReason({ META_API_KEY: "k" }) === null);
-  check("fail-closed: surrounding whitespace trimmed", () => readLiveKey({ META_API_KEY: "  k  " }) === "k");
-
-  // Shape validation: one valid body plus strict rejections.
-  check("shape: valid live body passes", () => {
-    const result = validateLiveResponse(selfTestBody());
-    return result.ok === true && result.evidence?.mode === "live";
-  });
-  check("shape: verdict field in draft rejected", () => {
-    const envelope = selfTestEnvelope({
-      draft: {
-        observation: "Unit visible.",
-        visibleEvidence: ["unit"],
-        unknowns: ["Sound unknown."],
-        suggestedManualChecks: ["Press the test button."],
-        verdict: "pass",
-      },
+  check("fail-closed: blank key blocks", () => liveBlockedReason({ META_API_KEY: "  " }) === "missing-key");
+  check("fail-closed: non-string key blocks", () => liveBlockedReason({ META_API_KEY: 5 }) === "missing-key");
+  check("fail-closed: configured key permits runner", () => liveBlockedReason({ META_API_KEY: "secret" }) === null);
+  check("provider key alias permits runner", () => liveBlockedReason({ MODEL_API_KEY: "secret" }) === null);
+  check("default media is the synthetic H.264 MP4 fixture", () =>
+    resolveSmokeVideoPath(undefined).path === DEFAULT_VIDEO_PATH && resolveSmokeVideoPath(undefined).isDefault);
+  check("explicit MP4 media path is accepted", () => resolveSmokeVideoPath("/tmp/staged-mock-unit.mp4").ok);
+  check("non-video photo paths are rejected", () => resolveSmokeVideoPath("/tmp/photo.jpg").ok === false);
+  check("remote media URLs are rejected", () => resolveSmokeVideoPath("https://example.invalid/video.mp4").ok === false);
+  check("valid SAM segment candidate enables mapping", () => {
+    const result = validateSegmentResponse(segmentBody(), {
+      identity: expected,
+      videoSha256: expected.expectedVideoSha256,
+      elementIds,
     });
-    const result = validateLiveResponse(selfTestBody({ envelope }));
-    return result.ok === false;
+    return result.ok && result.candidateCount === 1 && typeof result.candidateToken === "string";
   });
-  check("shape: verdict field at envelope level rejected", () => {
-    const envelope = { ...selfTestEnvelope(), compliant: true };
-    const result = validateLiveResponse(selfTestBody({ envelope }));
-    return result.ok === false;
-  });
-  check("shape: unexpected envelope field rejected", () => {
-    const envelope = { ...selfTestEnvelope(), extra: 1 };
-    const result = validateLiveResponse(selfTestBody({ envelope }));
-    return result.ok === false;
-  });
-  check("shape: fixture mode rejected in live smoke", () => {
-    const envelope = selfTestEnvelope({ mode: "fixture" });
-    const result = validateLiveResponse(selfTestBody({ envelope, mode: "fixture" }));
-    return result.ok === false;
-  });
-  check("shape: fixtureNotice rejected", () => {
-    const result = validateLiveResponse(selfTestBody({ fixtureNotice: "Fixture output." }));
-    return result.ok === false;
-  });
-  check("shape: wrong item rejected", () => {
-    const envelope = selfTestEnvelope({ itemId: "demo-water-supply" });
-    const result = validateLiveResponse(selfTestBody({ envelope }));
-    return result.ok === false;
-  });
-  check("shape: malformed mediaHash rejected", () => {
-    const envelope = selfTestEnvelope({ mediaHash: "not-a-hash" });
-    const result = validateLiveResponse(selfTestBody({ envelope }));
-    return result.ok === false;
-  });
-  check("shape: empty draft rejected", () => {
-    const envelope = selfTestEnvelope({
-      draft: { observation: "Unit visible.", visibleEvidence: [], unknowns: [], suggestedManualChecks: [] },
+  check("empty SAM result is valid without an unused lease", () => {
+    const base = segmentBody({ candidates: [], mappingRequired: false });
+    delete base.candidateToken;
+    delete base.mappingExpiresAt;
+    const result = validateSegmentResponse(base, {
+      identity: expected,
+      videoSha256: expected.expectedVideoSha256,
+      elementIds,
     });
-    const result = validateLiveResponse(selfTestBody({ envelope }));
-    return result.ok === false;
+    return result.ok && result.candidateCount === 0 && result.candidateToken === null;
   });
-  check("shape: oversized observation rejected", () => {
-    const envelope = selfTestEnvelope({
-      draft: {
-        observation: "x".repeat(601),
-        visibleEvidence: ["unit"],
-        unknowns: ["Sound unknown."],
-        suggestedManualChecks: ["Press the test button."],
-      },
+  check("segment identity mismatch rejected", () => {
+    const result = validateSegmentResponse(segmentBody({ media: { container: "mp4", sourceVideoSha256: "b".repeat(64) } }), {
+      identity: expected,
+      videoSha256: expected.expectedVideoSha256,
+      elementIds,
     });
-    const result = validateLiveResponse(selfTestBody({ envelope }));
-    return result.ok === false;
+    return !result.ok;
   });
-  check("shape: digest mismatch rejected", () => {
-    const body = selfTestBody();
-    const tampered = {
-      ...body,
-      normalizedMedia: { ...body.normalizedMedia, base64: Buffer.from("other-bytes").toString("base64") },
+  check("invalid SAM candidate evidence rejected", () => {
+    const result = validateSegmentResponse(segmentBody({ candidates: [{ ...candidate, evidence: { ...candidate.evidence, frameIndex: -1 } }] }), {
+      identity: expected,
+      videoSha256: expected.expectedVideoSha256,
+      elementIds,
+    });
+    return !result.ok;
+  });
+  check("mapped response remains an unreviewed proposal", () => {
+    const stillSha256 = "c".repeat(64);
+    const evidence = { ...candidate, still: { sha256: stillSha256, mimeType: "image/jpeg" } };
+    const body = {
+      ok: true,
+      stage: "mapped",
+      models: { segmentation: "sam-3.1", mapping: "muse-spark-1.3" },
+      room: "kitchen",
+      media: { container: "mp4", sourceVideoSha256: expected.expectedVideoSha256 },
+      identity: expected,
+      proposals: [{
+        elementId: "demo-water-supply",
+        state: "draft-proposal",
+        modelSuggestion: "A",
+        observation: "A faucet is visible in the frame.",
+        confidence: 82,
+        evidenceCandidateIds: ["cand-0001"],
+        evidence: [evidence],
+      }],
+      humanReviewRequired: true,
+      conditionAssessment: "not_assessed",
     };
-    const result = validateLiveResponse(tampered);
-    return result.ok === false;
+    return validateMappedResponse(body, {
+      identity: expected,
+      videoSha256: expected.expectedVideoSha256,
+      candidates: [candidate],
+      elementIds,
+    }).ok;
   });
-  check("shape: mismatched requestId rejected", () => {
-    const result = validateLiveResponse(selfTestBody({ requestId: "req-other" }));
-    return result.ok === false;
-  });
-  check("shape: errors never echo untrusted values", () => {
-    const sentinel = `sentinel-${"x".repeat(590)}-tail`;
-    const envelope = selfTestEnvelope({
-      draft: {
-        observation: sentinel,
-        visibleEvidence: ["unit"],
-        unknowns: ["Sound unknown."],
-        suggestedManualChecks: ["Press the test button."],
-      },
-    });
-    const result = validateLiveResponse(selfTestBody({ envelope }));
-    if (result.ok !== false) return "expected rejection";
-    return !result.errors.join(";").includes(sentinel);
+  check("mapped final verdict field rejected", () => {
+    const body = {
+      ok: true,
+      stage: "mapped",
+      models: { segmentation: "sam-3.1", mapping: "muse-spark-1.3" },
+      room: "kitchen",
+      media: { container: "mp4", sourceVideoSha256: expected.expectedVideoSha256 },
+      identity: expected,
+      proposals: [{
+        elementId: "demo-water-supply",
+        state: "draft-proposal",
+        modelSuggestion: "A",
+        observation: "A faucet is visible in the frame.",
+        confidence: 82,
+        evidenceCandidateIds: ["cand-0001"],
+        evidence: [],
+        approved: true,
+      }],
+      humanReviewRequired: true,
+      conditionAssessment: "not_assessed",
+    };
+    return !validateMappedResponse(body, {
+      identity: expected,
+      videoSha256: expected.expectedVideoSha256,
+      candidates: [candidate],
+      elementIds,
+    }).ok;
   });
 
-  const passed = results.filter((entry) => entry.pass).length;
-  for (const entry of results) {
-    if (!entry.pass) {
-      console.error(`test:live --self-test FAILED: ${entry.name}${entry.detail ? ` (${entry.detail})` : ""}`);
-    }
+  const passed = results.filter((result) => result.pass).length;
+  for (const result of results) {
+    if (!result.pass) console.error(`test:live --self-test FAILED: ${result.name}`);
   }
   if (passed === results.length) {
-    console.log(`test:live --self-test: ${passed}/${results.length} checks passed (no network, no key required).`);
-    process.exit(0);
+    console.log(`test:live --self-test: ${passed}/${results.length} checks passed (offline; no key, media, server, or network).`);
+    process.exitCode = 0;
   } else {
     console.error(`test:live --self-test: ${passed}/${results.length} checks passed.`);
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 
-// ---------------------------------------------------------------------------
-// Live path (coordinator-side only).
-// ---------------------------------------------------------------------------
+async function runLiveSmoke() {
+  const result = { exitCode: 1, failure: null, summary: null, leaseReleased: null };
+  let child = null;
+  let spawnFailed = false;
+  let segmentRequested = false;
+  let mappingCompleted = false;
+  let candidateToken = null;
+  let identity = null;
+  let baseUrl = null;
+  const startedAt = Date.now();
 
-function readCatalogVersion() {
   try {
-    const raw = readFileSync(path.join(REPO_ROOT, "src", "data", "catalog.demo.json"), "utf8");
-    const parsed = JSON.parse(raw);
-    if (typeof parsed?.version === "string" && VERSION_PATTERN.test(parsed.version)) {
-      return parsed.version;
+    // Next's environment loader respects shell values, loads local .env files,
+    // and is given a silent logger so neither keys nor parsed values are printed.
+    loadEnvConfig(REPO_ROOT, false, { info() {}, error() {} });
+    if (liveBlockedReason(process.env) !== null) {
+      result.failure = "test:live BLOCKED: META_API_KEY is not set in the process or local Next.js environment. No provider call was attempted.";
+      return result;
     }
-    return null;
-  } catch {
-    return null;
-  }
-}
 
-function readImageBytes(imagePath) {
-  try {
-    const bytes = readFileSync(imagePath);
-    return bytes;
-  } catch {
-    return null;
-  }
-}
+    const video = readSmokeVideo(process.env.SMOKE_VIDEO);
+    if (!video.ok) {
+      result.failure = `test:live BLOCKED: ${video.error} No provider call was attempted.`;
+      return result;
+    }
+    const catalog = readCatalogInfo();
+    if (!catalog) {
+      result.failure = "test:live FAILED: the bundled demo catalog could not be validated. No provider call was attempted.";
+      return result;
+    }
+    const videoSha256 = createHash("sha256").update(video.bytes).digest("hex");
+    identity = makeIdentity(catalog.version, videoSha256);
 
-async function waitForServerReady(baseUrl) {
-  const deadline = Date.now() + SERVER_READY_TIMEOUT_MS;
-  for (;;) {
+    let port;
     try {
-      const response = await fetch(baseUrl, { method: "GET", signal: AbortSignal.timeout(5000) });
-      await response.arrayBuffer().catch(() => undefined);
-      if (response.ok) return true;
+      port = await reserveSmokePort(process.env.SMOKE_PORT);
     } catch {
-      // Server not up yet; keep polling until the deadline.
+      result.failure = "test:live FAILED: SMOKE_PORT is invalid or already in use. No provider call was attempted.";
+      return result;
     }
-    if (Date.now() >= deadline) return false;
-    await delay(SERVER_POLL_INTERVAL_MS);
+    baseUrl = `http://127.0.0.1:${port}`;
+    const childEnv = {
+      ...process.env,
+      APP_ANALYSIS_MODE: "live",
+      // Next normalizes its internal request URL to the local server origin;
+      // explicitly trust the runner's loopback origin for this isolated smoke.
+      APP_PUBLIC_ORIGIN: baseUrl,
+      PORT: String(port),
+      HOSTNAME: "127.0.0.1",
+      NEXT_TELEMETRY_DISABLED: "1",
+    };
+    // Prevent the optional mapping fallback from making a second provider call.
+    // An explicitly empty value prevents Next's child from restoring the
+    // optional fallback key from .env after this process removes it.
+    childEnv.BASETEN_API_KEY = "";
+    child = spawn(process.execPath, [NEXT_CLI, "start", "--port", String(port), "--hostname", "127.0.0.1"], {
+      cwd: REPO_ROOT,
+      env: childEnv,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.once("error", () => { spawnFailed = true; });
+    if (!await waitForServerReady(baseUrl, child, () => spawnFailed)) {
+      result.failure = "test:live FAILED: the local production server did not become ready. Run npm run build first. No provider request was sent.";
+      return result;
+    }
+
+    const segmentForm = new FormData();
+    segmentForm.set("stage", "segment");
+    segmentForm.set("room", DEFAULT_ROOM);
+    fillIdentity(segmentForm, identity);
+    segmentForm.set("video", new Blob([video.bytes], { type: "video/mp4" }), "live-smoke.mp4");
+    segmentRequested = true;
+
+    let segmentResponse;
+    let segmentBody;
+    try {
+      ({ response: segmentResponse, body: segmentBody } = await requestJson(
+        `${baseUrl}/api/video/segment?stage=segment`, segmentForm, baseUrl, REQUEST_TIMEOUT_MS,
+      ));
+    } catch {
+      result.failure = "test:live FAILED: the single video segment request timed out or was unreachable. No retry was attempted.";
+      return result;
+    }
+    if (isRecord(segmentBody) && typeof segmentBody.candidateToken === "string" && segmentBody.candidateToken.length <= TOKEN_MAX_LENGTH) {
+      candidateToken = segmentBody.candidateToken;
+    }
+    if (!segmentResponse.ok) {
+      const code = safeFailureCode(segmentBody);
+      result.failure = `test:live FAILED: video segment returned HTTP ${segmentResponse.status} (code ${code}). No retry was attempted.`;
+      return result;
+    }
+    const checkedSegment = validateSegmentResponse(segmentBody, {
+      identity,
+      videoSha256,
+      elementIds: catalog.elementIds,
+    });
+    if (!checkedSegment.ok) {
+      result.failure = `test:live FAILED: video segment response validation failed: ${checkedSegment.errors.join("; ")}.`;
+      return result;
+    }
+    candidateToken = checkedSegment.candidateToken;
+
+    let mappingStatus = "skipped-no-candidates";
+    let mappingModel = null;
+    let proposalCount = null;
+    let mappingRequests = 0;
+    if (checkedSegment.candidateCount > 0) {
+      mappingStatus = "pending";
+      const mapForm = new FormData();
+      mapForm.set("stage", "map");
+      mapForm.set("room", DEFAULT_ROOM);
+      fillIdentity(mapForm, identity);
+      mapForm.set("candidateToken", checkedSegment.candidateToken);
+      mappingRequests = 1;
+      let mapResponse;
+      let mapBody;
+      try {
+        ({ response: mapResponse, body: mapBody } = await requestJson(
+          `${baseUrl}/api/video/segment?stage=map`, mapForm, baseUrl, REQUEST_TIMEOUT_MS,
+        ));
+      } catch {
+        result.failure = "test:live FAILED: the single eligible mapping request timed out or was unreachable. No retry was attempted.";
+        return result;
+      }
+      if (!mapResponse.ok) {
+        const code = safeFailureCode(mapBody);
+        result.failure = `test:live FAILED: eligible mapping returned HTTP ${mapResponse.status} (code ${code}). No retry was attempted.`;
+        return result;
+      }
+      const checkedMap = validateMappedResponse(mapBody, {
+        identity,
+        videoSha256,
+        candidates: checkedSegment.candidates,
+        elementIds: catalog.elementIds,
+      });
+      if (!checkedMap.ok) {
+        result.failure = `test:live FAILED: eligible mapping response validation failed: ${checkedMap.errors.join("; ")}.`;
+        return result;
+      }
+      mappingStatus = "completed";
+      mappingModel = mapBody.models.mapping;
+      proposalCount = checkedMap.proposalCount;
+      mappingCompleted = true;
+    } else {
+      mappingCompleted = true;
+    }
+
+    result.summary = {
+      mode: "live",
+      route: "/api/video/segment",
+      room: DEFAULT_ROOM,
+      segmentationModel: "sam-3.1",
+      videoSha256,
+      videoBytes: video.bytes.length,
+      segmentRequests: 1,
+      mappingRequests,
+      mapping: mappingStatus,
+      mappingModel,
+      proposalCount,
+      videoQuality: "not-assessed",
+      latencyMs: Date.now() - startedAt,
+    };
+    result.exitCode = 0;
+    return result;
+  } catch {
+    result.failure = "test:live FAILED: local smoke setup failed. No provider response or secret was logged.";
+    return result;
+  } finally {
+    if (segmentRequested && identity && !mappingCompleted) {
+      if (baseUrl) result.leaseReleased = await releasePendingLease(baseUrl, identity, candidateToken);
+    }
+    if (child) await stopServer(child);
   }
 }
 
 async function main() {
-  const args = new Set(process.argv.slice(2));
-  if (args.has("--self-test")) {
+  if (process.argv.slice(2).includes("--self-test")) {
     runSelfTest();
     return;
   }
-
-  // Fail closed without credentials: explicit message, exit 1, no fixture
-  // fallback, no fixture success claim, no live call attempted.
-  if (liveBlockedReason(process.env) !== null) {
-    console.error(
-      "test:live BLOCKED: META_API_KEY is not set. " +
-        "Live Meta smoke requires server-only credentials and rights-cleared media; " +
-        "fixture output must never stand in for live inference. " +
-        "Set META_API_KEY in the environment (name only on the command line; never commit values) " +
-        `and provide a rights-cleared JPEG at SMOKE_IMAGE (default ${DEFAULT_IMAGE_PATH}). ` +
-        "No live call was attempted.",
-    );
-    process.exit(1);
+  const result = await runLiveSmoke();
+  if (result.exitCode !== 0) {
+    console.error(result.failure ?? "test:live FAILED: the video smoke did not complete.");
+    process.exitCode = result.exitCode;
+    return;
   }
-
-  const imagePath = process.env.SMOKE_IMAGE?.trim() || DEFAULT_IMAGE_PATH;
-  const imageBytes = readImageBytes(imagePath);
-  if (imageBytes === null || imageBytes.length === 0) {
-    console.error(
-      `test:live FAILED: smoke image not found or empty at SMOKE_IMAGE path "${imagePath}". ` +
-        "Provide a rights-cleared JPEG outside the repo (default /tmp/live-smoke-detector.jpg). " +
-        "No fixture substitution was made.",
-    );
-    process.exit(1);
+  // `summary` is populated before teardown. The only emitted fields are
+  // sanitized operational metadata; provider bodies, IDs/tokens, paths,
+  // candidate/model text and secrets are never printed.
+  const output = result.summary;
+  if (!output) {
+    console.error("test:live FAILED: sanitized evidence was unavailable.");
+    process.exitCode = 1;
+    return;
   }
-  if (imageBytes.length > MAX_IMAGE_BYTES) {
-    console.error(
-      "test:live FAILED: smoke image exceeds the 8 MiB upload bound. Choose a smaller rights-cleared photo.",
-    );
-    process.exit(1);
-  }
-
-  const catalogVersion = readCatalogVersion();
-  if (catalogVersion === null) {
-    console.error("test:live FAILED: demo catalog version is unreadable; run from the repo root.");
-    process.exit(1);
-  }
-
-  const port = Number.parseInt(process.env.SMOKE_PORT?.trim() || String(DEFAULT_PORT), 10);
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-    console.error("test:live FAILED: SMOKE_PORT must be a valid TCP port number.");
-    process.exit(1);
-  }
-  const baseUrl = `http://127.0.0.1:${port}`;
-
-  // Production-build server in live mode. The key travels via process env
-  // only and is never printed. Build must already exist (`npm run build`).
-  const child = spawn("npx", ["--no-install", "next", "start", "--port", String(port), "--hostname", "127.0.0.1"], {
-    cwd: REPO_ROOT,
-    env: { ...process.env, APP_ANALYSIS_MODE: "live", PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let tail = "";
-  const remember = (chunk) => {
-    tail += String(chunk);
-    if (tail.length > 4000) tail = tail.slice(-4000);
-  };
-  child.stdout?.on("data", remember);
-  child.stderr?.on("data", remember);
-  // A spawn failure surfaces via the readiness timeout (explicit build-first
-  // message); never let an unhandled 'error' event crash the runner.
-  child.once("error", remember);
-
-  const stopServer = () =>
-    new Promise((resolve) => {
-      if (child.exitCode !== null || child.signalCode !== null) {
-        resolve();
-        return;
-      }
-      child.once("exit", () => resolve());
-      child.kill("SIGTERM");
-      const killTimer = globalThis.setTimeout(() => {
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          // Already exited.
-        }
-        resolve();
-      }, 5000);
-      if (typeof killTimer.unref === "function") killTimer.unref();
-    });
-
-  let exitCode = 1;
-  try {
-    const ready = await waitForServerReady(baseUrl);
-    if (ready !== true) {
-      console.error(
-        "test:live FAILED: production server did not become ready. " +
-          "Run `npm run build` first, then retry. Server output tail: " +
-          (tail.trim().length > 0 ? tail.trim().slice(-1000) : "(no output)"),
-      );
-      process.exitCode = 1;
-      return;
-    }
-
-    const sessionId = `live-smoke-${randomUUID()}`;
-    const analysisId = `live-smoke-analysis-${randomUUID()}`;
-    const form = new FormData();
-    form.set("sessionId", sessionId);
-    form.set("itemId", ITEM_ID);
-    form.set("catalogVersion", catalogVersion);
-    form.set("analysisId", analysisId);
-    form.set("image", new Blob([imageBytes], { type: "image/jpeg" }), "live-smoke-detector.jpg");
-
-    let response;
-    try {
-      response = await fetch(`${baseUrl}/api/analyze`, {
-        method: "POST",
-        body: form,
-        signal: AbortSignal.timeout(ANALYZE_TIMEOUT_MS),
-      });
-    } catch {
-      console.error("test:live FAILED: analyze request timed out or was unreachable (single attempt, no retry).");
-      process.exitCode = 1;
-      return;
-    }
-
-    if (response.status !== 200) {
-      let code = "unknown";
-      try {
-        const failure = await response.json();
-        if (isRecord(failure?.error) && typeof failure.error.code === "string") {
-          code = failure.error.code;
-        }
-      } catch {
-        // Error body is not JSON; report the status only.
-      }
-      console.error(`test:live FAILED: expected HTTP 200, got HTTP ${response.status} (code ${code}).`);
-      process.exitCode = 1;
-      return;
-    }
-
-    let body;
-    try {
-      body = await response.json();
-    } catch {
-      console.error("test:live FAILED: analyze response was not JSON.");
-      process.exitCode = 1;
-      return;
-    }
-
-    const checked = validateLiveResponse(body);
-    if (checked.ok !== true || !checked.evidence) {
-      console.error(`test:live FAILED: strict envelope validation failed: ${checked.errors.join("; ")}`);
-      process.exitCode = 1;
-      return;
-    }
-
-    // Sanitized evidence only: no key material, no key presence, no
-    // provider bodies, no image bytes.
-    console.log(JSON.stringify(checked.evidence));
-    exitCode = 0;
-    process.exitCode = 0;
-  } finally {
-    await stopServer();
-    process.exit(exitCode);
-  }
+  console.log(JSON.stringify({ ...output, pendingLeaseReleased: result.leaseReleased }));
+  process.exitCode = 0;
 }
 
 await main();

@@ -31,7 +31,7 @@ export const OFFLINE_QUEUE_STORAGE_KEY =
   "habitability-walkthrough:offline-queue:v1";
 
 /** App-shell cache name. Mirrors `SHELL_CACHE` in `public/sw.js`. */
-export const APP_SHELL_CACHE_NAME = "habitability-walkthrough-shell-v1";
+export const APP_SHELL_CACHE_NAME = "habitability-walkthrough-shell-v2";
 
 /** Service-worker script URL (served from the web root). */
 export const SERVICE_WORKER_URL = "/sw.js";
@@ -641,5 +641,6 @@ export function shouldServiceWorkerCache(
   if (url.pathname === "/manifest.webmanifest") return true;
   if (url.pathname.indexOf("/_next/static/") === 0) return true;
   if (url.pathname.indexOf("/icons/") === 0) return true;
+  if (url.pathname.indexOf("/fonts/") === 0) return true;
   return false;
 }

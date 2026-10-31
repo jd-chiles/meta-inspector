@@ -1,0 +1,14 @@
+{
+  "viewport": {
+    "width": 360,
+    "height": 640
+  },
+  "uploadBottomToNavigationGap": 234.03125,
+  "lastPromptBottomToNavigationGap": 30.09375,
+  "privacyDisclosureBottomToNavigationGap": 11.71875,
+  "mainScrollHeight": 618,
+  "mainClientHeight": 562,
+  "scrollTopAfterLastPrompt": 56,
+  "navigationBottom": 640,
+  "horizontalOverflow": false
+}
