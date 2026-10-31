@@ -17,6 +17,7 @@ async function openReadyCapture(page: Page, width: number, height: number): Prom
   if (await setupToggle.getAttribute("aria-expanded") !== "true") await setupToggle.click();
   await page.getByLabel("Unit pseudonym").fill("Staged Demo Unit 04");
   await page.getByLabel("Funding type").selectOption("lahsa");
+  await page.getByLabel("Unit type").selectOption("studio");
   await expect(page.getByTestId("walkthrough-video-capture")).toBeVisible();
 }
 

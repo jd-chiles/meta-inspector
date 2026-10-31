@@ -25,6 +25,7 @@ async function openCapture(page: Page): Promise<void> {
   await openProfilePanel(page, "Unit & Funding");
   await page.getByLabel("Unit pseudonym").fill("Staged MOV Test Unit");
   await page.getByLabel("Funding type").selectOption("lahsa");
+  await page.getByLabel("Unit type").selectOption("studio");
   await goToCapture(page);
 }
 

@@ -60,7 +60,7 @@ export function deriveGuideModel(input: GuideInput): GuideModel | null {
   };
   const film: GuideStep = {
     id: "film",
-    title: "Film 4 rooms",
+    title: `Film ${input.rooms.length} rooms`,
     detail: `${capturedCount} of ${input.rooms.length} clips saved`,
     state: !input.canCapture ? "locked" : allRooms ? "done" : "current",
     action:

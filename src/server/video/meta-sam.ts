@@ -14,11 +14,15 @@ import {
 import { getServerCatalog } from "../catalog";
 import {
   MOVE_IN_READY_ELEMENTS,
+  MOVE_IN_READY_ROOM_TYPES,
   MOVE_IN_READY_SCHEMA_VERSION,
   isMoveInReadyElementId,
+  isMoveInReadyRoomId,
+  parseRoomId,
   validateModelDeficiencySuggestion,
   type ModelDeficiencySuggestion,
   type MoveInReadyElementId,
+  type MoveInReadyRoomType,
 } from "../../domain/move-in-ready";
 import { VIDEO_SAMPLE_TIMESTAMP_TOLERANCE_MS } from "../../domain/video-format";
 import { WALKTHROUGH_CLIENT_HEADER, WALKTHROUGH_CLIENT_ID } from "../../domain/walkthrough-client";
@@ -71,8 +75,10 @@ const APP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const FORBIDDEN_PROPOSAL_TEXT = /\b(?:approved|deficient|compliant|noncompliant|pass(?:ed)?|fail(?:ed)?|meets?\s+(?:the\s+)?standards?)\b/i;
 
-export const VIDEO_ROOMS = ["kitchen", "bathroom", "bedroom-living", "hallway"] as const;
-export type VideoRoom = (typeof VIDEO_ROOMS)[number];
+export type VideoRoom = string;
+
+/** Concrete room ids are validated by room type (`bedroom-2` uses bedroom prompts). */
+export const VIDEO_ROOM_TYPES = MOVE_IN_READY_ROOM_TYPES;
 
 export interface FixedVideoPrompt {
   elementId: MoveInReadyElementId;
@@ -80,7 +86,7 @@ export interface FixedVideoPrompt {
 }
 
 /** One short, fixed noun phrase per request; client text never reaches SAM. */
-export const VIDEO_PROMPTS: Readonly<Record<VideoRoom, readonly FixedVideoPrompt[]>> = {
+export const VIDEO_PROMPTS: Readonly<Record<MoveInReadyRoomType, readonly FixedVideoPrompt[]>> = {
   kitchen: [
     { elementId: "demo-water-supply", concept: "water faucet" },
     { elementId: "demo-item-10", concept: "kitchen stove" },
@@ -97,7 +103,15 @@ export const VIDEO_PROMPTS: Readonly<Record<VideoRoom, readonly FixedVideoPrompt
     { elementId: "demo-smoke-co", concept: "smoke detector" },
     { elementId: "demo-smoke-co", concept: "carbon monoxide detector" },
   ],
-  "bedroom-living": [
+  bedroom: [
+    { elementId: "demo-item-07", concept: "door lock" },
+    { elementId: "demo-smoke-co", concept: "smoke detector" },
+    { elementId: "demo-item-09", concept: "heating equipment" },
+    { elementId: "demo-item-09", concept: "air conditioning unit" },
+    { elementId: "demo-interior-air", concept: "ventilation fan" },
+    { elementId: "demo-smoke-co", concept: "carbon monoxide detector" },
+  ],
+  "living-room": [
     { elementId: "demo-item-07", concept: "door lock" },
     { elementId: "demo-smoke-co", concept: "smoke detector" },
     { elementId: "demo-item-09", concept: "heating equipment" },
@@ -491,10 +505,17 @@ function parseRequestIdentity(form: FormData, requireCurrentCatalog = true): Vid
 
 function parseRoom(form: FormData): VideoRoom {
   const roomValue = requiredText(form, "room");
-  if (!(VIDEO_ROOMS as readonly string[]).includes(roomValue)) {
+  if (!isMoveInReadyRoomId(roomValue)) {
     throw new VideoSegmentError(400, "INVALID_REQUEST", "Choose a supported walkthrough room.");
   }
-  return roomValue as VideoRoom;
+  return roomValue;
+}
+
+/** Fixed SAM concepts for a concrete room id, by room type. */
+export function videoPromptsForRoom(room: VideoRoom): readonly FixedVideoPrompt[] {
+  const parsed = parseRoomId(room);
+  if (!parsed) throw new VideoSegmentError(400, "INVALID_REQUEST", "Choose a supported walkthrough room.");
+  return VIDEO_PROMPTS[parsed.type];
 }
 
 /** One decoded source frame near the center of each second for Muse context. */
@@ -595,7 +616,7 @@ function verifyCandidateToken(token: string, apiKey: string): CandidateTokenPayl
     !exactKeys(parsed, ["version", "expiresAt", "room", "container", "durationMs", "sampleTimestampsMs", "identity", "candidates"]) ||
     parsed.version !== 2 || typeof parsed.expiresAt !== "number" || !Number.isSafeInteger(parsed.expiresAt) ||
     parsed.expiresAt <= Date.now() || parsed.expiresAt > Date.now() + MAPPING_TOKEN_TTL_MS + 5_000 ||
-    typeof parsed.room !== "string" || !(VIDEO_ROOMS as readonly string[]).includes(parsed.room) ||
+    typeof parsed.room !== "string" || !isMoveInReadyRoomId(parsed.room) ||
     (parsed.container !== "mp4" && parsed.container !== "mov") ||
     typeof durationMs !== "number" || !Number.isSafeInteger(durationMs) || durationMs < 1 || durationMs > 30_000 ||
     !Array.isArray(sampleTimestampsMs) ||
@@ -652,7 +673,7 @@ function verifyCandidateToken(token: string, apiKey: string): CandidateTokenPayl
     if ((box.right as number) <= (box.left as number) || (box.bottom as number) <= (box.top as number)) {
       throw new VideoSegmentError(409, "STALE_REQUEST", "These video candidates could not be verified. Analyze the current clip again.");
     }
-    const roomPrompts = VIDEO_PROMPTS[parsed.room as VideoRoom];
+    const roomPrompts = videoPromptsForRoom(parsed.room);
     if (!roomPrompts.some((prompt) => prompt.elementId === raw.elementId && prompt.concept === raw.concept)) {
       throw new VideoSegmentError(409, "STALE_REQUEST", "These video candidates do not match the current room. Analyze the current clip again.");
     }
@@ -1827,7 +1848,7 @@ export async function handleVideoSegmentRequest(request: Request, deps: Dependen
           }
 
           const fileId = await uploadVideo(config.baseUrl, config.apiKey, upload, fetchImpl, deadline.signal);
-          const prompts = VIDEO_PROMPTS[upload.room];
+          const prompts = videoPromptsForRoom(upload.room);
           // One fixed concept per SAM request; reuse the same short-lived upload.
           const results = await mapVideoConcepts(
             prompts,
@@ -1922,5 +1943,205 @@ export async function handleVideoSegmentRequest(request: Request, deps: Dependen
     return failure(new VideoSegmentError(502, "PROVIDER_FAILURE", "Video processing could not be completed."));
   } finally {
     processingLease?.release();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Live tracking (v2 copilot loop): one SAM image call per sampled frame.
+// Tracking boxes are a live viewfinder aid only. They are never persisted as
+// evidence; evidence stills come from saved clips through the segment flow.
+// ---------------------------------------------------------------------------
+
+/** Fixed trackable concepts: the union of every room's fixed prompt list. */
+export const TRACKABLE_CONCEPTS: ReadonlySet<string> = new Set(
+  Object.values(VIDEO_PROMPTS).flatMap((prompts) => prompts.map((prompt) => prompt.concept)),
+);
+
+export interface TrackBox {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  confidence?: number;
+}
+
+export interface TrackFrameSuccess {
+  ok: true;
+  tracked: boolean;
+  concept: string;
+  width: number;
+  height: number;
+  boxes: TrackBox[];
+}
+
+const MAX_TRACK_IMAGE_BYTES = 500 * 1024;
+const MAX_TRACK_BASE64_CHARS = 700 * 1024;
+const MAX_TRACK_DIMENSION = 1920;
+const MIN_TRACK_DIMENSION = 160;
+const TRACK_TIMEOUT_MS = 20_000;
+const MAX_TRACK_BOXES = 16;
+
+function parseTrackBody(value: unknown): {
+  bytes: Uint8Array;
+  mimeType: "image/jpeg" | "image/png";
+  width: number;
+  height: number;
+  concept: string;
+} {
+  if (typeof value !== "object" || value === null) {
+    throw new VideoSegmentError(400, "INVALID_REQUEST", "Send one frame to track as JSON.");
+  }
+  const body = value as Record<string, unknown>;
+  const { imageBase64, mimeType, width, height, concept } = body;
+  if (typeof concept !== "string" || !TRACKABLE_CONCEPTS.has(concept)) {
+    throw new VideoSegmentError(400, "INVALID_REQUEST", "Track one supported inspection concept.");
+  }
+  if (mimeType !== "image/jpeg" && mimeType !== "image/png") {
+    throw new VideoSegmentError(400, "INVALID_REQUEST", "Track a JPEG or PNG frame.");
+  }
+  if (typeof width !== "number" || typeof height !== "number" ||
+      !Number.isInteger(width) || !Number.isInteger(height) ||
+      width < MIN_TRACK_DIMENSION || height < MIN_TRACK_DIMENSION ||
+      width > MAX_TRACK_DIMENSION || height > MAX_TRACK_DIMENSION) {
+    throw new VideoSegmentError(400, "INVALID_REQUEST", "Track a frame between 160 and 1920 pixels per side.");
+  }
+  if (typeof imageBase64 !== "string" || imageBase64.length === 0 || imageBase64.length > MAX_TRACK_BASE64_CHARS) {
+    throw new VideoSegmentError(400, "INVALID_REQUEST", "Track a frame under 500 KiB.");
+  }
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(Buffer.from(imageBase64, "base64"));
+  } catch {
+    throw new VideoSegmentError(400, "INVALID_REQUEST", "Track valid base64 image bytes.");
+  }
+  if (bytes.byteLength === 0 || bytes.byteLength > MAX_TRACK_IMAGE_BYTES) {
+    throw new VideoSegmentError(400, "INVALID_REQUEST", "Track a frame under 500 KiB.");
+  }
+  const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  const isPng = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+  if ((mimeType === "image/jpeg" && !isJpeg) || (mimeType === "image/png" && !isPng)) {
+    throw new VideoSegmentError(400, "INVALID_REQUEST", "Track actual JPEG or PNG bytes.");
+  }
+  return { bytes, mimeType, width, height, concept };
+}
+
+async function trackImageConcept(
+  baseUrl: string,
+  apiKey: string,
+  frame: { bytes: Uint8Array; mimeType: string; width: number; height: number; concept: string },
+  fetchImpl: typeof fetch,
+  signal: AbortSignal,
+): Promise<TrackBox[]> {
+  let response: Response;
+  try {
+    response = await fetchImpl(`${baseUrl}/responses`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+      },
+      body: JSON.stringify({
+        model: SAM_VIDEO_MODEL,
+        input: [{
+          type: "message",
+          role: "user",
+          content: [
+            { type: "input_text", text: frame.concept },
+            {
+              type: "input_image",
+              image_url: `data:${frame.mimeType};base64,${Buffer.from(frame.bytes).toString("base64")}`,
+            },
+          ],
+        }],
+        stream: true,
+        store: false,
+        metadata: { mask_encoding: "one_bit", include_confidence: "true" },
+      }),
+      signal,
+      cache: "no-store",
+    });
+  } catch (error) {
+    if (signal.aborted || (error instanceof Error && error.name === "AbortError")) {
+      throw new VideoSegmentError(504, "PROVIDER_TIMEOUT", "Live tracking timed out for this frame.");
+    }
+    throw new VideoSegmentError(502, "PROVIDER_FAILURE", "Live tracking could not be completed.");
+  }
+  if (!response.ok) {
+    try { await response.body?.cancel(); } catch { /* Ignore provider response bytes. */ }
+    if (response.status === 429) throw new VideoSegmentError(429, "PROVIDER_FAILURE", "Live tracking is temporarily rate limited.");
+    if (response.status === 400) throw new VideoSegmentError(400, "INVALID_REQUEST", "This frame could not be tracked. Hold steady and try again.");
+    if (response.status >= 500) throw new VideoSegmentError(502, "PROVIDER_FAILURE", "Live tracking could not be completed.");
+    throw new VideoSegmentError(502, "PROVIDER_FAILURE", "Live tracking could not be completed.");
+  }
+  let result;
+  try {
+    result = await parseVideoStream(readProviderEvents(response, signal)).finalResult;
+  } catch (error) {
+    if (error instanceof VideoSegmentError) throw error;
+    if (signal.aborted || (error instanceof Error && error.name === "AbortError")) {
+      throw new VideoSegmentError(504, "PROVIDER_TIMEOUT", "Live tracking timed out for this frame.");
+    }
+    throw new VideoSegmentError(502, "INVALID_MODEL_OUTPUT", "Live tracking returned an unsupported response.");
+  }
+  if (result.outcome.status !== "completed" || result.diagnostics.some((d) => d.severity === "error")) {
+    throw new VideoSegmentError(502, "INVALID_MODEL_OUTPUT", "Live tracking returned an incomplete result.");
+  }
+  const boxes = recordsOfKind(result.records, "box");
+  if (boxes.length > MAX_TRACK_BOXES) {
+    throw new VideoSegmentError(502, "INVALID_MODEL_OUTPUT", "Live tracking returned too many detections.");
+  }
+  const tracked: TrackBox[] = [];
+  for (const box of boxes) {
+    if (frameIndexOf(box) !== 0) continue;
+    if (
+      ![box.left, box.top, box.right, box.bottom].every((n) => Number.isFinite(n) && n >= 0 && n <= 100_000) ||
+      box.right <= box.left || box.bottom <= box.top ||
+      (box.confidence !== undefined && (!Number.isFinite(box.confidence) || box.confidence < 0 || box.confidence > 1))
+    ) {
+      throw new VideoSegmentError(502, "INVALID_MODEL_OUTPUT", "Live tracking returned an invalid detection.");
+    }
+    tracked.push({
+      left: box.left,
+      top: box.top,
+      right: box.right,
+      bottom: box.bottom,
+      ...(box.confidence === undefined ? {} : { confidence: box.confidence }),
+    });
+  }
+  return tracked;
+}
+
+export async function handleVideoTrackRequest(request: Request, deps: Dependencies = {}): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), deps.requestTimeoutMs ?? TRACK_TIMEOUT_MS);
+  try {
+    assertSameOrigin(request, deps.publicOrigin ?? process.env.APP_PUBLIC_ORIGIN);
+    let body: unknown = null;
+    try {
+      body = await request.json();
+    } catch {
+      throw new VideoSegmentError(400, "INVALID_REQUEST", "Send one frame to track as JSON.");
+    }
+    const frame = parseTrackBody(body);
+    const env = deps.env ?? process.env;
+    const fetchImpl = deps.fetch ?? fetch;
+    const config = resolveMetaConfig(env as MetaEnv);
+    requireLiveConfig(config);
+    const boxes = await trackImageConcept(config.baseUrl, config.apiKey, frame, fetchImpl, controller.signal);
+    const success: TrackFrameSuccess = {
+      ok: true,
+      tracked: boxes.length > 0,
+      concept: frame.concept,
+      width: frame.width,
+      height: frame.height,
+      boxes,
+    };
+    return jsonResponse(success, 200);
+  } catch (error) {
+    if (error instanceof VideoSegmentError) return failure(error);
+    return failure(new VideoSegmentError(502, "PROVIDER_FAILURE", "Live tracking could not be completed."));
+  } finally {
+    clearTimeout(timer);
   }
 }

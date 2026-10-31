@@ -803,3 +803,51 @@
 }
 
 .installSteps li + li { margin-top: 6px; }
+
+.voicePrompt {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 12px;
+  min-width: 0;
+}
+
+.voiceQuestion {
+  margin: 0 0 8px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.voiceControls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.voiceTranscript {
+  margin: 8px 0 0;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.voiceTapRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.voiceCheckList {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.voiceCheckList li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}

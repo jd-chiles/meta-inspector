@@ -476,7 +476,7 @@ describe("POST /api/video/segment", () => {
       { elementId: "demo-smoke-co", concept: "carbon monoxide detector" },
     ]));
     expect(VIDEO_PROMPTS.bathroom).toContainEqual({ elementId: "demo-smoke-co", concept: "carbon monoxide detector" });
-    expect(VIDEO_PROMPTS["bedroom-living"]).toEqual(expect.arrayContaining([
+    expect(VIDEO_PROMPTS.bedroom).toEqual(expect.arrayContaining([
       { elementId: "demo-item-09", concept: "heating equipment" },
       { elementId: "demo-item-09", concept: "air conditioning unit" },
       { elementId: "demo-smoke-co", concept: "carbon monoxide detector" },

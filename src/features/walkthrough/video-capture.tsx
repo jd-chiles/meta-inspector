@@ -20,8 +20,8 @@ import {
 import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 
 import {
-  MOVE_IN_READY_ROOM_PROMPT_IDS,
   isMoveInReadyRoomId,
+  promptIdForRoom,
   type MoveInReadyPromptId,
 } from "../../domain/move-in-ready";
 import styles from "./video-capture.module.css";
@@ -217,7 +217,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
 
   const roomPrompts = prompts ?? getRoomPrompts(roomId);
   const roomPromptIds = !prompts && isMoveInReadyRoomId(roomId)
-    ? MOVE_IN_READY_ROOM_PROMPT_IDS[roomId]
+    ? [promptIdForRoom(roomId)]
     : [];
   const currentPromptIndex = roomPrompts.findIndex((_, index) => {
     const promptId = roomPromptIds[index];
@@ -757,9 +757,13 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
             ? "Bath"
             : option.id === "bedroom-living"
               ? "Bed/Liv"
-              : option.id === "hallway"
-                ? "Hall"
-                : option.label;
+              : option.id === "bedroom"
+                ? "Bed"
+                : option.id === "living-room"
+                  ? "Living"
+                  : option.id === "hallway"
+                    ? "Hall"
+                    : option.label;
           return <button
             key={option.id}
             type="button"

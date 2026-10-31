@@ -10,8 +10,8 @@ import {
   EVALUATOR_ATTESTATION_TEXT,
   MOVE_IN_READY_ELEMENTS,
   MOVE_IN_READY_ELEMENT_IDS,
-  MOVE_IN_READY_ROOMS,
   MOVE_IN_READY_SCHEMA_VERSION,
+  roomsForUnit,
   type EvidenceReference,
   type EvaluatorDecisionSet,
 } from "../../../src/domain/move-in-ready";
@@ -93,7 +93,8 @@ function inputFor(
     sessionId: "demo-session-001",
     pseudonym: "Sample Unit 12",
     fundingType: "lahsa",
-    capturedRoomIds: MOVE_IN_READY_ROOMS.map((room) => room.id),
+    capturedRoomIds: roomsForUnit("1-bedroom", 1),
+    expectedRoomIds: roomsForUnit("1-bedroom", 1),
     decisions: approvedDecisions(),
     signoff: {
       evaluatorName: "Demo Evaluator",

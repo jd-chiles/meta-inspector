@@ -113,6 +113,7 @@ test("the hydrated walkthrough saves and restores real local progress offline", 
   await openProfilePanel(page, "Unit & Funding");
   await page.getByLabel("Unit pseudonym").fill("Offline Saved Unit 04");
   await page.getByLabel("Funding type").selectOption("lahsa");
+  await page.getByLabel("Unit type").selectOption("studio");
   await expect(page.getByText("Offline. Capture and review stay on this device; live analysis needs a connection.", { exact: true })).toBeVisible();
   await expect.poll(() => readSavedProgress(page)).toMatchObject({
     pseudonym: "Offline Saved Unit 04",

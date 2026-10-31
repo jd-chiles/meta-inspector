@@ -45,6 +45,7 @@ test("room prompt completion persists with a saved clip and stays room-specific"
   await openProfilePanel(page, "Unit & Funding");
   await page.getByLabel("Unit pseudonym").fill("Staged Prompt Demo Unit");
   await page.getByLabel("Funding type").selectOption("lahsa");
+  await page.getByLabel("Unit type").selectOption("studio");
   await goToCapture(page);
 
   await expect(page.getByText("Not filmed", { exact: true }).first()).toBeVisible();
@@ -102,6 +103,7 @@ test("replacing a room clip clears the filmed mark", async ({ page }) => {
   await openProfilePanel(page, "Unit & Funding");
   await page.getByLabel("Unit pseudonym").fill("Staged Replacement Demo Unit");
   await page.getByLabel("Funding type").selectOption("lahsa");
+  await page.getByLabel("Unit type").selectOption("studio");
   await goToCapture(page);
 
   await expect(page.getByText("One clip per room. Assess in person.", { exact: true })).toBeVisible();

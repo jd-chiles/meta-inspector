@@ -155,7 +155,7 @@ import {
   prepareVideoReview,
   validateVideoContainer,
 } from "../../../src/features/walkthrough/video-utils";
-import { MOVE_IN_READY_ROOM_PROMPT_IDS } from "../../../src/domain/move-in-ready";
+import { promptIdForRoom } from "../../../src/domain/move-in-ready";
 import { DEFAULT_ROOM_PROMPTS } from "../../../src/features/walkthrough/video-capture";
 
 describe("walkthrough MP4/MOV header validation", () => {
@@ -460,7 +460,7 @@ describe("MOV packet-copy normalization", () => {
       expect(prompts).toMatch(/fan/);
       expect(prompts).toMatch(/lock/);
       expect(prompts).toMatch(/detector/);
-      expect(MOVE_IN_READY_ROOM_PROMPT_IDS[roomId]).toHaveLength(DEFAULT_ROOM_PROMPTS[roomId].length);
+      expect([promptIdForRoom(roomId)]).toHaveLength(DEFAULT_ROOM_PROMPTS[roomId].length);
     }
     expect(DEFAULT_ROOM_PROMPTS.hallway.join(" ").toLowerCase()).toMatch(/(?:public|common)[ -]area/);
   });

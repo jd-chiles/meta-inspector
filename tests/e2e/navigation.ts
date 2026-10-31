@@ -45,7 +45,7 @@ export async function openProfilePanel(page: Page, panelName: "Unit & Funding" |
 }
 
 /** Select one room step from the mobile Capture walkthrough. */
-export async function selectRoom(page: Page, roomId: "kitchen" | "bathroom" | "bedroom-living" | "hallway"): Promise<void> {
+export async function selectRoom(page: Page, roomId: string): Promise<void> {
   const roomPicker = page.getByTestId("room-picker-toggle");
   if (await roomPicker.isVisible() && await roomPicker.getAttribute("aria-expanded") !== "true") {
     await roomPicker.click();

@@ -4,14 +4,16 @@ import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import catalogJson from "../../data/catalog.demo.json";
 
 import {
+  LEGACY_DEFAULT_ROOM_IDS,
   MOVE_IN_READY_ELEMENTS,
-  MOVE_IN_READY_ROOMS,
-  MOVE_IN_READY_ROOM_PROMPT_IDS,
   MOVE_IN_READY_SCHEMA_VERSION,
+  MOVE_IN_READY_UNIT_TYPES,
   createUnreviewedEvaluatorDecisions,
   isMoveInReadyElementId,
   isMoveInReadyPromptIdForRoom,
   isMoveInReadyRoomId,
+  roomContributesToElement,
+  roomsForUnit,
   validateEvaluatorDecision,
   validateModelDeficiencySuggestion,
   validateEvaluatorSignoff,
@@ -25,6 +27,7 @@ import {
   type MoveInReadyElementId,
   type MoveInReadyPromptId,
   type MoveInReadyRoomId,
+  type MoveInReadyUnitType,
   type ProposalState,
   type VideoAnalysisIdentity,
 } from "../../domain/move-in-ready";
@@ -67,6 +70,29 @@ export interface StoredRoomClipIdentity {
   evidence: EvidenceReference[];
 }
 
+/**
+ * What the 1fps live tracking loop saw while an element proof clip was
+ * filmed. Counts come from /api/video/track responses; the excerpt is the
+ * inspector's last heard narration. Drafts built from a proof must still be
+ * confirmed by the evaluator.
+ */
+export interface LiveProofMetadata {
+  /** Frames where SAM tracked the element's concept. */
+  trackedFrames: number;
+  /** Total 1fps tracking samples attempted while recording. */
+  totalFrames: number;
+  /** Inspector narration heard while filming, or null when silent. */
+  transcriptExcerpt: string | null;
+  /** ISO timestamp when the proof clip finished recording. */
+  recordedAt: string;
+}
+
+export interface VoiceCheckAnswer {
+  question: string;
+  answer: "yes" | "no" | "skipped";
+  recordedAt: string;
+}
+
 export interface MoveInReadyInspection {
   schemaVersion: typeof INSPECTION_SCHEMA_VERSION;
   catalogVersion: string;
@@ -76,9 +102,20 @@ export interface MoveInReadyInspection {
   fundingType: FundingType;
   pseudonym: string;
   evaluatorName: string;
+  /** Voice/tap answers to the in-person room checks, keyed by room id. */
+  voiceChecks: Partial<Record<MoveInReadyRoomId, VoiceCheckAnswer[]>>;
+  /** Evaluator-described unit; "" for records saved before per-unit rooms. */
+  unitType: "" | MoveInReadyUnitType;
+  bathCount: number;
+  /** Concrete rooms this inspection covers, from the unit description. */
+  roomIds: MoveInReadyRoomId[];
   selectedRoomId: MoveInReadyRoomId;
   completedPromptIdsByRoom: Partial<Record<MoveInReadyRoomId, MoveInReadyPromptId[]>>;
   clipIdentities: Partial<Record<MoveInReadyRoomId, StoredRoomClipIdentity>>;
+  /** v2 per-element live clip identities, keyed by element id. */
+  elementClipIdentities: Partial<Record<MoveInReadyElementId, StoredRoomClipIdentity>>;
+  /** v2 live tracking proof metadata, keyed by element id. */
+  liveProofs: Partial<Record<MoveInReadyElementId, LiveProofMetadata>>;
   proposals: Partial<Record<string, ModelElementProposal>>;
   decisions: EvaluatorDecisionSet;
   pendingAnalysisIntent: PendingAnalysisIntent | null;
@@ -354,9 +391,15 @@ export function createInitialInspectionRecord(
     fundingType: "unknown",
     pseudonym: "",
     evaluatorName: "",
-    selectedRoomId: MOVE_IN_READY_ROOMS[0].id,
+    voiceChecks: {},
+    unitType: "",
+    bathCount: 1,
+    roomIds: roomsForUnit("1-bedroom", 1),
+    selectedRoomId: "kitchen",
     completedPromptIdsByRoom: {},
     clipIdentities: {},
+    elementClipIdentities: {},
+    liveProofs: {},
     proposals: {},
     decisions: createUnreviewedEvaluatorDecisions(),
     pendingAnalysisIntent: null,
@@ -370,6 +413,134 @@ export function createInitialInspectionRecord(
     leadershipSignedAt: "",
     inspectionNote: "",
   };
+}
+
+interface NormalizedRoomFields {
+  unitType: "" | MoveInReadyUnitType;
+  bathCount: number;
+  roomIds: MoveInReadyRoomId[];
+}
+
+/**
+ * Per-unit rooms, defaulted for records saved before the evaluator described
+ * the unit. Legacy records keep the four legacy room ids so their clips and
+ * decisions stay valid.
+ */
+function normalizeVoiceChecks(value: Record<string, unknown>): MoveInReadyInspection["voiceChecks"] | null {
+  const raw = value.voiceChecks;
+  if (raw === undefined) return {};
+  if (!isRecord(raw)) return null;
+  const checks: MoveInReadyInspection["voiceChecks"] = {};
+  for (const [roomId, answers] of Object.entries(raw)) {
+    if (!isMoveInReadyRoomId(roomId) || !Array.isArray(answers) || answers.length > 8) return null;
+    const normalized: VoiceCheckAnswer[] = [];
+    for (const answer of answers) {
+      if (!isRecord(answer) || typeof answer.question !== "string" || answer.question.length === 0 ||
+          answer.question.length > 300 || (answer.answer !== "yes" && answer.answer !== "no" && answer.answer !== "skipped") ||
+          typeof answer.recordedAt !== "string" || !Number.isFinite(Date.parse(answer.recordedAt))) {
+        return null;
+      }
+      normalized.push({ question: answer.question, answer: answer.answer, recordedAt: answer.recordedAt });
+    }
+    checks[roomId as MoveInReadyRoomId] = normalized;
+  }
+  return checks;
+}
+
+function normalizeRoomFields(value: Record<string, unknown>): NormalizedRoomFields | null {
+  const unitType = value.unitType;
+  if (unitType !== undefined && unitType !== "" &&
+      !(MOVE_IN_READY_UNIT_TYPES as readonly string[]).includes(unitType as string)) {
+    return null;
+  }
+  const bathCount = value.bathCount;
+  if (bathCount !== undefined &&
+      (typeof bathCount !== "number" || !Number.isSafeInteger(bathCount) || bathCount < 1 || bathCount > 8)) {
+    return null;
+  }
+  const roomIds = value.roomIds;
+  if (roomIds !== undefined) {
+    if (!Array.isArray(roomIds) || roomIds.length === 0 || roomIds.length > 12) return null;
+    const seen = new Set<string>();
+    for (const roomId of roomIds) {
+      if (!isMoveInReadyRoomId(roomId) || seen.has(roomId as string)) return null;
+      seen.add(roomId as string);
+    }
+    return {
+      unitType: (unitType ?? "") as "" | MoveInReadyUnitType,
+      bathCount: (bathCount ?? 1) as number,
+      roomIds: [...roomIds] as MoveInReadyRoomId[],
+    };
+  }
+  return { unitType: "", bathCount: 1, roomIds: [...LEGACY_DEFAULT_ROOM_IDS] };
+}
+
+/**
+ * Shared field + evidence validation for one stored clip identity. Room-map
+ * keys bind the identity's roomId to the key; element-map keys (v2) carry the
+ * filming room inside the identity because the key is the element id.
+ */
+function validateStoredClipIdentityEntry(
+  mapKey: string,
+  rawIdentity: Record<string, unknown>,
+  kind: "room" | "element",
+): { ok: true } | { ok: false; message: string } {
+  if (kind === "room") {
+    if (rawIdentity.roomId !== mapKey) {
+      return { ok: false, message: "The saved inspection has an invalid clip identity." };
+    }
+  } else if (!isMoveInReadyRoomId(rawIdentity.roomId)) {
+    return { ok: false, message: "The saved inspection has an invalid element clip identity." };
+  }
+  if (
+    typeof rawIdentity.schemaVersion !== "number" || !Number.isSafeInteger(rawIdentity.schemaVersion) || rawIdentity.schemaVersion < 1 ||
+    typeof rawIdentity.catalogVersion !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(rawIdentity.catalogVersion) ||
+    typeof rawIdentity.videoId !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(rawIdentity.videoId) ||
+    !Number.isSafeInteger(rawIdentity.videoRevision) ||
+    (rawIdentity.videoRevision as number) < 1 ||
+    typeof rawIdentity.videoHash !== "string" ||
+    !/^[0-9a-f]{64}$/.test(rawIdentity.videoHash) ||
+    typeof rawIdentity.capturedAt !== "string" ||
+    !Number.isFinite(Date.parse(rawIdentity.capturedAt)) ||
+    typeof rawIdentity.durationSeconds !== "number" ||
+    !Number.isFinite(rawIdentity.durationSeconds) ||
+    rawIdentity.durationSeconds <= 0 ||
+    rawIdentity.durationSeconds > 30 ||
+    typeof rawIdentity.sizeBytes !== "number" ||
+    !Number.isSafeInteger(rawIdentity.sizeBytes) ||
+    rawIdentity.sizeBytes <= 0 ||
+    rawIdentity.sizeBytes > 60 * 1024 * 1024 ||
+    !Array.isArray(rawIdentity.evidence) ||
+    rawIdentity.evidence.length > 30
+  ) {
+    return { ok: false, message: "The saved inspection has an invalid clip identity." };
+  }
+  const identityEvidence = new Set<string>();
+  const identityStillIds = new Set<string>();
+  for (const evidence of rawIdentity.evidence) {
+    const parsedEvidence = validateEvidenceReference(evidence);
+    if (!parsedEvidence.ok ||
+        parsedEvidence.value.frameIndex !== null ||
+        parsedEvidence.value.videoId !== rawIdentity.videoId ||
+        parsedEvidence.value.videoRevision !== rawIdentity.videoRevision ||
+        parsedEvidence.value.roomId !== rawIdentity.roomId ||
+        parsedEvidence.value.schemaVersion !== rawIdentity.schemaVersion ||
+        parsedEvidence.value.catalogVersion !== rawIdentity.catalogVersion ||
+        parsedEvidence.value.timestampMs >= (rawIdentity.durationSeconds as number) * 1000) {
+      return { ok: false, message: "The saved inspection contains invalid still evidence." };
+    }
+    const evidenceKey = evidenceReferenceKey(parsedEvidence.value);
+    if (identityEvidence.has(evidenceKey)) {
+      return { ok: false, message: "The saved inspection contains duplicate still identities." };
+    }
+    if (identityStillIds.has(parsedEvidence.value.stillId)) {
+      return { ok: false, message: "The saved inspection contains duplicate still IDs." };
+    }
+    identityEvidence.add(evidenceKey);
+    identityStillIds.add(parsedEvidence.value.stillId);
+  }
+  return { ok: true };
 }
 
 export function validateInspectionRecord(
@@ -407,6 +578,8 @@ export function validateInspectionRecord(
     !isMoveInReadyRoomId(value.selectedRoomId) ||
     (value.completedPromptIdsByRoom !== undefined && !isRecord(value.completedPromptIdsByRoom)) ||
     !isRecord(value.clipIdentities) ||
+    (value.elementClipIdentities !== undefined && !isRecord(value.elementClipIdentities)) ||
+    (value.liveProofs !== undefined && !isRecord(value.liveProofs)) ||
     !isRecord(value.proposals) ||
     !isRecord(value.decisions) ||
     !(value.pendingAnalysisIntent === null || isRecord(value.pendingAnalysisIntent)) ||
@@ -431,8 +604,7 @@ export function validateInspectionRecord(
   const completedPromptIdsByRoom: MoveInReadyInspection["completedPromptIdsByRoom"] = {};
   if (value.completedPromptIdsByRoom !== undefined) {
     for (const [roomKey, rawPromptIds] of Object.entries(value.completedPromptIdsByRoom as Record<string, unknown>)) {
-      if (!isMoveInReadyRoomId(roomKey) || !Array.isArray(rawPromptIds) ||
-          rawPromptIds.length > MOVE_IN_READY_ROOM_PROMPT_IDS[roomKey].length) {
+      if (!isMoveInReadyRoomId(roomKey) || !Array.isArray(rawPromptIds) || rawPromptIds.length > 1) {
         return { ok: false, message: "The saved inspection contains invalid room prompt completion." };
       }
       const seen = new Set<string>();
@@ -450,54 +622,31 @@ export function validateInspectionRecord(
     if (!isMoveInReadyRoomId(roomKey) || !isRecord(rawIdentity)) {
       return { ok: false, message: "The saved inspection contains an invalid room clip identity." };
     }
-    if (
-      rawIdentity.roomId !== roomKey ||
-      typeof rawIdentity.schemaVersion !== "number" || !Number.isSafeInteger(rawIdentity.schemaVersion) || rawIdentity.schemaVersion < 1 ||
-      typeof rawIdentity.catalogVersion !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(rawIdentity.catalogVersion) ||
-      typeof rawIdentity.videoId !== "string" ||
-      !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(rawIdentity.videoId) ||
-      !Number.isSafeInteger(rawIdentity.videoRevision) ||
-      (rawIdentity.videoRevision as number) < 1 ||
-      typeof rawIdentity.videoHash !== "string" ||
-      !/^[0-9a-f]{64}$/.test(rawIdentity.videoHash) ||
-      typeof rawIdentity.capturedAt !== "string" ||
-      !Number.isFinite(Date.parse(rawIdentity.capturedAt)) ||
-      typeof rawIdentity.durationSeconds !== "number" ||
-      !Number.isFinite(rawIdentity.durationSeconds) ||
-      rawIdentity.durationSeconds <= 0 ||
-      rawIdentity.durationSeconds > 30 ||
-      typeof rawIdentity.sizeBytes !== "number" ||
-      !Number.isSafeInteger(rawIdentity.sizeBytes) ||
-      rawIdentity.sizeBytes <= 0 ||
-      rawIdentity.sizeBytes > 60 * 1024 * 1024 ||
-      !Array.isArray(rawIdentity.evidence) ||
-      rawIdentity.evidence.length > 30
-    ) {
-      return { ok: false, message: "The saved inspection has an invalid clip identity." };
+    const entry = validateStoredClipIdentityEntry(roomKey, rawIdentity, "room");
+    if (!entry.ok) return entry;
+  }
+  if (value.elementClipIdentities !== undefined) {
+    for (const [elementKey, rawIdentity] of Object.entries(value.elementClipIdentities)) {
+      if (!isMoveInReadyElementId(elementKey) || !isRecord(rawIdentity)) {
+        return { ok: false, message: "The saved inspection contains an invalid element clip identity." };
+      }
+      const entry = validateStoredClipIdentityEntry(elementKey, rawIdentity, "element");
+      if (!entry.ok) return entry;
     }
-    const identityEvidence = new Set<string>();
-    const identityStillIds = new Set<string>();
-    for (const evidence of rawIdentity.evidence) {
-      const parsedEvidence = validateEvidenceReference(evidence);
-      if (!parsedEvidence.ok ||
-          parsedEvidence.value.frameIndex !== null ||
-          parsedEvidence.value.videoId !== rawIdentity.videoId ||
-          parsedEvidence.value.videoRevision !== rawIdentity.videoRevision ||
-          parsedEvidence.value.roomId !== roomKey ||
-          parsedEvidence.value.schemaVersion !== rawIdentity.schemaVersion ||
-          parsedEvidence.value.catalogVersion !== rawIdentity.catalogVersion ||
-          parsedEvidence.value.timestampMs >= (rawIdentity.durationSeconds as number) * 1000) {
-        return { ok: false, message: "The saved inspection contains invalid still evidence." };
+  }
+
+  if (value.liveProofs !== undefined) {
+    for (const [elementKey, rawProof] of Object.entries(value.liveProofs)) {
+      if (!isMoveInReadyElementId(elementKey) || !isRecord(rawProof) ||
+          !Number.isSafeInteger(rawProof.trackedFrames) || (rawProof.trackedFrames as number) < 0 ||
+          !Number.isSafeInteger(rawProof.totalFrames) || (rawProof.totalFrames as number) < 0 ||
+          (rawProof.trackedFrames as number) > (rawProof.totalFrames as number) ||
+          (rawProof.transcriptExcerpt !== null &&
+            (typeof rawProof.transcriptExcerpt !== "string" || rawProof.transcriptExcerpt.length > 300)) ||
+          typeof rawProof.recordedAt !== "string" ||
+          !Number.isFinite(Date.parse(rawProof.recordedAt))) {
+        return { ok: false, message: "The saved inspection contains an invalid live proof." };
       }
-      const evidenceKey = evidenceReferenceKey(parsedEvidence.value);
-      if (identityEvidence.has(evidenceKey)) {
-        return { ok: false, message: "The saved inspection contains duplicate still identities." };
-      }
-      if (identityStillIds.has(parsedEvidence.value.stillId)) {
-        return { ok: false, message: "The saved inspection contains duplicate still IDs." };
-      }
-      identityEvidence.add(evidenceKey);
-      identityStillIds.add(parsedEvidence.value.stillId);
     }
   }
 
@@ -505,6 +654,9 @@ export function validateInspectionRecord(
     Object.values(value.clipIdentities).some((rawIdentity) =>
       isRecord(rawIdentity) && (rawIdentity.schemaVersion !== value.schemaVersion || rawIdentity.catalogVersion !== value.catalogVersion),
     ) ||
+    (isRecord(value.elementClipIdentities) && Object.values(value.elementClipIdentities).some((rawIdentity) =>
+      isRecord(rawIdentity) && (rawIdentity.schemaVersion !== value.schemaVersion || rawIdentity.catalogVersion !== value.catalogVersion),
+    )) ||
     Object.values(value.proposals).some((rawProposal) => {
       const identity = isRecord(rawProposal) ? rawProposal.analysisIdentity : null;
       return !isRecord(identity) || identity.schemaVersion !== value.schemaVersion || identity.catalogVersion !== value.catalogVersion;
@@ -520,6 +672,15 @@ export function validateInspectionRecord(
     (value.pendingAnalysisIntent !== null && (!isRecord(value.pendingAnalysisIntent) ||
       value.pendingAnalysisIntent.schemaVersion !== value.schemaVersion || value.pendingAnalysisIntent.catalogVersion !== value.catalogVersion));
 
+  const roomFields = normalizeRoomFields(value);
+  if (!roomFields) {
+    return { ok: false, message: "The saved inspection contains invalid unit rooms." };
+  }
+  const voiceChecks = normalizeVoiceChecks(value);
+  if (!voiceChecks) {
+    return { ok: false, message: "The saved inspection contains invalid voice check answers." };
+  }
+
   if (hasStaleVersions) {
     return {
       ok: true,
@@ -532,9 +693,15 @@ export function validateInspectionRecord(
         fundingType: value.fundingType as FundingType,
         pseudonym: value.pseudonym,
         evaluatorName: typeof value.evaluatorName === "string" ? value.evaluatorName : "",
+        voiceChecks,
+        unitType: roomFields.unitType,
+        bathCount: roomFields.bathCount,
+        roomIds: roomFields.roomIds,
         selectedRoomId: value.selectedRoomId as MoveInReadyRoomId,
         completedPromptIdsByRoom,
         clipIdentities: value.clipIdentities as MoveInReadyInspection["clipIdentities"],
+        elementClipIdentities: (value.elementClipIdentities ?? {}) as MoveInReadyInspection["elementClipIdentities"],
+        liveProofs: (value.liveProofs ?? {}) as MoveInReadyInspection["liveProofs"],
         proposals: {},
         decisions: createUnreviewedEvaluatorDecisions(),
         pendingAnalysisIntent: null,
@@ -576,11 +743,11 @@ export function validateInspectionRecord(
     }
     if (parsed.value.status === "A" || parsed.value.status === "D") {
       if (parsed.value.analysisIdentity !== null &&
-          !isAnalysisIdentityCurrentInStoredRecord(parsed.value.analysisIdentity, value.sessionId as string, value.clipIdentities, value.schemaVersion as number, value.catalogVersion)) {
+          !isAnalysisIdentityCurrentInStoredRecord(parsed.value.analysisIdentity, value.sessionId as string, value.clipIdentities, value.schemaVersion as number, value.catalogVersion, isRecord(value.elementClipIdentities) ? value.elementClipIdentities : {})) {
         return { ok: false, message: "The saved evaluator decision refers to a stale video analysis." };
       }
       for (const evidence of parsed.value.evidence) {
-        if (!isEvidenceCurrentInStoredRecord(evidence, value.clipIdentities, value.schemaVersion as number, value.catalogVersion)) {
+        if (!isEvidenceCurrentInStoredRecord(evidence, value.clipIdentities, value.schemaVersion as number, value.catalogVersion, isRecord(value.elementClipIdentities) ? value.elementClipIdentities : {})) {
           return { ok: false, message: "The saved evaluator decision refers to a stale room clip." };
         }
       }
@@ -603,7 +770,7 @@ export function validateInspectionRecord(
     }
     const parsedAnalysisIdentity = validateVideoAnalysisIdentity(rawProposal.analysisIdentity);
     if (!parsedAnalysisIdentity.ok ||
-        !isAnalysisIdentityCurrentInStoredRecord(parsedAnalysisIdentity.value, value.sessionId as string, value.clipIdentities, value.schemaVersion as number, value.catalogVersion)) {
+        !isAnalysisIdentityCurrentInStoredRecord(parsedAnalysisIdentity.value, value.sessionId as string, value.clipIdentities, value.schemaVersion as number, value.catalogVersion, isRecord(value.elementClipIdentities) ? value.elementClipIdentities : {})) {
       return { ok: false, message: "The saved model proposal refers to a stale or invalid video analysis." };
     }
     let deficiencySuggestion: ModelElementProposal["deficiencySuggestion"];
@@ -620,7 +787,7 @@ export function validateInspectionRecord(
     for (const evidence of rawProposal.evidence) {
       const parsedEvidence = validateEvidenceReference(evidence);
       if (!parsedEvidence.ok || parsedEvidence.value.frameIndex === null ||
-          !isEvidenceCurrentInStoredRecord(parsedEvidence.value, value.clipIdentities, value.schemaVersion as number, value.catalogVersion)) {
+          !isEvidenceCurrentInStoredRecord(parsedEvidence.value, value.clipIdentities, value.schemaVersion as number, value.catalogVersion, isRecord(value.elementClipIdentities) ? value.elementClipIdentities : {})) {
         return { ok: false, message: "The saved model proposal has invalid still evidence." };
       }
       normalizedEvidence.push(parsedEvidence.value);
@@ -634,7 +801,7 @@ export function validateInspectionRecord(
       analysisIdentity: parsedAnalysisIdentity.value,
     };
     const sourceElement = MOVE_IN_READY_ELEMENTS.find((element) => element.id === elementId);
-    if (!sourceElement?.roomIds.some((roomId) => roomId === parsedAnalysisIdentity.value.roomId)) {
+    if (!sourceElement || !roomContributesToElement(parsedAnalysisIdentity.value.roomId, sourceElement)) {
       return { ok: false, message: "The saved model proposal refers to an unrelated room." };
     }
     proposals[elementId] = rawProposal.modelSuggestion === "D"
@@ -667,9 +834,15 @@ export function validateInspectionRecord(
       fundingType: value.fundingType as FundingType,
       pseudonym: value.pseudonym,
       evaluatorName,
+      voiceChecks,
+      unitType: roomFields.unitType,
+      bathCount: roomFields.bathCount,
+      roomIds: roomFields.roomIds,
       selectedRoomId: value.selectedRoomId as MoveInReadyRoomId,
       completedPromptIdsByRoom,
       clipIdentities: value.clipIdentities as MoveInReadyInspection["clipIdentities"],
+      elementClipIdentities: (value.elementClipIdentities ?? {}) as MoveInReadyInspection["elementClipIdentities"],
+      liveProofs: (value.liveProofs ?? {}) as MoveInReadyInspection["liveProofs"],
       proposals,
       decisions,
       pendingAnalysisIntent: parsedPendingAnalysisIntent.value,
@@ -769,6 +942,8 @@ export function migrateLegacyInspectionRecord(
     selectedRoomId: value.selectedRoomId as MoveInReadyRoomId,
     completedPromptIdsByRoom: (value.completedPromptIdsByRoom ?? {}) as MoveInReadyInspection["completedPromptIdsByRoom"],
     clipIdentities: clipIdentities as MoveInReadyInspection["clipIdentities"],
+    elementClipIdentities: {},
+    liveProofs: {},
     proposals: {},
     decisions: createUnreviewedEvaluatorDecisions(),
     pendingAnalysisIntent: null,
@@ -840,6 +1015,8 @@ function stampLegacyVersions(
     ...record,
     catalogVersion: legacyCatalogVersion,
     clipIdentities: clipIdentities as MoveInReadyInspection["clipIdentities"],
+    elementClipIdentities: (record.elementClipIdentities ?? {}) as MoveInReadyInspection["elementClipIdentities"],
+    liveProofs: (record.liveProofs ?? {}) as MoveInReadyInspection["liveProofs"],
   };
 }
 
@@ -973,11 +1150,16 @@ function isAnalysisIdentityCurrentInStoredRecord(
   clipIdentities: Record<string, unknown>,
   schemaVersion: number,
   catalogVersion: string,
+  elementClipIdentities: Record<string, unknown> = {},
 ): boolean {
   const parsed = validateVideoAnalysisIdentity(identity);
   if (!parsed.ok || parsed.value.sessionId !== sessionId ||
       parsed.value.schemaVersion !== schemaVersion || parsed.value.catalogVersion !== catalogVersion) return false;
-  const clip = clipIdentities[parsed.value.roomId];
+  const roomClip = clipIdentities[parsed.value.roomId];
+  const clip = isRecord(roomClip) && roomClip.videoId === parsed.value.videoId
+    ? roomClip
+    : Object.values(elementClipIdentities).find((candidate) =>
+        isRecord(candidate) && candidate.roomId === parsed.value.roomId && candidate.videoId === parsed.value.videoId);
   return isRecord(clip) &&
     clip.roomId === parsed.value.roomId &&
     clip.schemaVersion === parsed.value.schemaVersion &&
@@ -999,14 +1181,35 @@ function sameAnalysisIdentity(left: VideoAnalysisIdentity, right: VideoAnalysisI
     left.catalogVersion === right.catalogVersion;
 }
 
+/**
+ * Resolve the stored clip identity a still evidence reference belongs to:
+ * the room clip when its videoId matches, otherwise the v2 element clip
+ * with the same filming room + videoId. Returns undefined when neither
+ * matches, which callers treat as stale evidence.
+ */
+export function identityForEvidenceReference(
+  record: Pick<MoveInReadyInspection, "clipIdentities" | "elementClipIdentities">,
+  reference: EvidenceReference,
+): StoredRoomClipIdentity | undefined {
+  const roomIdentity = record.clipIdentities[reference.roomId];
+  if (roomIdentity && roomIdentity.videoId === reference.videoId) return roomIdentity;
+  return Object.values(record.elementClipIdentities ?? {}).find((candidate) =>
+    candidate !== undefined && candidate.roomId === reference.roomId && candidate.videoId === reference.videoId);
+}
+
 function isEvidenceCurrentInStoredRecord(
   evidence: EvidenceReference,
   clipIdentities: Record<string, unknown>,
   schemaVersion: number,
   catalogVersion: string,
+  elementClipIdentities: Record<string, unknown> = {},
 ): boolean {
-  const identity = clipIdentities[evidence.roomId];
-  if (!isRecord(identity) || !Array.isArray(identity.evidence) || identity.videoId !== evidence.videoId ||
+  const roomIdentity = clipIdentities[evidence.roomId];
+  const identity = isRecord(roomIdentity) && roomIdentity.videoId === evidence.videoId
+    ? roomIdentity
+    : Object.values(elementClipIdentities).find((candidate) =>
+        isRecord(candidate) && candidate.roomId === evidence.roomId && candidate.videoId === evidence.videoId);
+  if (!isRecord(identity) || !Array.isArray(identity.evidence) ||
       identity.videoRevision !== evidence.videoRevision || identity.schemaVersion !== schemaVersion ||
       identity.catalogVersion !== catalogVersion || evidence.schemaVersion !== schemaVersion ||
       evidence.catalogVersion !== catalogVersion) return false;

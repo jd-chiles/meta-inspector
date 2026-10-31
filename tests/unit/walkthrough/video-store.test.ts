@@ -8,10 +8,13 @@ vi.mock("idb", async (importOriginal) => {
 });
 
 import {
+  createStoredElementClip,
   createStoredVideoClip,
   createVideoClipStore,
   VIDEO_CLIP_SCHEMA_VERSION,
+  makeElementClipId,
   makeVideoClipId,
+  validateStoredElementClip,
   validateStoredVideoClip,
 } from "../../../src/features/walkthrough/video-store";
 import { VIDEO_MAX_BYTES } from "../../../src/features/walkthrough/video-utils";
@@ -19,6 +22,7 @@ import { VIDEO_MAX_BYTES } from "../../../src/features/walkthrough/video-utils";
 const SESSION_ID = "session-1";
 const ROOM_ID = "kitchen";
 const CLIP_ID = makeVideoClipId(SESSION_ID, ROOM_ID);
+const ELEMENT_ID = "demo-water-supply";
 
 function row(overrides: Record<string, unknown> = {}) {
   return {
@@ -66,6 +70,17 @@ describe("stored room video validation", () => {
   it("rejects a clip stored under another walkthrough or room", () => {
     expect(validateStoredVideoClip(row(), { sessionId: "different-session", roomId: ROOM_ID }).ok).toBe(false);
     expect(validateStoredVideoClip(row(), { sessionId: SESSION_ID, roomId: "bathroom" }).ok).toBe(false);
+  });
+
+  it("rejects a room binding for a per-element clip row", () => {
+    const elementRow = row({
+      id: makeElementClipId(SESSION_ID, ELEMENT_ID),
+      elementId: ELEMENT_ID,
+    });
+    expect(validateStoredElementClip(elementRow, { sessionId: SESSION_ID, elementId: ELEMENT_ID }).ok).toBe(true);
+    expect(validateStoredVideoClip(elementRow, { sessionId: SESSION_ID, roomId: ROOM_ID }).ok).toBe(false);
+    expect(validateStoredElementClip(elementRow, { sessionId: SESSION_ID, elementId: "demo-ventilation" }).ok).toBe(false);
+    expect(validateStoredElementClip(elementRow, { sessionId: "different-session", elementId: ELEMENT_ID }).ok).toBe(false);
   });
 });
 
@@ -367,3 +382,57 @@ function sizedBlob(size: number): Blob {
     slice: () => new Blob(),
   } as unknown as Blob;
 }
+
+function elementClip() {
+  const video = new Blob([new Uint8Array([9, 9, 9, 9])], { type: "video/mp4" });
+  return createStoredElementClip({
+    sessionId: SESSION_ID,
+    elementId: ELEMENT_ID,
+    roomId: ROOM_ID,
+    roomLabel: "Kitchen",
+    fileName: "element-faucet.mp4",
+    mime: "video/mp4",
+    sizeBytes: video.size,
+    durationSeconds: 8,
+    width: 1,
+    height: 1,
+    video,
+    sourceSha256: "c".repeat(64),
+    stills: [],
+    capturedAt: "2026-10-29T09:16:00.000Z",
+  });
+}
+
+describe("temporary in-memory per-element video store", () => {
+  beforeEach(() => {
+    vi.stubGlobal("indexedDB", undefined);
+    openDBMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps per-element clips separate from room clips and clears both on session removal", async () => {
+    const store = createVideoClipStore();
+    const roomClip = clip();
+    const liveClip = elementClip();
+
+    expect(await store.getElement(SESSION_ID, ELEMENT_ID)).toBeNull();
+    await store.put(roomClip);
+    await store.put(liveClip);
+
+    expect(await store.get(SESSION_ID, ROOM_ID)).toEqual(roomClip);
+    expect(await store.getElement(SESSION_ID, ELEMENT_ID)).toEqual(liveClip);
+
+    await store.removeElement(SESSION_ID, ELEMENT_ID);
+    expect(await store.getElement(SESSION_ID, ELEMENT_ID)).toBeNull();
+    expect(await store.get(SESSION_ID, ROOM_ID)).toEqual(roomClip);
+
+    await store.put(liveClip);
+    await store.removeSession(SESSION_ID);
+    expect(await store.get(SESSION_ID, ROOM_ID)).toBeNull();
+    expect(await store.getElement(SESSION_ID, ELEMENT_ID)).toBeNull();
+    store.close();
+  });
+});

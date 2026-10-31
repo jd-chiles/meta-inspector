@@ -10,6 +10,7 @@ vi.mock("idb", async (importOriginal) => {
 import {
   createInitialInspectionRecord,
   createInspectionStore,
+  identityForEvidenceReference,
   INSPECTION_MEMORY_ONLY_WARNING,
   validateInspectionRecord,
 } from "../../../src/features/walkthrough/inspection-store";
@@ -617,5 +618,99 @@ describe("local inspection record validation", () => {
     record.evaluatorName = "Jordan Lee";
     const result = validateInspectionRecord(record, "session-1");
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("per-element clip identities (v2 live capture)", () => {
+  const ELEMENT_EVIDENCE: EvidenceReference = {
+    schemaVersion: MOVE_IN_READY_SCHEMA_VERSION,
+    catalogVersion: "0.3.0-demo.3",
+    videoId: "video-element-faucet",
+    videoRevision: 1,
+    roomId: "kitchen",
+    stillId: "still-element-faucet",
+    timestampMs: 3000,
+    frameIndex: null,
+    stillHash: "c".repeat(64),
+  };
+
+  function recordWithElementClip() {
+    const record = createInitialInspectionRecord("session-1", NOW);
+    record.fundingType = "lahsa";
+    record.pseudonym = "Mock Unit 04";
+    record.evaluatorName = "Alex Morgan";
+    record.elementClipIdentities["demo-water-supply"] = {
+      roomId: "kitchen",
+      schemaVersion: MOVE_IN_READY_SCHEMA_VERSION,
+      catalogVersion: "0.3.0-demo.3",
+      videoId: ELEMENT_EVIDENCE.videoId,
+      videoRevision: ELEMENT_EVIDENCE.videoRevision,
+      videoHash: "d".repeat(64),
+      capturedAt: NOW,
+      durationSeconds: 8,
+      sizeBytes: 512,
+      evidence: [{ ...ELEMENT_EVIDENCE }],
+    };
+    record.decisions["demo-water-supply"] = {
+      status: "A",
+      evaluatorName: "Alex Morgan",
+      decidedAt: NOW,
+      inPersonCheckAcknowledgment: { evaluatorName: "Alex Morgan", completedAt: NOW },
+      rationale: "I filmed the mock-unit faucet running and checked it in person.",
+      evidence: [{ ...ELEMENT_EVIDENCE, frameIndex: 90 }],
+      analysisIdentity: null,
+    };
+    return record;
+  }
+
+  it("accepts element evidence bound to a matching element clip identity", () => {
+    const record = recordWithElementClip();
+    const result = validateInspectionRecord(record, "session-1");
+    expect(result.ok).toBe(true);
+    const resolved = identityForEvidenceReference(record, { ...ELEMENT_EVIDENCE, frameIndex: 90 });
+    expect(resolved?.videoId).toBe(ELEMENT_EVIDENCE.videoId);
+  });
+
+  it("accepts a proposal whose analysis identity is bound to the element clip", () => {
+    const record = recordWithElementClip();
+    record.proposals["demo-water-supply"] = {
+      elementId: "demo-water-supply",
+      state: "draft-proposal",
+      modelSuggestion: "A",
+      observation: "Live tracking draft (unreviewed): faucet tracked in 7 of 8 sampled frames.",
+      confidence: 80,
+      evidence: [{ ...ELEMENT_EVIDENCE, frameIndex: 4 }],
+      analysisIdentity: {
+        sessionId: "session-1",
+        roomId: "kitchen",
+        schemaVersion: MOVE_IN_READY_SCHEMA_VERSION,
+        videoId: ELEMENT_EVIDENCE.videoId,
+        videoRevision: ELEMENT_EVIDENCE.videoRevision,
+        expectedSourceHash: "d".repeat(64),
+        analysisId: "analysis-live-1",
+        attempt: 1,
+        catalogVersion: "0.3.0-demo.3",
+      },
+    };
+    expect(validateInspectionRecord(record, "session-1").ok).toBe(true);
+  });
+
+  it("treats element evidence as stale when the element clip was replaced", () => {
+    const record = recordWithElementClip();
+    const identity = record.elementClipIdentities["demo-water-supply"];
+    if (!identity) throw new Error("expected the element clip identity");
+    identity.videoId = "video-element-faucet-retake";
+    identity.evidence = [];
+    const result = validateInspectionRecord(record, "session-1");
+    expect(result.ok).toBe(false);
+    expect(identityForEvidenceReference(record, { ...ELEMENT_EVIDENCE, frameIndex: 90 })).toBeUndefined();
+  });
+
+  it("rejects element clip identities keyed by an unknown element", () => {
+    const record = recordWithElementClip();
+    (record as unknown as Record<string, Record<string, unknown>>).elementClipIdentities = {
+      "not-an-element": record.elementClipIdentities["demo-water-supply"],
+    };
+    expect(validateInspectionRecord(record, "session-1").ok).toBe(false);
   });
 });

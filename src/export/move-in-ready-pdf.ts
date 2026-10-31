@@ -31,6 +31,7 @@ export interface MoveInReadyExportInput {
   pseudonym: string;
   fundingType: FundingType;
   capturedRoomIds: readonly MoveInReadyRoomId[];
+  expectedRoomIds: readonly MoveInReadyRoomId[];
   decisions: EvaluatorDecisionSet;
   signoff: EvaluatorSignoff;
   leadershipSignoffRequired?: boolean;
@@ -956,6 +957,7 @@ async function assertExportable(input: MoveInReadyExportInput): Promise<void> {
   const finalization = deriveFinalInspectionResult({
     fundingType: input.fundingType,
     capturedRoomIds: input.capturedRoomIds,
+    expectedRoomIds: input.expectedRoomIds,
     evaluatorDecisions: input.decisions,
     signoff: input.signoff,
   });

@@ -6,9 +6,11 @@
 
 import {
   MOVE_IN_READY_ELEMENTS,
-  MOVE_IN_READY_ROOMS,
+  parseRoomId,
+  roomLabel,
   type MoveInReadyElementId,
   type MoveInReadyRoomId,
+  type MoveInReadyRoomType,
 } from "../../domain/move-in-ready";
 
 export type AssistantActionId =
@@ -16,8 +18,7 @@ export type AssistantActionId =
   | "film-room"
   | "analyze-all"
   | "open-requirement"
-  | "prefill-all"
-  | "save-all"
+  | "confirm-all"
   | "signoff"
   | "dismiss";
 
@@ -42,19 +43,18 @@ export interface AssistantScriptInput {
   canCapture: boolean;
   pseudonym: string;
   evaluatorName: string;
+  roomIds: readonly MoveInReadyRoomId[];
   filmedRoomIds: readonly MoveInReadyRoomId[];
   analyzedRoomIds: readonly MoveInReadyRoomId[];
   analyzedTotal: number;
   resolvedDecisions: number;
-  prefilledDecisions: number;
-  acknowledgedDecisions: number;
   nextUndecidedLabel: string | null;
   nextUndecidedId: MoveInReadyElementId | null;
   signed: boolean;
   batchActive: boolean;
 }
 
-export const ASSISTANT_FILMING_SCRIPTS: Record<MoveInReadyRoomId, readonly string[]> = {
+export const ASSISTANT_FILMING_SCRIPTS: Record<MoveInReadyRoomType, readonly string[]> = {
   kitchen: [
     "Recording. First, run the kitchen faucet and show the water flow and drainage.",
     "Now pan across the sink, counters, and outlets.",
@@ -67,8 +67,14 @@ export const ASSISTANT_FILMING_SCRIPTS: Record<MoveInReadyRoomId, readonly strin
     "Show the ventilation fan running.",
     "Finally, show the smoke or carbon monoxide detector.",
   ],
-  "bedroom-living": [
-    "Recording. First, walk the bedroom and living areas showing walls and floors.",
+  bedroom: [
+    "Recording. First, walk the bedroom showing walls and floors.",
+    "Now show the windows, locks, and heating or cooling equipment.",
+    "Show the light fixtures and outlets.",
+    "Finally, show the smoke or carbon monoxide detector.",
+  ],
+  "living-room": [
+    "Recording. First, walk the living room showing walls and floors.",
     "Now show the windows, locks, and heating or cooling equipment.",
     "Show the light fixtures and outlets.",
     "Finally, show the smoke or carbon monoxide detector.",
@@ -100,15 +106,17 @@ export function deriveAssistantNode(input: AssistantScriptInput): AssistantNode 
       actions: [{ id: "setup", label: "Set up the unit", primary: true }],
     };
   }
-  const nextRoom = MOVE_IN_READY_ROOMS.find((room) => !input.filmedRoomIds.includes(room.id)) ?? null;
-  if (nextRoom) {
+  const nextRoomId = input.roomIds.find((roomId) => !input.filmedRoomIds.includes(roomId)) ?? null;
+  if (nextRoomId) {
     const filmed = input.filmedRoomIds.length;
+    const total = input.roomIds.length;
+    const label = roomLabel(nextRoomId);
     return {
-      key: `film-${nextRoom.id}`,
-      title: `Step ${filmed + 1} of 4: film the ${nextRoom.label}`,
-      message: `One continuous take. I'll narrate exactly what to show while the camera rolls. Tap below and I'll open the camera for the ${nextRoom.label}.`,
-      speak: `Step ${filmed + 1} of 4. Let's film the ${nextRoom.label}. I'll tell you exactly what to show.`,
-      actions: [{ id: "film-room", label: `Film the ${nextRoom.label}`, primary: true, roomId: nextRoom.id }],
+      key: `film-${nextRoomId}`,
+      title: `Step ${filmed + 1} of ${total}: film the ${label}`,
+      message: `One continuous take. I'll narrate exactly what to show while the camera rolls. Tap below and I'll open the camera for the ${label}.`,
+      speak: `Step ${filmed + 1} of ${total}. Let's film the ${label}. I'll tell you exactly what to show.`,
+      actions: [{ id: "film-room", label: `Film the ${label}`, primary: true, roomId: nextRoomId }],
     };
   }
   if (input.batchActive) {
@@ -125,30 +133,25 @@ export function deriveAssistantNode(input: AssistantScriptInput): AssistantNode 
     return {
       key: "analyze",
       title: "All filmed — my turn to work",
-      message: `All 4 rooms are filmed. I'll analyze every clip and draft all 11 requirements for you. Tapping below confirms the clips are staged mock-unit footage with no tenants, faces, addresses, or case notes, and that each clip will be sent to Meta for live processing.`,
+      message: `All ${input.roomIds.length} rooms are filmed. I'll analyze every clip and draft all 11 requirements for you. Tapping below confirms the clips are staged mock-unit footage with no tenants, faces, addresses, or case notes, and that each clip will be sent to Meta for live processing.`,
       speak: `All filmed. Confirm your clips are staged mock footage, and I'll analyze everything now.`,
       actions: [{ id: "analyze-all", label: `Confirm & analyze ${remaining} room${remaining === 1 ? "" : "s"}`, primary: true }],
     };
   }
   if (input.resolvedDecisions < MOVE_IN_READY_ELEMENTS.length) {
-    if (input.prefilledDecisions === 0 && input.nextUndecidedId) {
-      return {
-        key: "prefill",
-        title: "Drafts are ready — quick review",
-        message: "The AI drafted every requirement from your clips. I'll fill them all in below; you just confirm each one in person with a single checkbox, then save everything at once.",
-        speak: "Drafts are ready. I'll fill in the whole checklist. You just confirm each item.",
-        actions: [{ id: "open-requirement", label: `Start: ${input.nextUndecidedLabel ?? "checklist"}`, primary: true, elementId: input.nextUndecidedId }],
-      };
-    }
     const remaining = MOVE_IN_READY_ELEMENTS.length - input.resolvedDecisions;
+    const actions: AssistantAction[] = [
+      { id: "confirm-all", label: `Confirm ${remaining} from AI drafts`, primary: true },
+    ];
+    if (input.nextUndecidedId) {
+      actions.push({ id: "open-requirement", label: `Review: ${input.nextUndecidedLabel ?? "requirement"}`, primary: false, elementId: input.nextUndecidedId });
+    }
     return {
       key: "confirm",
       title: `${remaining} requirement${remaining === 1 ? "" : "s"} left to confirm`,
-      message: "For each item: read the AI draft, do the quick in-person check, tick the confirmation, and move on. Nothing is decided until you confirm it.",
-      speak: `${remaining} items left. Check each one in person and confirm.`,
-      actions: input.nextUndecidedId
-        ? [{ id: "open-requirement", label: `Next: ${input.nextUndecidedLabel ?? "requirement"}`, primary: true, elementId: input.nextUndecidedId }]
-        : [{ id: "save-all", label: "Save all confirmed", primary: true }],
+      message: "The AI drafts are applied below. Confirm them all at once after your in-person walk, or open any requirement to inspect its evidence first. Nothing is decided until you confirm it.",
+      speak: `${remaining} items left. Confirm them all, or review each one.`,
+      actions,
     };
   }
   if (!input.signed) {
@@ -167,4 +170,11 @@ export function deriveAssistantNode(input: AssistantScriptInput): AssistantNode 
     speak: "Inspection complete. Nice work.",
     actions: [{ id: "signoff", label: "Open exports", primary: true }],
   };
+}
+
+/** Filming narration for a concrete room, resolved by room type. */
+export function filmingScriptForRoom(roomId: MoveInReadyRoomId): readonly string[] {
+  const parsed = parseRoomId(roomId);
+  if (!parsed) return ASSISTANT_FILMING_SCRIPTS.hallway;
+  return ASSISTANT_FILMING_SCRIPTS[parsed.type];
 }

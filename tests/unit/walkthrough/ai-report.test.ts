@@ -5,7 +5,7 @@ import {
   type EvaluatorDecisionSet,
   type ModelElementProposal,
 } from "../../../src/domain/move-in-ready";
-import { selectIssueElements } from "../../../src/features/walkthrough/move-in-ready-flow";
+import { selectIssueElements, sortedReviewElements } from "../../../src/features/walkthrough/move-in-ready-flow";
 
 function proposal(overrides: Partial<ModelElementProposal> & { elementId: ModelElementProposal["elementId"] }): ModelElementProposal {
   return {
@@ -47,5 +47,24 @@ describe("selectIssueElements", () => {
 
   it("returns nothing without proposals", () => {
     expect(selectIssueElements({}, createUnreviewedEvaluatorDecisions())).toEqual([]);
+  });
+});
+
+describe("sortedReviewElements", () => {
+  it("orders manual-only first, then issues, then clean drafts, then decided", () => {
+    const decisions: EvaluatorDecisionSet = createUnreviewedEvaluatorDecisions();
+    decisions["demo-item-05"] = { status: "A", evaluatorName: "E", decidedAt: "2026-01-01T00:00:00.000Z", inPersonCheckAcknowledgment: { evaluatorName: "E", completedAt: "2026-01-01T00:00:00.000Z" }, rationale: "ok", evidence: [], analysisIdentity: null };
+    const sorted = sortedReviewElements(
+      {
+        "demo-water-supply": proposal({ elementId: "demo-water-supply", modelSuggestion: "D", deficiencySuggestion: { deficientArea: "faucet", correction: "fix", completionDate: "2026-02-01", reinspectionDate: "2026-02-08" } }),
+        "demo-item-10": proposal({ elementId: "demo-item-10", modelSuggestion: "A" }),
+      },
+      decisions,
+    ).map(({ element }) => element.id);
+    // demo-item-06 has no proposal (manual first); water D next; item-10 A after issues; decided item-05 last.
+    expect(sorted.indexOf("demo-item-06")).toBeLessThan(sorted.indexOf("demo-water-supply"));
+    expect(sorted.indexOf("demo-water-supply")).toBeLessThan(sorted.indexOf("demo-item-10"));
+    expect(sorted.indexOf("demo-item-10")).toBeLessThan(sorted.indexOf("demo-item-05"));
+    expect(sorted).toHaveLength(11);
   });
 });

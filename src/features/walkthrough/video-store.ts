@@ -45,8 +45,10 @@ export interface StoredVideoClip {
   sessionId: string;
   roomId: string;
   roomLabel: string;
+  /** Set for v2 per-element live clips; room clips leave this undefined. */
+  elementId?: string;
   fileName: string;
-  mime: "video/mp4" | "video/quicktime";
+  mime: "video/mp4" | "video/quicktime" | "video/webm";
   sizeBytes: number;
   durationSeconds: number;
   width: number;
@@ -90,6 +92,8 @@ export interface VideoClipStore {
   /** True when this instance keeps clips only in memory until it is closed. */
   isMemoryOnly(): boolean;
   get(sessionId: string, roomId: string): Promise<StoredVideoClip | null>;
+  /** Per-element v2 live clip, keyed by element instead of room. */
+  getElement(sessionId: string, elementId: string): Promise<StoredVideoClip | null>;
   put(clip: StoredVideoClip): Promise<void>;
   /** Atomically append source stills only while the room still holds this video. */
   addStillsIfSourceMatches(
@@ -100,6 +104,7 @@ export interface VideoClipStore {
     stills: readonly StoredVideoStill[],
   ): Promise<boolean>;
   remove(sessionId: string, roomId: string): Promise<void>;
+  removeElement(sessionId: string, elementId: string): Promise<void>;
   /** Delete every room clip saved under one inspection session. */
   removeSession(sessionId: string): Promise<void>;
   close(): void;
@@ -168,6 +173,16 @@ export function createVideoClipStore(): VideoClipStore {
         validated.ok ? "The temporary room clip is missing its source hash." : validated.message,
         false,
       );
+    }
+    return cloneStoredVideoClip(validated.clip as StoredVideoClip);
+  };
+
+  const getElementFromMemory = (sessionId: string, elementId: string): StoredVideoClip | null => {
+    const row = memoryClips.get(makeElementClipId(sessionId, elementId));
+    if (row === undefined) return null;
+    const validated = validateStoredElementClip(row, { sessionId, elementId });
+    if (!validated.ok) {
+      throw new VideoStoreError("SCHEMA_MISMATCH", validated.message, false);
     }
     return cloneStoredVideoClip(validated.clip as StoredVideoClip);
   };
@@ -292,11 +307,32 @@ export function createVideoClipStore(): VideoClipStore {
       }
     },
 
+    async getElement(sessionId, elementId) {
+      const id = makeElementClipId(sessionId, elementId);
+      if (memoryOnly) return getElementFromMemory(sessionId, elementId);
+      try {
+        const db = await database();
+        const row = await db.get("clips", id);
+        if (row === undefined) return null;
+        const validated = validateStoredElementClip(row, { sessionId, elementId });
+        if (!validated.ok) {
+          throw new VideoStoreError("SCHEMA_MISMATCH", validated.message, false);
+        }
+        rememberClip(validated.clip as StoredVideoClip);
+        return validated.clip as StoredVideoClip;
+      } catch (error) {
+        if (activateMemoryFallback(error)) return getElementFromMemory(sessionId, elementId);
+        throw normalizeStorageError(error);
+      }
+    },
+
     async put(clip) {
-      const validated = validateStoredVideoClip(clip, {
-        sessionId: clip.sessionId,
-        roomId: clip.roomId,
-      });
+      const validated = typeof clip.elementId === "string"
+        ? validateStoredElementClip(clip, { sessionId: clip.sessionId, elementId: clip.elementId })
+        : validateStoredVideoClip(clip, {
+            sessionId: clip.sessionId,
+            roomId: clip.roomId,
+          });
       if (!validated.ok) {
         throw new VideoStoreError("SCHEMA_MISMATCH", validated.message, false);
       }
@@ -394,6 +430,34 @@ export function createVideoClipStore(): VideoClipStore {
       }
     },
 
+    async removeElement(sessionId, elementId) {
+      const id = makeElementClipId(sessionId, elementId);
+      if (memoryOnly && !persistentDatabaseWasOpened) {
+        if (typeof indexedDB === "undefined") {
+          memoryClips.delete(id);
+          return;
+        }
+        throw new VideoStoreError(
+          "UNAVAILABLE",
+          "Browser storage could not be accessed, so removal from this device could not be confirmed. Restore storage access and try again.",
+          true,
+        );
+      }
+      try {
+        await (await database()).delete("clips", id);
+        memoryClips.delete(id);
+      } catch (error) {
+        if (activateMemoryFallback(error)) {
+          throw new VideoStoreError(
+            "QUOTA_EXCEEDED",
+            "Local storage is full. This walkthrough is now memory only, but the saved clip could not be removed from persistent local storage.",
+            true,
+          );
+        }
+        throw normalizeStorageError(error);
+      }
+    },
+
     async removeSession(sessionId) {
       const prefix = `${encodeURIComponent(sessionId)}::`;
       if (memoryOnly && !persistentDatabaseWasOpened) {
@@ -449,6 +513,11 @@ export function makeVideoClipId(sessionId: string, roomId: string): string {
   return `${encodeURIComponent(sessionId)}::${encodeURIComponent(roomId)}`;
 }
 
+/** v2 element clip key. The `element:` prefix keeps it out of the room keyspace. */
+export function makeElementClipId(sessionId: string, elementId: string): string {
+  return `${encodeURIComponent(sessionId)}::element%3A${encodeURIComponent(elementId)}`;
+}
+
 export function createStoredVideoClip(input: {
   sessionId: string;
   roomId: string;
@@ -470,6 +539,42 @@ export function createStoredVideoClip(input: {
     sessionId: input.sessionId,
     roomId: input.roomId,
     roomLabel: input.roomLabel,
+    fileName: input.fileName,
+    mime: input.mime,
+    sizeBytes: input.sizeBytes,
+    durationSeconds: input.durationSeconds,
+    width: input.width,
+    height: input.height,
+    capturedAt: input.capturedAt ?? new Date().toISOString(),
+    sourceSha256: input.sourceSha256,
+    video: input.video,
+    stills: input.stills.map((still) => ({ ...still })),
+  };
+}
+
+export function createStoredElementClip(input: {
+  sessionId: string;
+  elementId: string;
+  roomId: string;
+  roomLabel: string;
+  fileName: string;
+  mime: StoredVideoClip["mime"];
+  sizeBytes: number;
+  durationSeconds: number;
+  width: number;
+  height: number;
+  video: Blob;
+  sourceSha256: string;
+  stills: readonly VideoStill[];
+  capturedAt?: string;
+}): StoredVideoClip {
+  return {
+    id: makeElementClipId(input.sessionId, input.elementId),
+    schemaVersion: VIDEO_CLIP_SCHEMA_VERSION,
+    sessionId: input.sessionId,
+    roomId: input.roomId,
+    roomLabel: input.roomLabel,
+    elementId: input.elementId,
     fileName: input.fileName,
     mime: input.mime,
     sizeBytes: input.sizeBytes,
@@ -538,6 +643,66 @@ export function validateStoredVideoClip(
 
 function cloneStoredVideoClip(clip: StoredVideoClip): StoredVideoClip {
   return { ...clip, stills: clip.stills.map((still) => ({ ...still })) };
+}
+
+/**
+ * Element-clip validation. Same bounds as room clips, keyed by element, and
+ * allowing WebM (desktop MediaRecorder output). Room clips stay MP4/MOV-only.
+ */
+export function validateStoredElementClip(
+  input: unknown,
+  expected: { sessionId: string; elementId: string },
+): { ok: true; clip: StoredVideoClipRow } | { ok: false; message: string } {
+  if (!isRecord(input)) return { ok: false, message: "The saved element clip is not a valid record." };
+  if (input.schemaVersion !== VIDEO_CLIP_SCHEMA_VERSION) {
+    return { ok: false, message: "The saved element clip uses an unsupported version. Re-film it." };
+  }
+  if (
+    input.sessionId !== expected.sessionId ||
+    input.elementId !== expected.elementId ||
+    input.id !== makeElementClipId(expected.sessionId, expected.elementId)
+  ) {
+    return { ok: false, message: "The saved element clip does not match this inspection element." };
+  }
+  if (
+    typeof input.roomId !== "string" ||
+    input.roomId.length === 0 ||
+    input.roomId.length > 128 ||
+    typeof input.roomLabel !== "string" ||
+    input.roomLabel.length > 120 ||
+    typeof input.fileName !== "string" ||
+    input.fileName.length > 255 ||
+    (input.mime !== "video/mp4" && input.mime !== "video/quicktime" && input.mime !== "video/webm") ||
+    typeof input.sizeBytes !== "number" ||
+    !Number.isSafeInteger(input.sizeBytes) ||
+    input.sizeBytes <= 0 ||
+    input.sizeBytes > VIDEO_MAX_BYTES ||
+    typeof input.durationSeconds !== "number" ||
+    !Number.isFinite(input.durationSeconds) ||
+    input.durationSeconds <= 0 ||
+    input.durationSeconds > VIDEO_MAX_DURATION_SECONDS ||
+    !isPositiveSafeInteger(input.width) ||
+    !isPositiveSafeInteger(input.height) ||
+    input.width * input.height > MAX_SOURCE_VIDEO_PIXELS ||
+    typeof input.capturedAt !== "string" ||
+    input.capturedAt.length > 64 ||
+    !Number.isFinite(Date.parse(input.capturedAt)) ||
+    typeof input.sourceSha256 !== "string" ||
+    !/^[0-9a-f]{64}$/.test(input.sourceSha256) ||
+    !isBlobLike(input.video) ||
+    !Number.isSafeInteger((input.video as Blob).size) ||
+    (input.video as Blob).size !== input.sizeBytes ||
+    !Array.isArray(input.stills) ||
+    input.stills.length > MAX_MEMORY_STILLS_PER_CLIP
+  ) {
+    return { ok: false, message: "The saved element clip is incomplete or damaged." };
+  }
+  for (const still of input.stills) {
+    if (!isValidStoredStill(still, input.durationSeconds)) {
+      return { ok: false, message: "The saved element clip has an invalid review still." };
+    }
+  }
+  return { ok: true, clip: input as unknown as StoredVideoClipRow };
 }
 
 function assertMemoryClipWithinBounds(clip: StoredVideoClip): void {

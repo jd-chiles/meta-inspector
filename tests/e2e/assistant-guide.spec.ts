@@ -28,6 +28,7 @@ test("AI guide opens from the nav tab and walks setup then filming", async ({ pa
 
   await page.getByLabel("Unit pseudonym").fill("Staged Assistant Unit");
   await page.getByLabel("Funding type").selectOption("lahsa");
+  await page.getByLabel("Unit type").selectOption("studio");
   await expect(guide.getByText("Step 1 of 4: film the Kitchen", { exact: true })).toBeVisible();
   await guide.getByRole("button", { name: "Film the Kitchen", exact: true }).click();
   await expect(page.getByText("0 of 4 clips saved", { exact: true }).first()).toBeVisible();
@@ -54,6 +55,7 @@ test("home offers a fresh inspection when progress exists", async ({ page }) => 
   if (await setupToggle.getAttribute("aria-expanded") !== "true") await setupToggle.click();
   await page.getByLabel("Unit pseudonym").fill("Staged Fresh Start Unit");
   await page.getByLabel("Funding type").selectOption("lahsa");
+  await page.getByLabel("Unit type").selectOption("studio");
 
   await page.getByRole("navigation", { name: "Main navigation" })
     .getByRole("button", { name: "Home", exact: true }).click();
@@ -77,6 +79,7 @@ test("saved inspections list, switch, and delete without losing the other", asyn
   if (await setupToggle.getAttribute("aria-expanded") !== "true") await setupToggle.click();
   await page.getByLabel("Unit pseudonym").fill("Unit Alpha");
   await page.getByLabel("Funding type").selectOption("lahsa");
+  await page.getByLabel("Unit type").selectOption("studio");
   await page.getByRole("navigation", { name: "Main navigation" })
     .getByRole("button", { name: "Home", exact: true }).click();
 
@@ -86,6 +89,7 @@ test("saved inspections list, switch, and delete without losing the other", asyn
   if (await setupToggle2.getAttribute("aria-expanded") !== "true") await setupToggle2.click();
   await page.getByLabel("Unit pseudonym").fill("Unit Bravo");
   await page.getByLabel("Funding type").selectOption("lahsa");
+  await page.getByLabel("Unit type").selectOption("studio");
   await page.getByRole("navigation", { name: "Main navigation" })
     .getByRole("button", { name: "Home", exact: true }).click();
 

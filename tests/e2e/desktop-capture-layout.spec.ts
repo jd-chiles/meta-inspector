@@ -27,6 +27,7 @@ test("desktop Capture uses five-tab navigation and places prompts beside the vid
   if (await captureSetup.getAttribute("aria-expanded") !== "true") await captureSetup.click();
   await page.getByLabel("Unit pseudonym").fill("Staged Desktop Layout Unit");
   await page.getByLabel("Funding type").selectOption("lahsa");
+  await page.getByLabel("Unit type").selectOption("studio");
 
   const capture = page.getByTestId("walkthrough-video-capture");
   await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
@@ -70,7 +71,6 @@ test("desktop Capture uses five-tab navigation and places prompts beside the vid
 
   await navigation.getByRole("button", { name: "Review", exact: true }).click();
   const elementList = page.locator("#element-overview-list");
-  await page.getByRole("button", { name: "View all 11 requirements", exact: true }).click();
   await elementList.getByRole("button", { name: /Structure and materials/ }).click();
   await expect(elementList.locator("button[aria-pressed='true']")).toHaveCount(1);
   await expect(page.getByRole("heading", { level: 1, name: "All 11 requirements", exact: true })).toBeVisible();

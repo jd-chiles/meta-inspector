@@ -26,6 +26,7 @@ test("home leads through film into the requirement-by-requirement checklist", as
   if (await setupToggle.getAttribute("aria-expanded") !== "true") await setupToggle.click();
   await page.getByLabel("Unit pseudonym").fill("Staged Home Flow Unit");
   await page.getByLabel("Funding type").selectOption("lahsa");
+  await page.getByLabel("Unit type").selectOption("studio");
   await expect(page.getByTestId("walkthrough-video-capture")).toBeVisible();
   await expect(page.getByTestId("capture-next-bar")).toContainText("0 of 4 rooms filmed");
 
@@ -37,9 +38,9 @@ test("home leads through film into the requirement-by-requirement checklist", as
     .getByRole("button", { name: "Review", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Requirement checklist" })).toBeVisible();
   await expect(page.getByRole("progressbar", { name: "Checklist progress" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "View all 11 requirements", exact: true })).toBeVisible();
+  await expect(page.locator("#element-overview-list").getByRole("listitem")).toHaveCount(11);
 
-  await page.getByRole("button", { name: /Continue: Structure and materials/ }).click();
+  await page.locator("#element-overview-list").getByRole("button", { name: /Structure and materials/ }).click();
   await expect(page.getByText("Requirement 1 of 11", { exact: false })).toBeVisible();
   await expect(page.getByTestId("review-element-demo-item-05")).toBeVisible();
 

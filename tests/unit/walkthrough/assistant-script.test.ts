@@ -10,12 +10,11 @@ const base: AssistantScriptInput = {
   canCapture: false,
   pseudonym: "",
   evaluatorName: "",
+  roomIds: ["kitchen", "bathroom", "bedroom", "living-room", "hallway"],
   filmedRoomIds: [],
   analyzedRoomIds: [],
   analyzedTotal: 0,
   resolvedDecisions: 0,
-  prefilledDecisions: 0,
-  acknowledgedDecisions: 0,
   nextUndecidedLabel: "Structure and materials",
   nextUndecidedId: "demo-item-05",
   signed: false,
@@ -38,9 +37,16 @@ describe("deriveAssistantNode", () => {
       ...base,
       fundingType: "lahsa",
       canCapture: true,
-      filmedRoomIds: ["kitchen", "bathroom", "bedroom-living"],
+      filmedRoomIds: ["kitchen", "bathroom", "bedroom"],
     });
-    expect(next.key).toBe("film-hallway");
+    expect(next.key).toBe("film-living-room");
+    const last = deriveAssistantNode({
+      ...base,
+      fundingType: "lahsa",
+      canCapture: true,
+      filmedRoomIds: ["kitchen", "bathroom", "bedroom", "living-room"],
+    });
+    expect(last.key).toBe("film-hallway");
   });
 
   it("offers one-tap analysis once every room is filmed", () => {
@@ -48,7 +54,7 @@ describe("deriveAssistantNode", () => {
       ...base,
       fundingType: "lahsa",
       canCapture: true,
-      filmedRoomIds: ["kitchen", "bathroom", "bedroom-living", "hallway"],
+      filmedRoomIds: ["kitchen", "bathroom", "bedroom", "living-room", "hallway"],
       analyzedTotal: 1,
     });
     expect(node.key).toBe("analyze");
@@ -60,12 +66,13 @@ describe("deriveAssistantNode", () => {
       ...base,
       fundingType: "lahsa",
       canCapture: true,
-      filmedRoomIds: ["kitchen", "bathroom", "bedroom-living", "hallway"],
-      analyzedRoomIds: ["kitchen", "bathroom", "bedroom-living", "hallway"],
-      analyzedTotal: 4,
+      filmedRoomIds: ["kitchen", "bathroom", "bedroom", "living-room", "hallway"],
+      analyzedRoomIds: ["kitchen", "bathroom", "bedroom", "living-room", "hallway"],
+      analyzedTotal: 5,
     });
-    expect(node.key).toBe("prefill");
-    expect(node.actions[0]).toMatchObject({ id: "open-requirement", elementId: "demo-item-05" });
+    expect(node.key).toBe("confirm");
+    expect(node.actions[0]).toMatchObject({ id: "confirm-all" });
+    expect(node.actions[1]).toMatchObject({ id: "open-requirement", elementId: "demo-item-05" });
   });
 
   it("ends at sign-off and completion", () => {
@@ -73,8 +80,8 @@ describe("deriveAssistantNode", () => {
       ...base,
       fundingType: "lahsa",
       canCapture: true,
-      filmedRoomIds: ["kitchen", "bathroom", "bedroom-living", "hallway"],
-      analyzedTotal: 4,
+      filmedRoomIds: ["kitchen", "bathroom", "bedroom", "living-room", "hallway"],
+      analyzedTotal: 5,
       resolvedDecisions: 11,
     });
     expect(signoff.key).toBe("signoff");
@@ -82,8 +89,8 @@ describe("deriveAssistantNode", () => {
       ...base,
       fundingType: "lahsa",
       canCapture: true,
-      filmedRoomIds: ["kitchen", "bathroom", "bedroom-living", "hallway"],
-      analyzedTotal: 4,
+      filmedRoomIds: ["kitchen", "bathroom", "bedroom", "living-room", "hallway"],
+      analyzedTotal: 5,
       resolvedDecisions: 11,
       signed: true,
     });

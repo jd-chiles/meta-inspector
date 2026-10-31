@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  confirmProposalAsDecision,
   createUnreviewedEvaluatorDecisions,
   deriveFinalInspectionResult,
   EVALUATOR_ATTESTATION_TEXT,
   MOVE_IN_READY_ELEMENTS,
   MOVE_IN_READY_ELEMENT_IDS,
-  MOVE_IN_READY_ROOMS,
   MOVE_IN_READY_SCHEMA_VERSION,
+  parseRoomId,
+  roomLabel,
+  roomsForUnit,
   validateEvidenceReference,
   validateEvaluatorDecision,
   validateEvaluatorSignoff,
@@ -96,17 +99,21 @@ const SIGNOFF = {
   attested: true,
   signedAt: TIMESTAMP,
 };
-const CAPTURED_ROOM_IDS = MOVE_IN_READY_ROOMS.map((room) => room.id);
+const CAPTURED_ROOM_IDS = roomsForUnit("1-bedroom", 1);
 
 describe("Move-in Ready inspection domain", () => {
-  it("defines four capture rooms and the eleven owner-attested elements", () => {
-    expect(MOVE_IN_READY_ROOMS).toHaveLength(4);
-    expect(MOVE_IN_READY_ROOMS.map((room) => room.id)).toEqual([
-      "kitchen",
-      "bathroom",
-      "bedroom-living",
-      "hallway",
-    ]);
+  it("derives the room list from the evaluator's unit description", () => {
+    expect(roomsForUnit("studio", 1)).toEqual(["kitchen", "bathroom", "living-room", "hallway"]);
+    expect(roomsForUnit("1-bedroom", 1)).toEqual(["kitchen", "bathroom", "bedroom", "living-room", "hallway"]);
+    expect(roomsForUnit("2-bedroom", 2)).toEqual(["kitchen", "bathroom", "bathroom-2", "bedroom", "bedroom-2", "living-room", "hallway"]);
+    expect(roomsForUnit("3-bedroom", 1, { hallway: false })).toEqual(["kitchen", "bathroom", "bedroom", "bedroom-2", "bedroom-3", "living-room"]);
+    expect(parseRoomId("bedroom-2")).toEqual({ type: "bedroom", index: 2, legacy: false });
+    expect(parseRoomId("bathroom")).toEqual({ type: "bathroom", index: 1, legacy: false });
+    expect(parseRoomId("bedroom-living")).toEqual({ type: "bedroom", index: 1, legacy: true });
+    expect(parseRoomId("kitchen-2")).toBeNull();
+    expect(parseRoomId("garage")).toBeNull();
+    expect(roomLabel("bedroom-2")).toBe("Bedroom 2");
+    expect(roomLabel("bathroom")).toBe("Bathroom");
     expect(MOVE_IN_READY_ELEMENTS).toHaveLength(11);
     expect(new Set(MOVE_IN_READY_ELEMENT_IDS).size).toBe(11);
     expect(MOVE_IN_READY_ELEMENTS.map((element) => element.label)).toEqual([
@@ -439,6 +446,7 @@ describe("Move-in Ready inspection domain", () => {
       expect(deriveFinalInspectionResult({
         fundingType: "lahsa",
         capturedRoomIds: CAPTURED_ROOM_IDS,
+        expectedRoomIds: CAPTURED_ROOM_IDS,
         evaluatorDecisions: decisions,
         signoff: null,
       }).status).toBe("signoff-required");
@@ -488,6 +496,7 @@ describe("Move-in Ready inspection domain", () => {
     const derived = deriveFinalInspectionResult({
       fundingType: "lahsa",
       capturedRoomIds: CAPTURED_ROOM_IDS,
+      expectedRoomIds: CAPTURED_ROOM_IDS,
       evaluatorDecisions: decisions,
       signoff: SIGNOFF,
     });
@@ -555,6 +564,7 @@ describe("Move-in Ready inspection domain", () => {
     const result = deriveFinalInspectionResult({
       fundingType: "lahsa",
       capturedRoomIds: CAPTURED_ROOM_IDS,
+      expectedRoomIds: CAPTURED_ROOM_IDS,
       evaluatorDecisions: createUnreviewedEvaluatorDecisions(),
       signoff: SIGNOFF,
     });
@@ -569,6 +579,7 @@ describe("Move-in Ready inspection domain", () => {
     const result = deriveFinalInspectionResult({
       fundingType: "lahsa",
       capturedRoomIds: CAPTURED_ROOM_IDS,
+      expectedRoomIds: CAPTURED_ROOM_IDS,
       evaluatorDecisions: allHumanApproved(),
       signoff: SIGNOFF,
     });
@@ -580,6 +591,7 @@ describe("Move-in Ready inspection domain", () => {
     const result = deriveFinalInspectionResult({
       fundingType: "lahsa",
       capturedRoomIds,
+      expectedRoomIds: CAPTURED_ROOM_IDS,
       evaluatorDecisions: allHumanApproved(),
       signoff: SIGNOFF,
     });
@@ -595,6 +607,7 @@ describe("Move-in Ready inspection domain", () => {
     const result = deriveFinalInspectionResult({
       fundingType: "lahsa",
       capturedRoomIds: CAPTURED_ROOM_IDS,
+      expectedRoomIds: CAPTURED_ROOM_IDS,
       evaluatorDecisions: allHumanApproved(),
       signoff: {
         ...SIGNOFF,
@@ -628,6 +641,7 @@ describe("Move-in Ready inspection domain", () => {
     const result = deriveFinalInspectionResult({
       fundingType: "lahsa",
       capturedRoomIds: CAPTURED_ROOM_IDS,
+      expectedRoomIds: CAPTURED_ROOM_IDS,
       evaluatorDecisions: decisions,
       signoff: SIGNOFF,
     });
@@ -644,6 +658,7 @@ describe("Move-in Ready inspection domain", () => {
     const unresolved = deriveFinalInspectionResult({
       fundingType: "lahsa",
       capturedRoomIds: CAPTURED_ROOM_IDS,
+      expectedRoomIds: CAPTURED_ROOM_IDS,
       evaluatorDecisions: decisions,
       signoff: SIGNOFF,
     });
@@ -656,6 +671,7 @@ describe("Move-in Ready inspection domain", () => {
     const unsigned = deriveFinalInspectionResult({
       fundingType: "lahsa",
       capturedRoomIds: CAPTURED_ROOM_IDS,
+      expectedRoomIds: CAPTURED_ROOM_IDS,
       evaluatorDecisions: allHumanApproved(),
       signoff: null,
     });
@@ -669,6 +685,7 @@ describe("Move-in Ready inspection domain", () => {
       deriveFinalInspectionResult({
         fundingType: "unknown",
         capturedRoomIds: CAPTURED_ROOM_IDS,
+        expectedRoomIds: CAPTURED_ROOM_IDS,
         evaluatorDecisions: decisions,
         signoff: SIGNOFF,
       }).status,
@@ -677,11 +694,112 @@ describe("Move-in Ready inspection domain", () => {
     const hud = deriveFinalInspectionResult({
       fundingType: "hud",
       capturedRoomIds: CAPTURED_ROOM_IDS,
+      expectedRoomIds: CAPTURED_ROOM_IDS,
       evaluatorDecisions: decisions,
       signoff: SIGNOFF,
     });
     expect(hud.status).toBe("hqs-branch-required");
     expect(hud.result).toBeNull();
     expect(hud.blockers[0]).toContain("HQS");
+  });
+
+  it("confirms an A proposal into an evaluator decision with provenance", () => {
+    const decision = confirmProposalAsDecision(
+      {
+        elementId: "demo-water-supply",
+        state: "draft-proposal",
+        modelSuggestion: "A",
+        observation: "Faucet runs clear.",
+        confidence: 90,
+        evidence: [EVIDENCE],
+        analysisIdentity: ANALYSIS_IDENTITY,
+      },
+      "demo-water-supply",
+      { evaluatorName: "Alex Morgan", decidedAt: TIMESTAMP },
+    );
+    expect(decision?.status).toBe("A");
+    const parsed = validateEvaluatorDecision(decision, "demo-water-supply");
+    expect(parsed.ok).toBe(true);
+    if (decision?.status === "A") {
+      expect(decision.rationale).toContain("Faucet runs clear.");
+      expect(decision.evidence).toHaveLength(1);
+      expect(decision.analysisIdentity).toEqual(ANALYSIS_IDENTITY);
+      expect(decision.inPersonCheckAcknowledgment).toEqual(IN_PERSON_ACKNOWLEDGMENT);
+    }
+  });
+
+  it("confirms a D proposal with its correction plan, and fire-safety A with both clauses", () => {
+    const deficient = confirmProposalAsDecision(
+      {
+        elementId: "demo-item-05",
+        state: "draft-proposal",
+        modelSuggestion: "D",
+        observation: "Wall damage visible.",
+        confidence: 82,
+        evidence: [{ ...EVIDENCE, roomId: "kitchen" }],
+        analysisIdentity: ANALYSIS_IDENTITY,
+        deficiencySuggestion: {
+          deficientArea: "Kitchen wall",
+          correction: "Patch and repaint.",
+          completionDate: "2026-11-12",
+          reinspectionDate: "2026-11-15",
+        },
+      },
+      "demo-item-05",
+      { evaluatorName: "Alex Morgan", decidedAt: TIMESTAMP },
+    );
+    expect(deficient?.status).toBe("D");
+    expect(validateEvaluatorDecision(deficient, "demo-item-05").ok).toBe(true);
+    const fire = confirmProposalAsDecision(
+      {
+        elementId: "demo-smoke-co",
+        state: "draft-proposal",
+        modelSuggestion: "A",
+        observation: "Detectors present.",
+        confidence: 88,
+        evidence: [EVIDENCE],
+        analysisIdentity: ANALYSIS_IDENTITY,
+      },
+      "demo-smoke-co",
+      { evaluatorName: "Alex Morgan", decidedAt: TIMESTAMP },
+    );
+    expect(fire?.status).toBe("A");
+    expect(validateEvaluatorDecision(fire, "demo-smoke-co").ok).toBe(true);
+  });
+
+  it("sends incomplete proposals to the detail form instead of confirming", () => {
+    const base = {
+      elementId: "demo-item-05" as const,
+      state: "draft-proposal" as const,
+      observation: "Wall damage visible.",
+      confidence: 82,
+      evidence: [EVIDENCE],
+      analysisIdentity: ANALYSIS_IDENTITY,
+    };
+    expect(confirmProposalAsDecision(
+      { ...base, modelSuggestion: "D" as const },
+      "demo-item-05",
+      { evaluatorName: "Alex Morgan", decidedAt: TIMESTAMP },
+    )).toBeNull();
+    expect(confirmProposalAsDecision(
+      {
+        ...base,
+        elementId: "demo-smoke-co",
+        modelSuggestion: "D" as const,
+        deficiencySuggestion: {
+          deficientArea: "Hallway",
+          correction: "Install detector.",
+          completionDate: "2026-11-12",
+          reinspectionDate: "2026-11-15",
+        },
+      },
+      "demo-smoke-co",
+      { evaluatorName: "Alex Morgan", decidedAt: TIMESTAMP },
+    )).toBeNull();
+    expect(confirmProposalAsDecision(
+      { ...base, modelSuggestion: "A" as const },
+      "demo-item-05",
+      { evaluatorName: "  ", decidedAt: TIMESTAMP },
+    )).toBeNull();
   });
 });

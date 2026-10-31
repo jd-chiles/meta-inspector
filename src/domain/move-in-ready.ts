@@ -1,11 +1,11 @@
 /**
  * Domain contract for the Move-in Ready video walkthrough flow.
  *
- * Model output is kept in `ModelElementProposal` and has no path into
- * `EvaluatorDecision`. Proposals can help a worker choose what to inspect,
- * but only an explicit evaluator decision can contribute to a final result.
- * This module intentionally contains no reducer that can mark an inspection
- * reviewed or turn model output into a human decision.
+ * Model output is kept in `ModelElementProposal`. The only path into
+ * `EvaluatorDecision` is `confirmProposalAsDecision`, which represents one
+ * explicit evaluator tap confirming one proposal after an in-person check.
+ * There is deliberately no automatic path: nothing here confirms, batches,
+ * or signs on the evaluator's behalf.
  */
 
 import type { ValidationResult } from "./catalog";
@@ -13,39 +13,152 @@ import type { ValidationResult } from "./catalog";
 /** Version of the persisted Move-in Ready inspection/evidence contract. */
 export const MOVE_IN_READY_SCHEMA_VERSION = 5;
 
-export const MOVE_IN_READY_ROOMS = [
-  { id: "kitchen", label: "Kitchen" },
-  { id: "bathroom", label: "Bathroom" },
-  { id: "bedroom-living", label: "Bedroom / living room" },
-  { id: "hallway", label: "Hallway" },
+/**
+ * Room types the app can film and analyze. The inspection's concrete room
+ * list is never guessed: the evaluator picks a unit type and bath count at
+ * setup (see roomsForUnit) and can toggle individual rooms. A concrete room
+ * id is a type, or `type-N` for counted rooms (`bathroom-2`, `bedroom-3`).
+ */
+export const MOVE_IN_READY_ROOM_TYPES = [
+  "kitchen",
+  "bathroom",
+  "bedroom",
+  "living-room",
+  "hallway",
 ] as const;
 
-export type MoveInReadyRoomId = (typeof MOVE_IN_READY_ROOMS)[number]["id"];
+export type MoveInReadyRoomType = (typeof MOVE_IN_READY_ROOM_TYPES)[number];
+
+/** Concrete room id: a room type, or `type-N` for counted rooms. */
+export type MoveInReadyRoomId = string;
+
+export const MOVE_IN_READY_UNIT_TYPES = [
+  "studio",
+  "1-bedroom",
+  "2-bedroom",
+  "3-bedroom",
+  "4-bedroom",
+] as const;
+
+export type MoveInReadyUnitType = (typeof MOVE_IN_READY_UNIT_TYPES)[number];
+
+export const MAX_COUNTED_ROOMS = 8;
+
+/**
+ * Legacy ids from schema-5 records saved before per-unit rooms.
+ * `bedroom-living` means the first bedroom (its clips stay valid evidence).
+ * Never issued for new rooms. Bare `bathroom`/`bedroom` remain the canonical
+ * first bathroom/bedroom ids.
+ */
+export const LEGACY_ROOM_IDS = ["bedroom-living"] as const;
+
+/** Room list for records saved before per-unit rooms. */
+export const LEGACY_DEFAULT_ROOM_IDS: readonly MoveInReadyRoomId[] = [
+  "kitchen",
+  "bathroom",
+  "bedroom-living",
+  "hallway",
+];
+
+export interface ParsedRoomId {
+  type: MoveInReadyRoomType;
+  /** 1-based occurrence for counted rooms; 1 for singletons. */
+  index: number;
+  legacy: boolean;
+}
+
+export function parseRoomId(roomId: string): ParsedRoomId | null {
+  if (roomId === "bedroom-living") return { type: "bedroom", index: 1, legacy: true };
+  const match = /^(kitchen|bathroom|bedroom|living-room|hallway)(?:-([1-9]))?$/.exec(roomId);
+  if (!match?.[1]) return null;
+  const type = match[1] as MoveInReadyRoomType;
+  const index = match[2] === undefined ? 1 : Number(match[2]);
+  if ((type === "kitchen" || type === "living-room" || type === "hallway") && match[2] !== undefined) return null;
+  if (index < 1 || index > MAX_COUNTED_ROOMS) return null;
+  return { type, index, legacy: false };
+}
+
+const ROOM_TYPE_LABELS: Record<MoveInReadyRoomType, string> = {
+  kitchen: "Kitchen",
+  bathroom: "Bathroom",
+  bedroom: "Bedroom",
+  "living-room": "Living room",
+  hallway: "Hallway",
+};
+
+export function roomTypeLabel(type: MoveInReadyRoomType): string {
+  return ROOM_TYPE_LABELS[type];
+}
+
+/** Display label for a concrete room (`bedroom-2` -> "Bedroom 2"). */
+export function roomLabel(roomId: MoveInReadyRoomId): string {
+  const parsed = parseRoomId(roomId);
+  if (!parsed) return roomId;
+  const base = ROOM_TYPE_LABELS[parsed.type];
+  if (parsed.legacy && roomId === "bedroom-living") return "Bedroom / living room";
+  if (parsed.type === "bathroom" || parsed.type === "bedroom") {
+    return parsed.index === 1 && !roomId.includes("-") ? base : `${base} ${parsed.index}`;
+  }
+  return base;
+}
+
+function bedroomCountForUnit(unitType: MoveInReadyUnitType): number {
+  switch (unitType) {
+    case "studio": return 0;
+    case "1-bedroom": return 1;
+    case "2-bedroom": return 2;
+    case "3-bedroom": return 3;
+    case "4-bedroom": return 4;
+  }
+}
+
+/**
+ * Concrete room list derived from the evaluator's unit description.
+ * Bedrooms beyond the first and bathrooms beyond the first are counted
+ * (`bedroom-2`, `bathroom-2`). The hallway stays toggleable.
+ */
+export function roomsForUnit(
+  unitType: MoveInReadyUnitType,
+  bathCount: number,
+  options: { hallway?: boolean } = {},
+): MoveInReadyRoomId[] {
+  const baths = Math.min(Math.max(Math.trunc(bathCount) || 1, 1), MAX_COUNTED_ROOMS);
+  const rooms: MoveInReadyRoomId[] = ["kitchen"];
+  for (let i = 1; i <= baths; i++) rooms.push(i === 1 ? "bathroom" : `bathroom-${i}`);
+  const bedrooms = bedroomCountForUnit(unitType);
+  for (let i = 1; i <= bedrooms; i++) rooms.push(i === 1 ? "bedroom" : `bedroom-${i}`);
+  rooms.push("living-room");
+  if (options.hallway !== false) rooms.push("hallway");
+  return rooms;
+}
 
 /** Stable checklist identities so room prompt completion survives reloads. One
  * filming instruction per room: each room captures a single continuous clip,
  * so the guidance is one take covering every moment the evidence needs. */
-export const MOVE_IN_READY_ROOM_PROMPT_IDS = {
-  kitchen: ["kitchen-walkthrough"],
-  bathroom: ["bathroom-walkthrough"],
-  "bedroom-living": ["bedroom-living-walkthrough"],
-  hallway: ["hallway-walkthrough"],
-} as const satisfies Record<MoveInReadyRoomId, readonly string[]>;
+export function promptIdForRoom(roomId: MoveInReadyRoomId): MoveInReadyPromptId {
+  return `${roomId}-walkthrough`;
+}
 
-export type MoveInReadyPromptId =
-  (typeof MOVE_IN_READY_ROOM_PROMPT_IDS)[MoveInReadyRoomId][number];
+export type MoveInReadyPromptId = string;
 
 export function isMoveInReadyPromptIdForRoom(
   roomId: MoveInReadyRoomId,
   promptId: string,
 ): promptId is MoveInReadyPromptId {
-  return (MOVE_IN_READY_ROOM_PROMPT_IDS[roomId] as readonly string[]).includes(promptId);
+  return promptId === promptIdForRoom(roomId);
 }
 
 export interface MoveInReadyElement {
   id: string;
   label: string;
-  roomIds: readonly MoveInReadyRoomId[];
+  /** Room types whose clips can contribute evidence; not concrete room ids. */
+  roomIds: readonly MoveInReadyRoomType[];
+}
+
+/** A concrete room contributes evidence when its type is listed. */
+export function roomContributesToElement(roomId: MoveInReadyRoomId, element: MoveInReadyElement): boolean {
+  const parsed = parseRoomId(roomId);
+  return parsed !== null && (element.roomIds as readonly string[]).includes(parsed.type);
 }
 
 /**
@@ -56,7 +169,7 @@ export const MOVE_IN_READY_ELEMENTS = [
   {
     id: "demo-item-05",
     label: "Structure and materials",
-    roomIds: ["kitchen", "bathroom", "bedroom-living", "hallway"],
+    roomIds: ["kitchen", "bathroom", "bedroom", "living-room", "hallway"],
   },
   {
     id: "demo-item-06",
@@ -66,12 +179,12 @@ export const MOVE_IN_READY_ELEMENTS = [
   {
     id: "demo-item-07",
     label: "Space and security",
-    roomIds: ["bedroom-living", "hallway"],
+    roomIds: ["bedroom", "living-room", "hallway"],
   },
   {
     id: "demo-interior-air",
     label: "Interior air quality / ventilation",
-    roomIds: ["kitchen", "bathroom", "bedroom-living", "hallway"],
+    roomIds: ["kitchen", "bathroom", "bedroom", "living-room", "hallway"],
   },
   {
     id: "demo-water-supply",
@@ -86,12 +199,12 @@ export const MOVE_IN_READY_ELEMENTS = [
   {
     id: "demo-item-09",
     label: "Thermal environment",
-    roomIds: ["kitchen", "bathroom", "bedroom-living", "hallway"],
+    roomIds: ["kitchen", "bathroom", "bedroom", "living-room", "hallway"],
   },
   {
     id: "demo-lighting-electric",
     label: "Lighting and electricity",
-    roomIds: ["kitchen", "bathroom", "bedroom-living", "hallway"],
+    roomIds: ["kitchen", "bathroom", "bedroom", "living-room", "hallway"],
   },
   {
     id: "demo-item-10",
@@ -101,12 +214,12 @@ export const MOVE_IN_READY_ELEMENTS = [
   {
     id: "demo-item-11",
     label: "Sanitary condition",
-    roomIds: ["kitchen", "bathroom", "bedroom-living", "hallway"],
+    roomIds: ["kitchen", "bathroom", "bedroom", "living-room", "hallway"],
   },
   {
     id: "demo-smoke-co",
     label: "Fire safety",
-    roomIds: ["kitchen", "bathroom", "bedroom-living", "hallway"],
+    roomIds: ["kitchen", "bathroom", "bedroom", "living-room", "hallway"],
   },
 ] as const satisfies readonly MoveInReadyElement[];
 
@@ -249,9 +362,6 @@ export interface EvaluatorSignoff {
 export const EVALUATOR_ATTESTATION_TEXT =
   "I understand that I am not a HUD-certified inspector. I evaluated this unit to the best of my ability and completed and reviewed this inspection based on my own assessment. AI suggestions are not my decisions.";
 
-const ROOM_ID_SET = new Set<string>(
-  MOVE_IN_READY_ROOMS.map((room) => room.id),
-);
 const ELEMENT_BY_ID = new Map<string, (typeof MOVE_IN_READY_ELEMENTS)[number]>(
   MOVE_IN_READY_ELEMENTS.map((element) => [element.id, element]),
 );
@@ -386,7 +496,7 @@ function normalizedName(name: string): string {
 }
 
 export function isMoveInReadyRoomId(value: unknown): value is MoveInReadyRoomId {
-  return typeof value === "string" && ROOM_ID_SET.has(value);
+  return typeof value === "string" && parseRoomId(value) !== null;
 }
 
 export function isMoveInReadyElementId(
@@ -655,7 +765,7 @@ export function validateModelProposalSet(
         continue;
       }
       const element = ELEMENT_BY_ID.get(elementId);
-      if (!element?.roomIds.some((roomId) => roomId === evidence.roomId)) {
+      if (!element || !roomContributesToElement(evidence.roomId, element)) {
         errors.push(`${path} references a still from an unrelated room`);
         continue;
       }
@@ -717,6 +827,62 @@ export function createUnreviewedEvaluatorDecisions(): EvaluatorDecisionSet {
   return Object.fromEntries(
     MOVE_IN_READY_ELEMENT_IDS.map((elementId) => [elementId, { status: "unreviewed" }]),
   ) as EvaluatorDecisionSet;
+}
+
+export interface ProposalConfirmation {
+  evaluatorName: string;
+  decidedAt: string;
+}
+
+/**
+ * One explicit evaluator confirmation tap on one proposal. Returns the
+ * resulting decision, or null when the proposal needs the detail form:
+ * a D without a correction plan or evidence stills, or a fire-safety D
+ * (its 11a/11b split needs per-clause choices). Callers must still run
+ * `validateEvaluatorDecision` on the result before saving.
+ */
+export function confirmProposalAsDecision(
+  proposal: ModelElementProposal,
+  elementId: MoveInReadyElementId,
+  confirmation: ProposalConfirmation,
+): EvaluatorDecision | null {
+  const evaluatorName = confirmation.evaluatorName.trim();
+  if (!evaluatorName || proposal.elementId !== elementId) return null;
+  const isFireSafety = elementId === "demo-smoke-co";
+  if (proposal.modelSuggestion === "D") {
+    const plan = proposal.deficiencySuggestion;
+    if (isFireSafety || !plan || proposal.evidence.length === 0) return null;
+    const parsedPlan = validateModelDeficiencySuggestion(plan);
+    if (!parsedPlan.ok) return null;
+    return {
+      status: "D",
+      evaluatorName,
+      decidedAt: confirmation.decidedAt,
+      inPersonCheckAcknowledgment: { evaluatorName, completedAt: confirmation.decidedAt },
+      rationale: `Confirmed deficiency: ${proposal.observation}`,
+      evidence: proposal.evidence.map((reference) => ({ ...reference })),
+      analysisIdentity: { ...proposal.analysisIdentity },
+      deficiency: {
+        issueDescription: parsedPlan.value.deficientArea,
+        correction: parsedPlan.value.correction,
+        completionDate: parsedPlan.value.completionDate,
+        reinspectionDate: parsedPlan.value.reinspectionDate,
+      },
+    };
+  }
+  const hasEvidence = proposal.evidence.length > 0;
+  return {
+    status: "A",
+    evaluatorName,
+    decidedAt: confirmation.decidedAt,
+    inPersonCheckAcknowledgment: { evaluatorName, completedAt: confirmation.decidedAt },
+    rationale: `Confirmed finding: ${proposal.observation}`,
+    evidence: hasEvidence ? proposal.evidence.map((reference) => ({ ...reference })) : [],
+    analysisIdentity: hasEvidence ? { ...proposal.analysisIdentity } : null,
+    ...(isFireSafety
+      ? { fireSafetyAssessment: { unitDetectors: "A", publicAreaDetectors: "A" } as FireSafetyAssessment }
+      : {}),
+  };
 }
 
 /**
@@ -1012,6 +1178,8 @@ export interface FinalizationInput {
   fundingType: FundingType;
   /** Room videos that are currently present and verified in local storage. */
   capturedRoomIds: readonly MoveInReadyRoomId[];
+  /** Rooms this inspection requires, from the evaluator's unit description. */
+  expectedRoomIds: readonly MoveInReadyRoomId[];
   evaluatorDecisions: Partial<Record<MoveInReadyElementId, unknown>>;
   signoff: unknown | null;
 }
@@ -1049,12 +1217,13 @@ export function deriveFinalInspectionResult(
   const capturedRoomIds = new Set<unknown>(
     Array.isArray(input.capturedRoomIds) ? input.capturedRoomIds : [],
   );
-  const missingRooms = MOVE_IN_READY_ROOMS.filter((room) => !capturedRoomIds.has(room.id));
+  const expectedRoomIds = Array.isArray(input.expectedRoomIds) ? input.expectedRoomIds : [];
+  const missingRooms = expectedRoomIds.filter((roomId) => !capturedRoomIds.has(roomId));
   if (missingRooms.length) {
     return {
       status: "capture-incomplete",
       result: null,
-      blockers: missingRooms.map((room) => `${room.label}: a room video is required before sign-off.`),
+      blockers: missingRooms.map((roomId) => `${roomLabel(roomId)}: a room video is required before sign-off.`),
     };
   }
 

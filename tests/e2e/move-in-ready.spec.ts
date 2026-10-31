@@ -39,6 +39,7 @@ async function setLahsaProfile(page: Page): Promise<void> {
   await openProfilePanel(page, "Unit & Funding");
   await page.getByLabel("Unit pseudonym").fill("Staged Demo Unit 04");
   await page.getByLabel("Funding type").selectOption("lahsa");
+  await page.getByLabel("Unit type").selectOption("studio");
   await openProfilePanel(page, "Evaluator");
   await page.getByLabel("Evaluator agency name").fill("Staged Demo Agency");
   await openProfilePanel(page, "Landlord & Agency");
@@ -90,7 +91,7 @@ async function expandReviewDisclosure(element: Locator, label: RegExp): Promise<
 
 async function uploadRequiredRoomClips(page: Page, existingRoomIds: readonly string[] = []): Promise<void> {
   const videoBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern.mp4"));
-  const rooms = ["kitchen", "bathroom", "bedroom-living", "hallway"] as const;
+  const rooms = ["kitchen", "bathroom", "living-room", "hallway"] as const;
   const alreadySaved = new Set(existingRoomIds);
   let savedCount = alreadySaved.size;
   for (const roomId of rooms) {
@@ -842,6 +843,7 @@ test.describe("Move-in Ready mobile flow", () => {
 
     await page.getByLabel("Unit pseudonym").fill("Staged Profile Flow Unit");
     await page.getByLabel("Funding type").selectOption("lahsa");
+  await page.getByLabel("Unit type").selectOption("studio");
     await expect(progress).toHaveAttribute("aria-valuenow", "1");
     await expect(setup.getByRole("button", { name: "Unit & Funding", exact: true })).toContainText("Ready");
 
@@ -1237,7 +1239,7 @@ test.describe("Move-in Ready mobile flow", () => {
         await consent.getByRole("checkbox", { name: /Every clip I film is staged\/mock-unit footage/ }).check();
         await consent.getByRole("checkbox", { name: /I understand each filmed clip will be sent/ }).check();
 
-        const firstRooms = ["kitchen", "bathroom", "bedroom-living"] as const;
+        const firstRooms = ["kitchen", "bathroom", "living-room"] as const;
         for (let index = 0; index < firstRooms.length; index += 1) {
           const roomId = firstRooms[index];
           await selectRoom(page, roomId);
@@ -1262,7 +1264,6 @@ test.describe("Move-in Ready mobile flow", () => {
         expect(mock.rooms.filter((entry) => entry.startsWith("segment:"))).toHaveLength(4);
         expect(mock.rooms.filter((entry) => entry.startsWith("map:"))).toHaveLength(4);
 
-        await page.getByRole("button", { name: "View all 11 requirements", exact: true }).click();
         const overview = page.getByRole("region", { name: "All 11 inspection elements" });
         await overview.locator("#element-overview-list").getByRole("button", { name: /Water supply/ }).click();
         await expect(page.getByTestId("review-element-demo-water-supply")).toContainText("Mock hallway water supply proposal.");
@@ -1347,7 +1348,6 @@ test.describe("Move-in Ready mobile flow", () => {
         await expect(page.getByRole("button", { name: "Analyze this room again", exact: true })).toBeVisible({ timeout: 30_000 });
 
         await page.getByRole("button", { name: "Review", exact: true }).click();
-        await page.getByRole("button", { name: "View all 11 requirements", exact: true }).click();
         const overview = page.getByRole("region", { name: "All 11 inspection elements" });
         const elementRows = overview.locator("#element-overview-list").getByRole("button");
         const waterSupplyRow = elementRows.filter({ hasText: "Water supply" });
@@ -1394,7 +1394,6 @@ test.describe("Move-in Ready mobile flow", () => {
         expect(mock.rooms).toEqual(["segment:kitchen", "map:kitchen", "segment:bathroom", "map:bathroom"]);
 
         await page.getByRole("button", { name: "Review", exact: true }).click();
-        await page.getByRole("button", { name: "View all 11 requirements", exact: true }).click();
         await waterSupplyRow.click();
         await expect(waterSupply).toContainText("Mock bathroom water supply proposal.");
         await page.getByRole("button", { name: "Back to all 11 requirements", exact: true }).click();
@@ -1408,7 +1407,6 @@ test.describe("Move-in Ready mobile flow", () => {
         await page.reload();
         await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
         await page.getByRole("button", { name: "Review", exact: true }).click();
-        await page.getByRole("button", { name: "View all 11 requirements", exact: true }).click();
         const reloadedOverview = page.getByRole("region", { name: "All 11 inspection elements" });
         const reloadedWaterSupplyRow = reloadedOverview.locator("#element-overview-list").getByRole("button", { name: /Water supply/ });
         await reloadedWaterSupplyRow.click();
@@ -1516,7 +1514,6 @@ test.describe("Move-in Ready mobile flow", () => {
         await selectRoom(page, "kitchen");
         await expect(page.getByText("replacement-during-map.mp4", { exact: true })).toBeVisible();
         await page.getByRole("button", { name: "Review", exact: true }).click();
-        await page.getByRole("button", { name: "View all 11 requirements", exact: true }).click();
         const overview = page.getByRole("region", { name: "All 11 inspection elements" });
         const waterSupplyRow = overview.locator("#element-overview-list").getByRole("button", { name: /Water supply/ });
         await waterSupplyRow.click();
@@ -1652,7 +1649,6 @@ test.describe("Move-in Ready mobile flow", () => {
     await uploadRequiredRoomClips(page, ["kitchen"]);
     await selectRoom(page, "kitchen");
     await page.getByRole("button", { name: "Review", exact: true }).click();
-    await page.getByRole("button", { name: "View all 11 requirements", exact: true }).click();
     const overview = page.getByRole("region", { name: "All 11 inspection elements" });
     const overviewButtons = overview.locator("#element-overview-list").getByRole("button");
     const waterSupplyRow = overviewButtons.filter({ hasText: "Water supply" });
@@ -1717,7 +1713,6 @@ test.describe("Move-in Ready mobile flow", () => {
     await goToCapture(page);
     await uploadRequiredRoomClips(page);
     await page.getByRole("button", { name: "Review", exact: true }).click();
-    await page.getByRole("button", { name: "View all 11 requirements", exact: true }).click();
 
     const elementButtons = page.getByRole("region", { name: "All 11 inspection elements" }).locator("#element-overview-list").getByRole("button");
     await expect(elementButtons).toHaveCount(11);

@@ -14,6 +14,7 @@ import {
   FolderOpen,
   Home,
   LoaderCircle,
+  Mic,
   RefreshCw,
   ShieldCheck,
   Smartphone,
@@ -37,14 +38,18 @@ import {
 import {
   EVALUATOR_ATTESTATION_TEXT,
   MOVE_IN_READY_SCHEMA_VERSION,
+  LEGACY_DEFAULT_ROOM_IDS,
   MOVE_IN_READY_ELEMENTS,
   MOVE_IN_READY_ELEMENT_IDS,
-  MOVE_IN_READY_ROOMS,
-  MOVE_IN_READY_ROOM_PROMPT_IDS,
+  confirmProposalAsDecision,
   createUnreviewedEvaluatorDecisions,
   deriveFinalInspectionResult,
   isMoveInReadyElementId,
   isMoveInReadyRoomId,
+  parseRoomId,
+  roomContributesToElement,
+  roomLabel,
+  roomsForUnit,
   validateModelDeficiencySuggestion,
   validateEvaluatorDecision,
   validateEvaluatorSignoff,
@@ -60,6 +65,7 @@ import {
   type MoveInReadyElementId,
   type MoveInReadyPromptId,
   type MoveInReadyRoomId,
+  type MoveInReadyUnitType,
   type VideoAnalysisIdentity,
 } from "../../domain/move-in-ready";
 import { MOVE_IN_READY_ELEMENT_CRITERIA } from "../../domain/element-criteria";
@@ -74,6 +80,7 @@ import {
 import {
   createInitialInspectionRecord,
   createInspectionStore,
+  identityForEvidenceReference,
   INSPECTION_MEMORY_ONLY_WARNING,
   type InspectionStore,
   type MoveInReadyInspection,
@@ -81,6 +88,9 @@ import {
   type StoredRoomClipIdentity,
 } from "./inspection-store";
 import WalkthroughVideoCapture from "./video-capture";
+import LiveCapture, { type LiveElementClipResult } from "./live-capture";
+import { LIVE_ELEMENT_SPECS, buildLiveProofDraft, filmingRoomForLiveElement } from "./live-elements";
+import { rankDeficiencies, reinspectionChecklist } from "./fix-list";
 import {
   findVerifiedEvidenceStill,
   isExpectedMp4Media,
@@ -100,6 +110,7 @@ import {
 } from "./offline";
 import {
   createVideoClipStore,
+  makeElementClipId,
   makeVideoClipId,
   type StoredVideoClip,
   type StoredVideoStill,
@@ -110,11 +121,14 @@ import { createPendingCancelTracker } from "./pending-cancel";
 import { deriveGuideModel, type GuideAction } from "./walkthrough-guide";
 import AssistantGuide from "./assistant-guide";
 import {
-  ASSISTANT_FILMING_SCRIPTS,
+  filmingScriptForRoom,
   deriveAssistantNode,
   type AssistantAction as AssistantGuideAction,
 } from "./assistant-script";
 import { cancelSpeech, readVoiceEnabled, speakText, writeVoiceEnabled } from "./voice-guide";
+import VoicePrompt from "./voice-prompt";
+import { VOICE_ROOM_CHECKS } from "./voice-checks";
+import { parseBathCount, parseUnitType, parseYesNo } from "./voice-parse";
 import styles from "./move-in-ready-flow.module.css";
 
 export type AnalysisMode = "live" | "fixture" | "unconfigured";
@@ -236,15 +250,15 @@ const MAX_ROOM_EVIDENCE_STILLS = 30;
 const MAX_STILLS_PER_DECODE = 12;
 
 function isCaptureSetupComplete(
-  record: Pick<MoveInReadyInspection, "pseudonym" | "fundingType"> | null,
+  record: Pick<MoveInReadyInspection, "pseudonym" | "fundingType" | "unitType"> | null,
 ): boolean {
-  return record !== null && record.fundingType === "lahsa" && record.pseudonym.trim().length > 0;
+  return record !== null && record.fundingType === "lahsa" && record.pseudonym.trim().length > 0 && record.unitType !== "";
 }
 
 function shouldExpandCaptureSetup(
-  record: Pick<MoveInReadyInspection, "pseudonym" | "fundingType">,
+  record: Pick<MoveInReadyInspection, "pseudonym" | "fundingType" | "unitType">,
 ): boolean {
-  const isUntouched = !record.pseudonym.trim() && record.fundingType === "unknown";
+  const isUntouched = !record.pseudonym.trim() && record.fundingType === "unknown" && record.unitType === "";
   return !isCaptureSetupComplete(record) && !isUntouched;
 }
 
@@ -273,14 +287,20 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   const [profileSection, setProfileSection] = useState<ProfileSection>("unit");
   const [setupExpanded, setSetupExpanded] = useState(false);
   const [selectedRoomId, setSelectedRoomId] = useState<MoveInReadyRoomId>("kitchen");
+  const [voiceTurn, setVoiceTurn] = useState<{ roomId: MoveInReadyRoomId; index: number } | null>(null);
+  const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null);
+  const [liveElementId, setLiveElementId] = useState<MoveInReadyElementId | null>(null);
+  const [liveDraftPreview, setLiveDraftPreview] = useState<{ elementId: MoveInReadyElementId; draft: ModelElementProposal } | null>(null);
+  const [setupVoiceStep, setSetupVoiceStep] = useState<"unit" | "baths" | null>(null);
+  const [setupVoiceTranscript, setSetupVoiceTranscript] = useState<string | null>(null);
   const [activeElementId, setActiveElementId] = useState<MoveInReadyElementId | null>(MOVE_IN_READY_ELEMENT_IDS[0]);
-  const [showAllReviewElements, setShowAllReviewElements] = useState(false);
   const [mobileReviewDetailOpen, setMobileReviewDetailOpen] = useState(false);
   const [isWideLayout, setIsWideLayout] = useState(false);
   const [reviewNoteOpen, setReviewNoteOpen] = useState(false);
   const [reviewNoteDraft, setReviewNoteDraft] = useState("");
   const [recordingInProgress, setRecordingInProgress] = useState(false);
   const [clips, setClips] = useState<Partial<Record<MoveInReadyRoomId, StoredVideoClip>>>({});
+  const [elementClips, setElementClips] = useState<Partial<Record<MoveInReadyElementId, StoredVideoClip>>>({});
   const [clipsReadySessionId, setClipsReadySessionId] = useState<string | null>(null);
   const [unreadableClipRooms, setUnreadableClipRooms] = useState<MoveInReadyRoomId[]>([]);
   const [booting, setBooting] = useState(true);
@@ -367,6 +387,37 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     const next = mutate({ ...current, updatedAt: new Date().toISOString() });
     persist(next);
   }, [persist]);
+
+  const handleLiveClipSaved = useCallback((elementId: MoveInReadyElementId, result: LiveElementClipResult) => {
+    const store = videoStoreRef.current;
+    const sessionId = recordRef.current?.sessionId;
+    if (store && sessionId) {
+      void store.getElement(sessionId, elementId).then((clip) => {
+        if (clip) setElementClips((current) => ({ ...current, [elementId]: clip }));
+      }).catch(() => undefined);
+    }
+    updateRecord((current) => ({
+      ...current,
+      elementClipIdentities: { ...current.elementClipIdentities, [elementId]: result.identity },
+      liveProofs: {
+        ...current.liveProofs,
+        [elementId]: {
+          trackedFrames: result.trackedFrameCount,
+          totalFrames: result.totalFrameCount,
+          transcriptExcerpt: result.transcriptExcerpt,
+          recordedAt: result.identity.capturedAt,
+        },
+      },
+    }));
+  }, [updateRecord]);
+
+  const handleLiveNeedsCheck = useCallback((elementId: MoveInReadyElementId, reason: string) => {
+    updateRecord((current) => ({
+      ...current,
+      decisions: { ...current.decisions, [elementId]: { status: "needs-human-check", note: reason.slice(0, 300) } },
+      signoff: null,
+    }));
+  }, [updateRecord]);
 
   const invalidateActiveAnalysis = useCallback((message?: string) => {
     analysisGenerationRef.current += 1;
@@ -485,23 +536,58 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     let active = true;
     const expectedSession = activeSessionId;
     setClips({});
+    setElementClips({});
     setClipsReadySessionId(null);
     setUnreadableClipRooms([]);
-    void Promise.all(MOVE_IN_READY_ROOMS.map(async (room) => {
-      try {
-        const clip = await store.get(expectedSession, room.id);
-        const videoHash = clip ? await sha256Blob(clip.video) : null;
-        return { roomId: room.id, clip, videoHash, failed: false } as const;
-      } catch {
-        return { roomId: room.id, clip: null, videoHash: null, failed: true } as const;
-      }
-    })).then((rows) => {
+    const loadRoomIds = recordRef.current?.roomIds ?? [...LEGACY_DEFAULT_ROOM_IDS];
+    const loadElementIds = LIVE_ELEMENT_SPECS.map((spec) => spec.elementId);
+    void Promise.all([
+      ...loadRoomIds.map(async (roomId) => {
+        try {
+          const clip = await store.get(expectedSession, roomId);
+          const videoHash = clip ? await sha256Blob(clip.video) : null;
+          return { kind: "room", roomId, clip, videoHash, failed: false } as const;
+        } catch {
+          return { kind: "room", roomId, clip: null, videoHash: null, failed: true } as const;
+        }
+      }),
+      ...loadElementIds.map(async (elementId) => {
+        try {
+          const clip = await store.getElement(expectedSession, elementId);
+          const videoHash = clip ? await sha256Blob(clip.video) : null;
+          return { kind: "element", elementId, clip, videoHash, failed: false } as const;
+        } catch {
+          return { kind: "element", elementId, clip: null, videoHash: null, failed: true } as const;
+        }
+      }),
+    ]).then((rows) => {
       if (!active || recordRef.current?.sessionId !== expectedSession) return;
       const next: Partial<Record<MoveInReadyRoomId, StoredVideoClip>> = {};
+      const nextElements: Partial<Record<MoveInReadyElementId, StoredVideoClip>> = {};
       const failedRooms: MoveInReadyRoomId[] = [];
       let reconciled = recordRef.current;
       let changed = false;
-      for (const { roomId, clip, videoHash, failed } of rows) {
+      for (const row of rows) {
+        if (row.kind === "element") {
+          const { elementId, clip, videoHash, failed } = row;
+          const existing = reconciled.elementClipIdentities[elementId];
+          if (failed) {
+            setStorageWarning("A saved live proof clip could not be checked. Its evidence stays hidden until local storage can be read.");
+            continue;
+          }
+          if (!clip || !videoHash || clip.sourceSha256 !== videoHash ||
+              existing?.videoHash !== videoHash || existing.sizeBytes !== clip.sizeBytes ||
+              existing.capturedAt !== clip.capturedAt) {
+            if (existing) {
+              reconciled = invalidateElementEvidence(reconciled, elementId);
+              changed = true;
+            }
+            continue;
+          }
+          nextElements[elementId] = clip;
+          continue;
+        }
+        const { roomId, clip, videoHash, failed } = row;
         const existing = reconciled.clipIdentities[roomId];
         if (failed) {
           failedRooms.push(roomId);
@@ -554,6 +640,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
         persist(reconciled);
       }
       setClips(next);
+      setElementClips(nextElements);
       setClipsReadySessionId(expectedSession);
       setUnreadableClipRooms(failedRooms);
       refreshStorageWarning();
@@ -584,8 +671,19 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     void (async () => {
       for (const reference of allCurrentEvidence(record)) {
         if (unreadableClipRooms.includes(reference.roomId)) continue;
-        const clip = clips[reference.roomId];
-        if (!clip || clip.id !== makeVideoClipId(expectedSessionId, reference.roomId)) {
+        const fromRoomClip = record.clipIdentities[reference.roomId]?.videoId === reference.videoId;
+        const elementId = fromRoomClip
+          ? undefined
+          : (Object.entries(record.elementClipIdentities ?? {}).find(([, candidate]) => candidate?.videoId === reference.videoId)?.[0] as MoveInReadyElementId | undefined);
+        const clip = elementId ? elementClips[elementId] : clips[reference.roomId];
+        const expectedClipId = elementId
+          ? makeElementClipId(expectedSessionId, elementId)
+          : makeVideoClipId(expectedSessionId, reference.roomId);
+        if (!fromRoomClip && !elementId) {
+          markStale(reference);
+          continue;
+        }
+        if (!clip || clip.id !== expectedClipId) {
           markStale(reference);
           continue;
         }
@@ -632,6 +730,15 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
               },
             };
           }
+          for (const [elementId, elementIdentity] of Object.entries(invalidated.elementClipIdentities ?? {})) {
+            if (!elementIdentity || elementIdentity.roomId !== roomId) continue;
+            const hasCurrentStaleElementEvidence = elementIdentity.evidence.some((reference) =>
+              staleStillIds.has(reference.stillId) && isEvidenceCurrent(reference, elementIdentity, invalidated),
+            );
+            if (hasCurrentStaleElementEvidence) {
+              invalidated = invalidateElementEvidence(invalidated, elementId as MoveInReadyElementId);
+            }
+          }
         }
         if (invalidated !== latest) {
           persist(invalidated);
@@ -651,12 +758,16 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       urls.forEach((url) => URL.revokeObjectURL(url));
       if (objectUrlsRef.current === urls) objectUrlsRef.current = [];
     };
-  }, [record, clips, clipsReadySessionId, unreadableClipRooms, persist]);
+  }, [record, clips, elementClips, clipsReadySessionId, unreadableClipRooms, persist]);
 
-  const roomClips = useMemo(() => MOVE_IN_READY_ROOMS.map((room) => ({
+  const rooms = useMemo(() => (record?.roomIds ?? LEGACY_DEFAULT_ROOM_IDS).map((id) => ({
+    id,
+    label: roomLabel(id),
+  })), [record?.roomIds]);
+  const roomClips = useMemo(() => rooms.map((room) => ({
     ...room,
     captured: Boolean(clips[room.id]),
-  })), [clips]);
+  })), [rooms, clips]);
   const capturedRoomCount = roomClips.filter((room) => room.captured).length;
   const capturedRoomIds = useMemo(
     () => roomClips.filter((room) => room.captured).map((room) => room.id),
@@ -667,6 +778,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     ? deriveFinalInspectionResult({
         fundingType: currentRecord.fundingType,
         capturedRoomIds,
+        expectedRoomIds: currentRecord.roomIds,
         evaluatorDecisions: currentRecord.decisions,
         signoff: currentRecord.signoff,
       })
@@ -710,34 +822,25 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     for (const proposal of Object.values(currentRecord?.proposals ?? {})) {
       if (proposal) analyzedRoomIds.add(proposal.analysisIdentity.roomId);
     }
-    let prefilled = 0;
-    let acknowledged = 0;
-    for (const element of MOVE_IN_READY_ELEMENTS) {
-      const draft = drafts[element.id];
-      if (!draft) continue;
-      if (draft.choice === "A" || draft.choice === "D") prefilled += 1;
-      if (draft.manualCheckAcknowledged) acknowledged += 1;
-    }
     return deriveAssistantNode({
       fundingType: currentRecord?.fundingType === "hud" ? "hud" : currentRecord?.fundingType === "lahsa" ? "lahsa" : "unknown",
       canCapture: isCaptureSetupComplete(currentRecord),
       pseudonym: currentRecord?.pseudonym ?? "",
       evaluatorName: currentRecord?.evaluatorName ?? "",
+      roomIds: currentRecord?.roomIds ?? [...LEGACY_DEFAULT_ROOM_IDS],
       filmedRoomIds: capturedRoomIds,
       analyzedRoomIds: [...analyzedRoomIds],
       analyzedTotal: analyzedRoomIds.size,
       resolvedDecisions: reviewCounts.resolved,
-      prefilledDecisions: prefilled,
-      acknowledgedDecisions: acknowledged,
       nextUndecidedLabel: nextUndecidedElement?.label ?? null,
       nextUndecidedId: nextUndecidedElement?.id ?? null,
       signed: Boolean(completedResult && currentRecord?.signoff),
       batchActive,
     });
-  }, [currentRecord, capturedRoomIds, reviewCounts.resolved, drafts, nextUndecidedElement, completedResult, batchActive]);
+  }, [currentRecord, capturedRoomIds, reviewCounts.resolved, nextUndecidedElement, completedResult, batchActive]);
 
   const profileSectionReady = {
-    unit: Boolean(currentRecord?.pseudonym.trim() && currentRecord.fundingType !== "unknown"),
+    unit: Boolean(currentRecord?.pseudonym.trim() && currentRecord.fundingType !== "unknown" && currentRecord.unitType !== ""),
     evaluator: Boolean(currentRecord?.evaluatorName.trim() && currentRecord.evaluatorAgencyName.trim()),
     agency: Boolean(
       currentRecord?.landlordDiscussion &&
@@ -898,10 +1001,10 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     if (!walkthroughAttested || !walkthroughSendConsent) return;
     if (batchActive || batchAutoStartedRef.current) return;
     if (analysisMode !== "live" || !online) return;
-    if (capturedRoomCount < MOVE_IN_READY_ROOMS.length) return;
+    if (capturedRoomCount < rooms.length) return;
     const current = recordRef.current;
     if (!current || current.fundingType !== "lahsa" || !current.pseudonym.trim()) return;
-    const needsWork = MOVE_IN_READY_ROOMS.some((room) =>
+    const needsWork = rooms.some((room) =>
       clips[room.id] && clips[room.id]?.mime !== "video/quicktime" && !roomHasCurrentProposal(room.id));
     if (!needsWork) return;
     batchAutoStartedRef.current = true;
@@ -922,7 +1025,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   // Narrate the filming script on timed cues while a take is recording.
   useEffect(() => {
     if (!recordingInProgress || !assistantOpen || !voiceOn) return;
-    const cues = ASSISTANT_FILMING_SCRIPTS[selectedRoomId];
+    const cues = filmingScriptForRoom(selectedRoomId);
     const timers = cues.map((cue, index) =>
       window.setTimeout(() => speakText(cue), 800 + index * 7000));
     return () => {
@@ -1048,7 +1151,6 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     }
     setStep(next);
     if (next === "review") {
-      setShowAllReviewElements(false);
       setMobileReviewDetailOpen(false);
       setReviewNoteOpen(false);
     }
@@ -1083,8 +1185,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     if (batchActive || analysisStatus === "segmenting" || analysisStatus === "mapping") return;
     const current = recordRef.current;
     if (!current) return;
-    const rooms = MOVE_IN_READY_ROOMS
-      .map((room) => room.id)
+    const rooms = current.roomIds
       .filter((roomId) => clips[roomId] && clips[roomId]?.mime !== "video/quicktime" && !roomHasCurrentProposal(roomId));
     if (rooms.length === 0) return;
     batchQueueRef.current = [...rooms];
@@ -1134,12 +1235,9 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     } else if (action.id === "open-requirement" && action.elementId) {
       changeStep("review");
       openReviewElement(action.elementId);
-    } else if (action.id === "prefill-all") {
-      prefillAllFromProposals();
+    } else if (action.id === "confirm-all") {
       changeStep("review");
-    } else if (action.id === "save-all") {
-      changeStep("review");
-      window.setTimeout(() => saveAllConfirmed(), 60);
+      window.setTimeout(() => confirmAllApproved(), 60);
     } else if (action.id === "signoff") {
       changeStep("signoff");
     } else if (action.id === "dismiss") {
@@ -1172,13 +1270,6 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   }
 
   function returnToReviewOverview(): void {
-    setMobileReviewDetailOpen(false);
-    if (!showAllReviewElements) setActiveElementId(null);
-    scrollMainToTop("smooth");
-  }
-
-  function returnToReviewSummary(): void {
-    setShowAllReviewElements(false);
     setMobileReviewDetailOpen(false);
     setActiveElementId(null);
     scrollMainToTop("smooth");
@@ -1636,6 +1727,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       setSetupExpanded(!isCaptureSetupComplete({
         pseudonym: key === "pseudonym" ? String(value) : current?.pseudonym ?? "",
         fundingType: key === "fundingType" ? value as FundingType : current?.fundingType ?? "unknown",
+        unitType: current?.unitType ?? "",
       }));
     }
     const previousValue = recordRef.current?.[key];
@@ -1657,6 +1749,94 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
         ...(identityChanged ? { decisions: createUnreviewedEvaluatorDecisions(), signoff: null } : {}),
       };
     });
+  }
+
+  /**
+   * The evaluator describes the unit; rooms derive from that description.
+   * Saved clips for removed rooms stay on the device but no longer count
+   * toward capture; per-element decisions are untouched.
+   */
+  function setUnitDescription(unitType: MoveInReadyUnitType, bathCount: number, hallwayIncluded: boolean): void {
+    invalidateActiveAnalysis("Analysis was cancelled because inspection settings changed.");
+    const roomIds = roomsForUnit(unitType, bathCount, { hallway: hallwayIncluded });
+    if (!roomIds.includes(selectedRoomId)) setSelectedRoomId(roomIds[0] ?? "kitchen");
+    const current = recordRef.current;
+    setSetupExpanded(!isCaptureSetupComplete({
+      pseudonym: current?.pseudonym ?? "",
+      fundingType: current?.fundingType ?? "unknown",
+      unitType,
+    }));
+    setSignoffName("");
+    setSignoffAttested(false);
+    updateRecord((latest) => ({
+      ...latest,
+      unitType,
+      bathCount,
+      roomIds,
+      selectedRoomId: roomIds.includes(latest.selectedRoomId) ? latest.selectedRoomId : (roomIds[0] ?? "kitchen"),
+      signoff: null,
+    }));
+  }
+
+  function recordVoiceCheck(roomId: MoveInReadyRoomId, question: string, answer: "yes" | "no" | "skipped"): void {
+    updateRecord((current) => {
+      const existing = current.voiceChecks[roomId] ?? [];
+      const next = [...existing.filter((entry) => entry.question !== question),
+        { question, answer, recordedAt: new Date().toISOString() }];
+      return { ...current, voiceChecks: { ...current.voiceChecks, [roomId]: next } };
+    });
+  }
+
+  function advanceVoiceTurn(roomId: MoveInReadyRoomId): void {
+    const current = recordRef.current;
+    const parsed = parseRoomId(roomId);
+    if (!current || !parsed) {
+      setVoiceTurn(null);
+      return;
+    }
+    const questions = VOICE_ROOM_CHECKS[parsed.type];
+    const answers = current.voiceChecks[roomId] ?? [];
+    const nextIndex = questions.findIndex((question) => !answers.some((entry) => entry.question === question));
+    setVoiceTranscript(null);
+    setVoiceTurn(nextIndex < 0 ? null : { roomId, index: nextIndex });
+  }
+
+  function answerVoiceCheck(roomId: MoveInReadyRoomId, question: string, answer: "yes" | "no" | "skipped"): void {
+    recordVoiceCheck(roomId, question, answer);
+    advanceVoiceTurn(roomId);
+  }
+
+  function voiceCheckNoteForElement(elementId: MoveInReadyElementId, current: MoveInReadyInspection): string | null {
+    const element = MOVE_IN_READY_ELEMENTS.find((item) => item.id === elementId);
+    if (!element) return null;
+    const parts: string[] = [];
+    for (const roomId of current.roomIds) {
+      if (!roomContributesToElement(roomId, element)) continue;
+      for (const entry of current.voiceChecks[roomId] ?? []) {
+        if (entry.answer !== "skipped") parts.push(`${roomLabel(roomId)}: "${entry.question}" — ${entry.answer}`);
+      }
+    }
+    return parts.length > 0 ? `Voice checks: ${parts.join("; ")}` : null;
+  }
+
+  function toggleInspectionRoom(roomId: MoveInReadyRoomId): void {
+    const current = recordRef.current;
+    if (!current) return;
+    const included = current.roomIds.includes(roomId);
+    const next = included
+      ? current.roomIds.filter((id) => id !== roomId)
+      : [...current.roomIds, roomId];
+    if (next.length === 0) return;
+    invalidateActiveAnalysis("Analysis was cancelled because inspection settings changed.");
+    if (included && selectedRoomId === roomId) setSelectedRoomId(next[0] ?? "kitchen");
+    setSignoffName("");
+    setSignoffAttested(false);
+    updateRecord((latest) => ({
+      ...latest,
+      roomIds: next,
+      selectedRoomId: next.includes(latest.selectedRoomId) ? latest.selectedRoomId : (next[0] ?? "kitchen"),
+      signoff: null,
+    }));
   }
 
   function saveDecision(elementId: MoveInReadyElementId): boolean {
@@ -1761,43 +1941,92 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     });
   }
 
-  function prefillAllFromProposals(): void {
-    const current = recordRef.current;
-    if (!current) return;
-    setDrafts((previous) => {
-      const next = { ...previous };
-      for (const element of MOVE_IN_READY_ELEMENTS) {
-        if (element.id === "demo-smoke-co") continue;
-        const proposal = current.proposals[element.id];
-        if (!proposal) continue;
-        if ((current.decisions[element.id]?.status ?? "unreviewed") !== "unreviewed") continue;
-        const base = next[element.id] ?? createDecisionDraft({ status: "unreviewed" });
-        next[element.id] = prefillDraftFromProposal(base, proposal);
-      }
-      return next;
-    });
-    setReviewError("");
+  function proposalIsCurrent(proposal: ModelElementProposal, current: MoveInReadyInspection): boolean {
+    const identity = current.clipIdentities[proposal.analysisIdentity.roomId];
+    return Boolean(identity) &&
+      proposal.analysisIdentity.videoId === identity!.videoId &&
+      proposal.analysisIdentity.videoRevision === identity!.videoRevision &&
+      proposal.analysisIdentity.expectedSourceHash === identity!.videoHash;
   }
 
-  function saveAllConfirmed(): void {
+  /**
+   * One evaluator tap confirming one AI proposal after the in-person check.
+   * Returns true when a decision was saved. Proposals that need the detail
+   * form (fire-safety D, D without a plan, stale clips) open it instead.
+   */
+  function confirmProposal(elementId: MoveInReadyElementId, options: { silent?: boolean } = {}): boolean {
+    const current = recordRef.current;
+    if (!current) return false;
+    if (current.fundingType !== "lahsa") {
+      if (!options.silent) setReviewError("Choose LAHSA / Form 1083 funding in Profile before recording a decision.");
+      return false;
+    }
+    if (!current.evaluatorName.trim()) {
+      if (!options.silent) setReviewError("Add the evaluator’s name in Profile before confirming.");
+      return false;
+    }
+    if ((current.decisions[elementId]?.status ?? "unreviewed") !== "unreviewed") return true;
+    const proposal = current.proposals[elementId];
+    if (!proposal) {
+      if (!options.silent) {
+        openReviewElement(elementId);
+        setReviewError("No AI draft for this requirement. Assess it in the detail form.");
+      }
+      return false;
+    }
+    if (!proposalIsCurrent(proposal, current)) {
+      if (!options.silent) setReviewError("That room clip changed since analysis. Analyze it again, then confirm.");
+      return false;
+    }
+    const evidence = proposal.evidence.filter((reference) =>
+      isEvidenceCurrent(reference, identityForEvidenceReference(current, reference), current));
+    let decided = confirmProposalAsDecision(
+      { ...proposal, evidence },
+      elementId,
+      { evaluatorName: current.evaluatorName.trim(), decidedAt: new Date().toISOString() },
+    );
+    if (decided && (decided.status === "A" || decided.status === "D")) {
+      const voiceNote = voiceCheckNoteForElement(elementId, current);
+      if (voiceNote) decided = { ...decided, rationale: `${decided.rationale}\n${voiceNote}`.slice(0, 1000) };
+    }
+    if (!decided) {
+      if (!options.silent) {
+        openReviewElement(elementId);
+        setReviewError("This one needs the detail form: review the draft and record each field.");
+      }
+      return false;
+    }
+    const parsed = validateEvaluatorDecision(decided, elementId);
+    if (!parsed.ok) {
+      if (!options.silent) setReviewError(decisionMessage(parsed.errors));
+      return false;
+    }
+    updateRecord((latest) => ({
+      ...latest,
+      decisions: { ...latest.decisions, [elementId]: parsed.value },
+      signoff: null,
+    }));
+    if (!options.silent) setReviewError("");
+    return true;
+  }
+
+  function confirmAllApproved(): void {
     const current = recordRef.current;
     if (!current) return;
     let saved = 0;
-    const skipped: string[] = [];
+    const needsDetail: string[] = [];
     for (const element of MOVE_IN_READY_ELEMENTS) {
       if ((recordRef.current?.decisions[element.id]?.status ?? "unreviewed") !== "unreviewed") continue;
-      const draft = drafts[element.id] ?? createDecisionDraft({ status: "unreviewed" });
-      const effective = element.id === "demo-smoke-co" ? fireSafetyChoiceFromDraft(draft) : draft.choice;
-      if ((effective === "A" || effective === "D") && draft.manualCheckAcknowledged) {
-        if (saveDecision(element.id)) saved += 1;
-        else skipped.push(element.label);
-      } else {
-        skipped.push(element.label);
+      if (!recordRef.current?.proposals[element.id]) {
+        needsDetail.push(element.label);
+        continue;
       }
+      if (confirmProposal(element.id, { silent: true })) saved += 1;
+      else needsDetail.push(element.label);
     }
-    if (skipped.length === 0) setReviewError("");
-    else if (saved === 0) setReviewError(`Nothing saved. Confirm each requirement in person first: ${skipped.join(", ")}.`);
-    else setReviewError(`Saved ${saved}. Still need your in-person confirmation: ${skipped.join(", ")}.`);
+    if (needsDetail.length === 0) setReviewError("");
+    else if (saved === 0) setReviewError(`Nothing confirmed. Open each requirement in the detail form: ${needsDetail.join(", ")}.`);
+    else setReviewError(`Confirmed ${saved}. Still need the detail form: ${needsDetail.join(", ")}.`);
   }
 
   function saveSignoff(): void {
@@ -1827,7 +2056,8 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     }
     const result = deriveFinalInspectionResult({
       fundingType: current.fundingType,
-      capturedRoomIds: MOVE_IN_READY_ROOMS.filter((room) => Boolean(clips[room.id])).map((room) => room.id),
+      capturedRoomIds: current.roomIds.filter((roomId) => Boolean(clips[roomId])),
+      expectedRoomIds: current.roomIds,
       evaluatorDecisions: current.decisions,
       signoff: parsed.value,
     });
@@ -1852,14 +2082,26 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     }
     const result: ExportStill[] = [];
     for (const reference of needed.values()) {
-      const clip = await store.get(current.sessionId, reference.roomId);
-      const identity = current.clipIdentities[reference.roomId];
+      const fromRoomClip = current.clipIdentities[reference.roomId]?.videoId === reference.videoId;
+      const elementId = fromRoomClip
+        ? undefined
+        : (Object.entries(current.elementClipIdentities ?? {}).find(([, candidate]) => candidate?.videoId === reference.videoId)?.[0] as MoveInReadyElementId | undefined);
+      if (!fromRoomClip && !elementId) {
+        throw new Error("An evidence clip changed while this export was being prepared. Recheck the room before export.");
+      }
+      const clip = elementId
+        ? await store.getElement(current.sessionId, elementId)
+        : await store.get(current.sessionId, reference.roomId);
+      const identity = identityForEvidenceReference(current, reference);
+      const expectedClipId = elementId
+        ? makeElementClipId(current.sessionId, elementId)
+        : makeVideoClipId(current.sessionId, reference.roomId);
       const referenceIsCurrent = Boolean(identity && identity.videoId === reference.videoId && identity.videoRevision === reference.videoRevision &&
         identity.schemaVersion === reference.schemaVersion && identity.catalogVersion === reference.catalogVersion &&
         identity.evidence.some((saved) => saved.stillId === reference.stillId && saved.videoId === reference.videoId &&
           saved.schemaVersion === reference.schemaVersion && saved.catalogVersion === reference.catalogVersion &&
           saved.videoRevision === reference.videoRevision && saved.timestampMs === reference.timestampMs && saved.stillHash === reference.stillHash));
-      if (!clip || clip.id !== makeVideoClipId(current.sessionId, reference.roomId) || !identity || !referenceIsCurrent ||
+      if (!clip || clip.id !== expectedClipId || !identity || !referenceIsCurrent ||
           clip.sourceSha256 !== identity.videoHash || clip.capturedAt !== identity.capturedAt || clip.sizeBytes !== identity.sizeBytes) {
         throw new Error("An evidence clip changed while this export was being prepared. Recheck the room before export.");
       }
@@ -1882,6 +2124,14 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
         throw new Error("A room clip changed while this export was being prepared. Review the current walkthrough and export again.");
       }
     }
+    for (const [elementId, identity] of Object.entries(current.elementClipIdentities ?? {})) {
+      if (!identity) continue;
+      const clip = await store.getElement(current.sessionId, elementId as MoveInReadyElementId);
+      if (!clip || clip.id !== makeElementClipId(current.sessionId, elementId) ||
+          clip.sourceSha256 !== identity.videoHash || clip.capturedAt !== identity.capturedAt || clip.sizeBytes !== identity.sizeBytes) {
+        throw new Error("A live proof clip changed while this export was being prepared. Review the current walkthrough and export again.");
+      }
+    }
     if (recordRef.current !== current) {
       throw new Error("The walkthrough changed while this export was being prepared. Review the current details and export again.");
     }
@@ -1895,15 +2145,16 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
         : "Choose LAHSA / Form 1083 funding in Profile before exporting.");
       return;
     }
-    const capturedRoomIds = MOVE_IN_READY_ROOMS.filter((room) => Boolean(clips[room.id])).map((room) => room.id);
+    const capturedRoomIds = (current?.roomIds ?? []).filter((roomId) => Boolean(clips[roomId]));
     const currentFinalization = current ? deriveFinalInspectionResult({
       fundingType: current.fundingType,
       capturedRoomIds,
+      expectedRoomIds: current.roomIds,
       evaluatorDecisions: current.decisions,
       signoff: current.signoff,
     }) : null;
     if (!current?.signoff || currentFinalization?.status !== "complete" || form1083AdministrativeBlocker(current)) {
-      setExportError(current ? form1083AdministrativeBlocker(current) ?? "Capture all four room videos, complete every evaluator decision, and save your attestation before creating exports." : "Capture all four room videos, complete every evaluator decision, and save your attestation before creating exports.");
+      setExportError(current ? form1083AdministrativeBlocker(current) ?? "Capture every room video, complete every evaluator decision, and save your attestation before creating exports." : "Capture every room video, complete every evaluator decision, and save your attestation before creating exports.");
       return;
     }
     setExporting(true);
@@ -1917,6 +2168,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
         pseudonym: current.pseudonym,
         fundingType: current.fundingType,
         capturedRoomIds,
+        expectedRoomIds: current.roomIds,
         decisions: current.decisions,
         signoff: current.signoff,
         evaluatorAgencyName: current.evaluatorAgencyName,
@@ -1981,7 +2233,6 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     setEvidenceViews([]);
     setActiveElementId(null);
     setMobileReviewDetailOpen(false);
-    setShowAllReviewElements(false);
     setReviewNoteOpen(false);
     setReviewNoteDraft("");
     setSignoffName("");
@@ -2089,8 +2340,8 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     const element = MOVE_IN_READY_ELEMENTS.find((item) => item.id === elementId);
     if (!element) return [];
     return evidenceViews.filter(({ reference }) =>
-      element.roomIds.some((roomId) => roomId === reference.roomId) &&
-      isEvidenceCurrent(reference, record.clipIdentities[reference.roomId], record),
+      roomContributesToElement(reference.roomId, element) &&
+      isEvidenceCurrent(reference, identityForEvidenceReference(record, reference), record),
     );
   };
 
@@ -2099,7 +2350,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   }
 
   return (
-    <div className={styles.app} data-step={step} data-review-detail={mobileReviewDetailOpen ? "true" : "false"} data-review-list={showAllReviewElements ? "true" : "false"} data-testid="move-in-ready-app">
+    <div className={styles.app} data-step={step} data-review-detail={mobileReviewDetailOpen ? "true" : "false"} data-testid="move-in-ready-app">
       <header className={`${styles.topBar} ${analysisMode === "live" ? styles.topBarConfigured : ""}`}>
         <div className={styles.brand}>
           <span className={styles.brandMark} aria-hidden="true">MR</span>
@@ -2168,7 +2419,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                 {inspections.length > 0 && (
                   <ul className={styles.homeRequirementList}>
                     {inspections.map((item) => {
-                      const clipCount = MOVE_IN_READY_ROOMS.filter((room) => item.clipIdentities[room.id]).length;
+                      const clipCount = item.roomIds.filter((roomId) => item.clipIdentities[roomId]).length;
                       const decidedCount = MOVE_IN_READY_ELEMENTS.filter((element) => (item.decisions[element.id]?.status ?? "unreviewed") !== "unreviewed").length;
                       const isActive = item.sessionId === record.sessionId;
                       const updated = item.updatedAt.slice(0, 10);
@@ -2252,7 +2503,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                 <div className={styles.cardTitleRow}>
                   <div>
                     <h2 id="home-rooms-heading">Room evidence</h2>
-                    <p className={styles.cardLead}>{capturedRoomCount} of {MOVE_IN_READY_ROOMS.length} clips saved. One continuous take per room.</p>
+                    <p className={styles.cardLead}>{capturedRoomCount} of {rooms.length} clips saved. One continuous take per room.</p>
                   </div>
                   <Video size={21} aria-hidden="true" />
                 </div>
@@ -2302,6 +2553,26 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                         <option value="hud">HUD-funded / HQS</option>
                       </select>
                     </div>
+                    <div className={styles.field}>
+                      <label htmlFor="capture-unit-type">Unit type</label>
+                      <select id="capture-unit-type" className={styles.formSelect} value={record.unitType} onChange={(event) => { const next = event.currentTarget.value as MoveInReadyUnitType | ""; if (next !== "") setUnitDescription(next, record.bathCount, record.roomIds.includes("hallway")); }}>
+                        <option value="">Choose unit type</option>
+                        <option value="studio">Studio</option>
+                        <option value="1-bedroom">1 bedroom</option>
+                        <option value="2-bedroom">2 bedroom</option>
+                        <option value="3-bedroom">3 bedroom</option>
+                        <option value="4-bedroom">4 bedroom</option>
+                      </select>
+                    </div>
+                    <div className={styles.field}>
+                      <label htmlFor="capture-baths">Bathrooms</label>
+                      <select id="capture-baths" className={styles.formSelect} value={String(record.bathCount)} disabled={record.unitType === ""} onChange={(event) => { if (record.unitType !== "") setUnitDescription(record.unitType, Number(event.currentTarget.value), record.roomIds.includes("hallway")); }}>
+                        <option value="1">1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                      </select>
+                    </div>
                   </div>
                   {record.fundingType === "hud" && <div className={`${styles.callout} ${styles.calloutDanger}`} role="alert"><strong>HQS workflow required.</strong> This app only supports the LAHSA Form 1083 path. HUD-funded units cannot receive a result or export here.</div>}
                   {record.fundingType === "unknown" && <div className={`${styles.callout} ${styles.calloutWarning}`} role="status">Select the unit’s funding type to continue.</div>}
@@ -2310,7 +2581,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
 
               {!canCapture && record.fundingType !== "hud" && (
                 <div className={`${styles.callout} ${styles.captureSetupGate}`} role="status" data-testid="capture-setup-gate">
-                  <strong>Finish unit setup to enable recording.</strong> Enter a unit pseudonym and select LAHSA / Form 1083 above. No video is sent unless you later choose live analysis.
+                  <strong>Finish unit setup to enable recording.</strong> Enter a pseudonym, select LAHSA / Form 1083, and describe the unit above. No video is sent unless you later choose live analysis.
                 </div>
               )}
 
@@ -2319,7 +2590,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   {canCapture && (
                     <div className={`${styles.card} ${styles.captureNextBar}`} data-testid="capture-next-bar">
                       <div>
-                        <strong>{capturedRoomCount} of {MOVE_IN_READY_ROOMS.length} rooms filmed</strong>
+                        <strong>{capturedRoomCount} of {rooms.length} rooms filmed</strong>
                         <p className={styles.cardLead}>
                           {capturedRoomCount === 0
                             ? "Film one continuous take per room. The AI drafts every requirement from your clips."
@@ -2340,14 +2611,14 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                       {capturedRoomCount === 0 && analysisMode === "live" && online && (
                         <div className={styles.walkthroughConsent} data-testid="walkthrough-consent">
                           <strong>Hands-free AI walkthrough</strong>
-                          <p className={styles.cardLead}>Confirm once. Film all 4 rooms and the AI analyzes every clip by itself, then brings you the report.</p>
+                          <p className={styles.cardLead}>Confirm once. Film every room and the AI analyzes every clip by itself, then brings you the report.</p>
                           <label className={styles.checkLabel}>
                             <input type="checkbox" checked={walkthroughAttested} onChange={(event) => setWalkthroughAttested(event.currentTarget.checked)} />
                             <span>Every clip I film is staged/mock-unit footage with no tenants, faces, addresses, personal documents, or real case notes.</span>
                           </label>
                           <label className={styles.checkLabel}>
                             <input type="checkbox" checked={walkthroughSendConsent} onChange={(event) => setWalkthroughSendConsent(event.currentTarget.checked)} />
-                            <span>I understand each filmed clip will be sent for live processing by Meta once all 4 rooms are filmed.</span>
+                            <span>I understand each filmed clip will be sent for live processing by Meta once every room is filmed.</span>
                           </label>
                         </div>
                       )}
@@ -2385,11 +2656,132 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                       )}
                     </div>
                   )}
+                  {canCapture && (
+                    <div className={styles.card} data-testid="live-proof-card">
+                      <strong>Live proof clips</strong>
+                      <p className={styles.cardLead}>
+                        Film one 5-10 second tracked clip per provable item. The AI watches the {` `}
+                        faucet, fan, lock, and detector while you film, then attaches the clip to the checklist.
+                      </p>
+                      {LIVE_ELEMENT_SPECS.map((spec) => {
+                        const element = MOVE_IN_READY_ELEMENTS.find((item) => item.id === spec.elementId);
+                        const identity = record.elementClipIdentities[spec.elementId];
+                        const proof = record.liveProofs[spec.elementId];
+                        const proposal = record.proposals[spec.elementId];
+                        const decision = record.decisions[spec.elementId];
+                        const status = proposal
+                          ? `Draft ${proposal.state === "needs-human-check" ? "check" : `AI ${proposal.modelSuggestion}`}`
+                          : identity
+                            ? `Saved ${identity.durationSeconds}s`
+                            : decision?.status === "needs-human-check" ? "Check" : "Open";
+                        const open = liveElementId === spec.elementId;
+                        return (
+                          <div className={styles.buttonRow} key={spec.elementId} data-testid={`live-proof-row-${spec.elementId}`}>
+                            <span className={styles.statusText} role="status">
+                              {element?.label ?? spec.elementId} · {status}
+                              {proof ? ` · ${proof.trackedFrames}/${proof.totalFrames} frames` : ""}
+                              {proof?.transcriptExcerpt ? ` · Heard: ${proof.transcriptExcerpt}` : ""}
+                            </span>
+                            {identity && proof && !proposal && (
+                              <button
+                                className={styles.secondaryButton}
+                                type="button"
+                                data-testid={`live-draft-${spec.elementId}`}
+                                onClick={() => {
+                                  const filmingRoomId = filmingRoomForLiveElement(spec, record.roomIds, selectedRoomId);
+                                  const draft = buildLiveProofDraft({
+                                    spec,
+                                    sessionId,
+                                    roomLabel: rooms.find((room) => room.id === filmingRoomId)?.label ?? filmingRoomId,
+                                    identity,
+                                    proof,
+                                    analysisId: makeId("analysis"),
+                                  });
+                                  setLiveDraftPreview(draft ? { elementId: spec.elementId, draft } : null);
+                                }}
+                              >
+                                Preview draft
+                              </button>
+                            )}
+                            <button
+                              className={styles.secondaryButton}
+                              type="button"
+                              onClick={() => setLiveElementId(open ? null : spec.elementId)}
+                            >
+                              {open ? "Close camera" : identity ? "Refilm proof" : "Film proof"}
+                            </button>
+                          </div>
+                        );
+                      })}
+                      {liveDraftPreview && (
+                        <div className={styles.callout} role="status" data-testid="live-draft-preview">
+                          <p><strong>Draft note (unreviewed, not saved yet).</strong> {liveDraftPreview.draft.observation}</p>
+                          <p className={styles.helpText}>
+                            Confidence {liveDraftPreview.draft.confidence} · still at {Math.round((liveDraftPreview.draft.evidence[0]?.timestampMs ?? 0) / 1000)}s ·
+                            {liveDraftPreview.draft.state === "needs-human-check" ? " needs a human check" : " ready to confirm in Review"}
+                          </p>
+                          <div className={styles.buttonRow}>
+                            <button
+                              className={styles.button}
+                              type="button"
+                              data-testid="live-draft-save"
+                              onClick={() => {
+                                const preview = liveDraftPreview;
+                                setLiveDraftPreview(null);
+                                updateRecord((current) => ({
+                                  ...current,
+                                  proposals: { ...current.proposals, [preview.elementId]: preview.draft },
+                                }));
+                              }}
+                            >
+                              Save draft
+                            </button>
+                            <button
+                              className={styles.secondaryButton}
+                              type="button"
+                              onClick={() => setLiveDraftPreview(null)}
+                            >
+                              Discard
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      {(() => {
+                        const spec = LIVE_ELEMENT_SPECS.find((item) => item.elementId === liveElementId);
+                        const store = videoStoreRef.current;
+                        if (!spec || !store) return null;
+                        const element = MOVE_IN_READY_ELEMENTS.find((item) => item.id === spec.elementId);
+                        const filmingRoomId = filmingRoomForLiveElement(spec, record.roomIds, selectedRoomId);
+                        const filmingRoomLabel = rooms.find((room) => room.id === filmingRoomId)?.label ?? filmingRoomId;
+                        return (
+                          <LiveCapture
+                            key={`${sessionId}:${spec.elementId}`}
+                            sessionId={sessionId}
+                            elementId={spec.elementId}
+                            elementLabel={element?.label ?? spec.elementId}
+                            concept={spec.concept}
+                            conceptLabel={spec.conceptLabel}
+                            prompt={spec.prompt}
+                            recoveryHint={spec.recoveryHint}
+                            roomId={filmingRoomId}
+                            roomLabel={filmingRoomLabel}
+                            schemaVersion={record.schemaVersion}
+                            catalogVersion={record.catalogVersion}
+                            clipStore={store}
+                            transcriptLines={voiceTranscript ? [voiceTranscript] : []}
+                            existingIdentity={record.elementClipIdentities[spec.elementId]}
+                            onSaved={(result) => handleLiveClipSaved(spec.elementId, result)}
+                            onNeedsHumanCheck={(reason) => handleLiveNeedsCheck(spec.elementId, reason)}
+                          />
+                        );
+                      })()}
+                    </div>
+                  )}
                   <WalkthroughVideoCapture
                     key={`${sessionId}:${selectedRoomId}`}
                     controlRef={captureControlRef}
                     sessionId={sessionId}
-                    rooms={MOVE_IN_READY_ROOMS}
+                    rooms={rooms}
                     roomId={selectedRoomId}
                     capturedRoomCount={capturedRoomCount}
                     capturedRoomIds={capturedRoomIds}
@@ -2404,7 +2796,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                             current.completedPromptIdsByRoom[selectedRoomId] ?? [],
                             promptId,
                             completed,
-                            MOVE_IN_READY_ROOM_PROMPT_IDS[selectedRoomId].length,
+                            1,
                           ) as MoveInReadyPromptId[],
                         },
                       }));
@@ -2468,6 +2860,56 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                       </div>
                     </details>
                   </WalkthroughVideoCapture>
+                  {clips[selectedRoomId] && canCapture && (() => {
+                    const parsed = parseRoomId(selectedRoomId);
+                    if (!parsed) return null;
+                    const questions = VOICE_ROOM_CHECKS[parsed.type];
+                    const answers = record.voiceChecks[selectedRoomId] ?? [];
+                    const turn = voiceTurn?.roomId === selectedRoomId ? voiceTurn : null;
+                    const turnQuestion = turn ? questions[turn.index] : undefined;
+                    return (
+                      <section className={styles.card} aria-label={`In-person checks for ${roomLabel(selectedRoomId)}`} data-testid="room-checks">
+                        <div className={styles.cardTitleRow}><div>
+                          <h2>In-person checks · {roomLabel(selectedRoomId)}</h2>
+                          <p className={styles.cardLead}>The camera can&apos;t prove these. Answer by voice or tap — answers attach to your decisions.</p>
+                        </div></div>
+                        <ul className={styles.voiceCheckList}>
+                          {questions.map((question, index) => {
+                            const entry = answers.find((item) => item.question === question);
+                            return (
+                              <li key={question}>
+                                <span>{question}</span>
+                                {entry ? <strong>{entry.answer}</strong> : (
+                                  <button className={styles.linkButton} type="button" onClick={() => { setVoiceTranscript(null); setVoiceTurn({ roomId: selectedRoomId, index }); }}>
+                                    Answer
+                                  </button>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                        {turn && turnQuestion && (
+                          <VoicePrompt
+                            key={`${selectedRoomId}:${turn.index}`}
+                            question={turnQuestion}
+                            autoSpeak
+                            transcript={voiceTranscript}
+                            onTranscript={(text) => {
+                              setVoiceTranscript(text);
+                              const parsedAnswer = parseYesNo(text);
+                              if (parsedAnswer) answerVoiceCheck(selectedRoomId, turnQuestion, parsedAnswer);
+                            }}
+                          >
+                            <div className={styles.voiceTapRow}>
+                              <button className={styles.secondaryButton} type="button" onClick={() => answerVoiceCheck(selectedRoomId, turnQuestion, "yes")}>Yes</button>
+                              <button className={styles.secondaryButton} type="button" onClick={() => answerVoiceCheck(selectedRoomId, turnQuestion, "no")}>No</button>
+                              <button className={styles.secondaryButton} type="button" onClick={() => answerVoiceCheck(selectedRoomId, turnQuestion, "skipped")}>Skip</button>
+                            </div>
+                          </VoicePrompt>
+                        )}
+                      </section>
+                    );
+                  })()}
 
                 </>
               )}
@@ -2480,16 +2922,14 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
             <StepHeader
               headingRef={stepHeadingRef}
               eyebrow="STEP 2 OF 3 · CHECKLIST"
-              title={record.fundingType === "hud" ? "HQS required" : record.fundingType === "unknown" ? "Choose funding type" : reviewNoteOpen ? "Add Note" : mobileReviewDetailOpen && !isWideLayout && activeElementId ? MOVE_IN_READY_ELEMENTS.find((element) => element.id === activeElementId)?.label ?? "Requirement review" : showAllReviewElements ? "All 11 requirements" : "Requirement checklist"}
-              lead={record.fundingType === "hud" ? "Use the HQS inspection workflow for HUD-funded units." : record.fundingType === "unknown" ? "Choose the applicable route in Profile before reviewing." : reviewNoteOpen ? "Add a short note to this local walkthrough." : mobileReviewDetailOpen && !isWideLayout ? `Requirement ${activeReviewIndex + 1} of ${MOVE_IN_READY_ELEMENTS.length} · confirm in person` : showAllReviewElements ? "Work through each requirement in order. AI drafts first, your decision second." : `${record.pseudonym} · ${reviewCounts.resolved} of ${MOVE_IN_READY_ELEMENTS.length} requirements decided`}
-              backLabel={reviewNoteOpen ? "checklist" : mobileReviewDetailOpen && !isWideLayout && showAllReviewElements ? "all 11 requirements" : mobileReviewDetailOpen && !isWideLayout ? "checklist" : showAllReviewElements ? "checklist" : "home"}
+              title={record.fundingType === "hud" ? "HQS required" : record.fundingType === "unknown" ? "Choose funding type" : reviewNoteOpen ? "Add Note" : mobileReviewDetailOpen && !isWideLayout && activeElementId ? MOVE_IN_READY_ELEMENTS.find((element) => element.id === activeElementId)?.label ?? "Requirement review" : "Requirement checklist"}
+              lead={record.fundingType === "hud" ? "Use the HQS inspection workflow for HUD-funded units." : record.fundingType === "unknown" ? "Choose the applicable route in Profile before reviewing." : reviewNoteOpen ? "Add a short note to this local walkthrough." : mobileReviewDetailOpen && !isWideLayout ? `Requirement ${activeReviewIndex + 1} of ${MOVE_IN_READY_ELEMENTS.length} · confirm in person` : `${record.pseudonym} · ${reviewCounts.resolved} of ${MOVE_IN_READY_ELEMENTS.length} requirements decided`}
+              backLabel={reviewNoteOpen ? "checklist" : mobileReviewDetailOpen && !isWideLayout ? "checklist" : "home"}
               onBack={() => {
                 if (reviewNoteOpen) {
                   setReviewNoteOpen(false);
                 } else if (mobileReviewDetailOpen && !isWideLayout) {
                   returnToReviewOverview();
-                } else if (showAllReviewElements) {
-                  returnToReviewSummary();
                 } else {
                   changeStep("home");
                 }
@@ -2532,55 +2972,23 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
               <div className={styles.homeProgressTrack} role="progressbar" aria-label="Checklist progress" aria-valuemin={0} aria-valuemax={MOVE_IN_READY_ELEMENTS.length} aria-valuenow={reviewCounts.resolved}>
                 <span style={{ width: `${(reviewCounts.resolved / MOVE_IN_READY_ELEMENTS.length) * 100}%` }} />
               </div>
-              {!mobileReviewDetailOpen && nextUndecidedElement && (
-                <button className={`${styles.button} ${styles.wideButton}`} type="button" onClick={() => openReviewElement(nextUndecidedElement.id)}>
-                  Continue: {nextUndecidedElement.label} <ArrowRight size={16} aria-hidden="true" />
+              {!mobileReviewDetailOpen && reviewCounts.resolved < MOVE_IN_READY_ELEMENTS.length && hasAnyProposals && (
+                <button className={`${styles.button} ${styles.wideButton}`} type="button" onClick={confirmAllApproved}>
+                  Confirm {MOVE_IN_READY_ELEMENTS.length - reviewCounts.resolved} from AI drafts <ArrowRight size={16} aria-hidden="true" />
                 </button>
               )}
-              {!mobileReviewDetailOpen && hasAnyProposals && (() => {
-                const issues = selectIssueElements(record.proposals, record.decisions);
-                if (issues.length === 0) return null;
-                return (
-                  <section className={`${styles.card} ${styles.aiReport}`} aria-labelledby="ai-report-heading" data-testid="ai-report">
-                    <div className={styles.cardTitleRow}>
-                      <div>
-                        <h2 id="ai-report-heading">AI found {issues.length} issue{issues.length === 1 ? "" : "s"}</h2>
-                        <p className={styles.cardLead}>Unreviewed drafts with video evidence. Tap one to verify it in person.</p>
-                      </div>
-                      <AlertCircle size={21} aria-hidden="true" />
-                    </div>
-                    <ul className={styles.aiReportList}>
-                      {issues.map((elementId) => {
-                        const element = MOVE_IN_READY_ELEMENTS.find((item) => item.id === elementId);
-                        const proposal = record.proposals[elementId];
-                        const firstEvidence = proposal?.evidence[0];
-                        if (!element || !proposal) return null;
-                        return (
-                          <li key={elementId}>
-                            <button type="button" className={styles.aiReportRow} onClick={() => openReviewElement(elementId)}>
-                              <span className={`${styles.elementOverviewStatus} ${proposal.modelSuggestion === "D" ? styles.elementOverviewDeficient : styles.elementOverviewCheck}`}>
-                                {proposal.modelSuggestion === "D" ? "Deficient" : "Check"}
-                              </span>
-                              <span className={styles.homeRequirementCopy}>
-                                <strong>{element.label}</strong>
-                                <small>{proposal.observation}{firstEvidence ? ` · ${roomLabel(firstEvidence.roomId)} ${formatTimestamp(firstEvidence.timestampMs / 1000)}` : ""}</small>
-                              </span>
-                              <ArrowRight size={16} aria-hidden="true" />
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </section>
-                );
-              })()}
-              <section className={`${styles.card} ${styles.reviewOverview} ${showAllReviewElements ? styles.reviewOverviewAll : ""} ${mobileReviewDetailOpen ? styles.reviewOverviewHiddenOnMobile : ""}`} aria-label="All 11 inspection elements">
-                <div className={styles.cardTitleRow}><div><h2>{showAllReviewElements ? "All 11 Form 1083 requirements" : "11 Form 1083 requirements"}</h2><p className={styles.cardLead}>
-                  {hasAnyProposals ? "AI drafts are ready. Confirm each requirement in person, in order." : "No AI draft yet. Work through each requirement in person, in order."}
-                  {!record.evaluatorName.trim() && <> Evaluator name is required before decisions. <button className={styles.linkButton} type="button" onClick={openProfileForRequiredDetails}>Set up profile</button></>}
+              {!mobileReviewDetailOpen && reviewCounts.resolved === MOVE_IN_READY_ELEMENTS.length && (
+                <button className={`${styles.button} ${styles.wideButton}`} type="button" onClick={() => changeStep("signoff")}>
+                  Continue to sign-off <ArrowRight size={17} aria-hidden="true" />
+                </button>
+              )}
+              <section className={`${styles.card} ${styles.reviewOverview} ${mobileReviewDetailOpen ? styles.reviewOverviewHiddenOnMobile : ""}`} aria-label="All 11 inspection elements">
+                <div className={styles.cardTitleRow}><div><h2>Checklist — hardest first</h2><p className={styles.cardLead}>
+                  {hasAnyProposals ? "AI findings are applied below. Confirm each, or open one to inspect its evidence." : "No AI draft yet. Open each requirement to assess it in person."}
+                  {!record.evaluatorName.trim() && <> Evaluator name is required before confirming. <button className={styles.linkButton} type="button" onClick={openProfileForRequiredDetails}>Set up profile</button></>}
                 </p></div></div>
-                <ul className={`${styles.elementOverview} ${showAllReviewElements ? styles.elementOverviewAll : ""}`} id="element-overview-list">
-                  {MOVE_IN_READY_ELEMENTS.slice(0, showAllReviewElements ? MOVE_IN_READY_ELEMENTS.length : 4).map((element, index) => {
+                <ul className={styles.elementOverview} id="element-overview-list">
+                  {sortedReviewElements(record.proposals, record.decisions).map(({ element, index }) => {
                     const decision = record.decisions[element.id];
                     const proposal = record.proposals[element.id];
                     const decisionEvidence = decision.status === "A" || decision.status === "D" ? decision.evidence : [];
@@ -2595,51 +3003,87 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                     const evidenceSummary = overviewEvidence
                       ? `${roomLabel(overviewEvidence.roomId)} · ${formatTimestamp(overviewEvidence.timestampMs / 1000)}${remainingEvidenceCount > 0 ? ` +${remainingEvidenceCount}` : ""}`
                       : "";
-                    const decisionSummary = decision.status === "needs-human-check"
-                      ? "Needs human check"
-                      : decision.status === "unreviewed"
-                        ? proposal ? "AI draft · unreviewed" : "Manual review needed"
-                        : "";
-                    const secondarySummary = [decisionSummary, evidenceSummary].filter(Boolean).join(" · ");
+                    const draftSummary = decision.status === "unreviewed" && proposal
+                      ? `${proposal.modelSuggestion} draft · ${proposal.confidence}% · ${proposal.observation}`
+                      : decision.status === "needs-human-check"
+                        ? "Needs human check"
+                        : decision.status === "unreviewed"
+                          ? "Manual review needed"
+                          : "";
+                    const secondarySummary = [draftSummary, evidenceSummary].filter(Boolean).join(" · ");
                     const state = decision.status === "A" ? styles.elementOverviewApproved
                       : decision.status === "D" ? styles.elementOverviewDeficient
                         : decision.status === "needs-human-check" ? styles.elementOverviewCheck : "";
+                    const confirmable = decision.status === "unreviewed" && Boolean(proposal);
                     return <li key={element.id} className={styles.elementOverviewItem}>
-                      <button type="button" className={`${styles.elementOverviewButton} ${overviewEvidenceView ? styles.elementOverviewWithEvidence : ""}`} aria-pressed={element.id === activeElementId && (isWideLayout || mobileReviewDetailOpen)} onClick={() => openReviewElement(element.id)}>
-                        <span className={styles.elementOverviewNumber}>{index + 1}</span>
-                        <span className={styles.elementOverviewCopy}>
-                          <strong>{element.label}</strong>
-                          {secondarySummary && <small>{secondarySummary}</small>}
-                        </span>
-                        <span className={`${styles.elementOverviewStatus} ${state}`}>{decision.status === "A" ? "Approved" : decision.status === "D" ? "Deficient" : decision.status === "needs-human-check" ? "Check" : "Open"}</span>
-                        {overviewEvidenceView && <Image className={styles.elementOverviewThumb} src={overviewEvidenceView.src} alt={`Source still for ${element.label}, ${roomLabel(overviewEvidenceView.reference.roomId)} at ${formatTimestamp(overviewEvidenceView.reference.timestampMs / 1000)}`} width={64} height={48} unoptimized />}
-                      </button>
+                      <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+                        <button type="button" style={{ flex: 1, minWidth: 0 }} className={`${styles.elementOverviewButton} ${overviewEvidenceView ? styles.elementOverviewWithEvidence : ""}`} aria-pressed={element.id === activeElementId && (isWideLayout || mobileReviewDetailOpen)} onClick={() => openReviewElement(element.id)}>
+                          <span className={styles.elementOverviewNumber}>{index + 1}</span>
+                          <span className={styles.elementOverviewCopy}>
+                            <strong>{element.label}</strong>
+                            {secondarySummary && <small>{secondarySummary}</small>}
+                          </span>
+                          <span className={`${styles.elementOverviewStatus} ${state}`}>{decision.status === "A" ? "Approved" : decision.status === "D" ? "Deficient" : decision.status === "needs-human-check" ? "Check" : proposal ? `AI ${proposal.modelSuggestion}` : "Open"}</span>
+                          {overviewEvidenceView && <Image className={styles.elementOverviewThumb} src={overviewEvidenceView.src} alt={`Source still for ${element.label}, ${roomLabel(overviewEvidenceView.reference.roomId)} at ${formatTimestamp(overviewEvidenceView.reference.timestampMs / 1000)}`} width={64} height={48} unoptimized />}
+                        </button>
+                        {confirmable && proposal && (
+                          <button type="button" className={styles.secondaryButton} aria-label={`Confirm ${element.label} as ${proposal.modelSuggestion}`} onClick={() => confirmProposal(element.id)}>
+                            Confirm {proposal.modelSuggestion}
+                          </button>
+                        )}
+                      </div>
                     </li>;
                   })}
                 </ul>
-                {!showAllReviewElements && <div className={styles.overviewActions}>
-                    <button className={styles.overviewDisclosure} type="button" onClick={() => { setShowAllReviewElements(true); scrollMainToTop("smooth"); }}>
-                      View all {MOVE_IN_READY_ELEMENTS.length} requirements <ArrowRight size={16} aria-hidden="true" />
-                    </button>
-                    <div className={styles.overviewPrimaryActions}>
-                      <button className={styles.secondaryButton} type="button" onClick={() => { setReviewNoteDraft(record.inspectionNote); setReviewNoteOpen(true); }}><StickyNote size={16} aria-hidden="true" /> {record.inspectionNote.trim() ? "Edit note" : "Add note"}</button>
-                      {hasAnyProposals && nextUndecidedElement && (
-                        <button className={styles.secondaryButton} type="button" onClick={prefillAllFromProposals}>
-                          Pre-fill all from AI drafts
-                        </button>
-                      )}
-                      {hasAnyProposals && nextUndecidedElement && (
-                        <button className={styles.secondaryButton} type="button" onClick={saveAllConfirmed}>
-                          Save all confirmed
-                        </button>
-                      )}
-                      <button className={`${styles.button} ${styles.wideButton}`} type="button" onClick={() => changeStep("signoff")}>
-                        Continue to sign-off <ArrowRight size={17} aria-hidden="true" />
-                      </button>
-                    </div>
-                    {record.inspectionNote.trim() && <p className={styles.reviewNotePreview}>Note saved on this device: {record.inspectionNote}</p>}
-                </div>}
+                <div className={styles.overviewActions}>
+                  <button className={styles.secondaryButton} type="button" onClick={() => { setReviewNoteDraft(record.inspectionNote); setReviewNoteOpen(true); }}><StickyNote size={16} aria-hidden="true" /> {record.inspectionNote.trim() ? "Edit note" : "Add note"}</button>
+                  {record.inspectionNote.trim() && <p className={styles.reviewNotePreview}>Note saved on this device: {record.inspectionNote}</p>}
+                </div>
               </section>
+              {(() => {
+                const ranked = rankDeficiencies(record.decisions);
+                if (ranked.length === 0) return null;
+                return (
+                  <section className={styles.card} aria-label="Landlord fix list preview" data-testid="fix-list-preview">
+                    <strong>Fix list preview · risk-ranked</strong>
+                    <p className={styles.cardLead}>
+                      {ranked.length} deficient item{ranked.length === 1 ? "" : "s"}, life and safety first.
+                      The property stays Not Approved until every item is fixed and re-filmed.
+                    </p>
+                    <ol className={styles.elementOverview}>
+                      {ranked.map(({ elementId, decision, tierLabel }, position) => {
+                        const element = MOVE_IN_READY_ELEMENTS.find((item) => item.id === elementId);
+                        const firstEvidence = decision.evidence[0];
+                        const evidenceView = firstEvidence ? evidenceViews.find(({ reference }) =>
+                          reference.videoId === firstEvidence.videoId &&
+                          reference.videoRevision === firstEvidence.videoRevision &&
+                          reference.stillId === firstEvidence.stillId,
+                        ) : undefined;
+                        return (
+                          <li key={elementId} className={styles.elementOverviewItem} data-testid={`fix-list-item-${elementId}`}>
+                            <span className={styles.elementOverviewNumber}>{position + 1}</span>
+                            <span className={styles.elementOverviewCopy}>
+                              <strong>{element?.label ?? elementId}</strong>
+                              <small>{tierLabel}</small>
+                              <small>Deficient area: {decision.deficiency.issueDescription}</small>
+                              <small>Correction: {decision.deficiency.correction}</small>
+                              <small>Complete by {decision.deficiency.completionDate} · reinspect {decision.deficiency.reinspectionDate}</small>
+                              {firstEvidence && (
+                                <small>Still: {roomLabel(firstEvidence.roomId)} · {formatTimestamp(firstEvidence.timestampMs / 1000)}</small>
+                              )}
+                              <small>{reinspectionChecklist(elementId)}</small>
+                            </span>
+                            {evidenceView && <Image className={styles.elementOverviewThumb} src={evidenceView.src} alt={`Source still for ${element?.label ?? elementId}`} width={64} height={48} unoptimized />}
+                            <button type="button" className={styles.secondaryButton} onClick={() => openReviewElement(elementId)}>
+                              Edit decision
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </section>
+                );
+              })()}
               <div className={`${styles.reviewDetails} ${mobileReviewDetailOpen ? styles.reviewDetailsOpen : ""}`} id="review-details">
               {mobileReviewDetailOpen && <div className={styles.reviewDetailProgress} role="status">
                 <strong>{reviewCounts.resolved} of {MOVE_IN_READY_ELEMENTS.length} reviewed</strong>
@@ -2814,7 +3258,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                           <summary>Source video frames · {evidence.length}</summary>
                           <div className={styles.evidenceGrid} aria-label={`${element.label} source stills`}>
                             {evidence.slice(0, 6).map(({ reference, src }) => <figure className={styles.evidenceFigure} key={reference.stillId}>
-                              <Image src={src} width={320} height={240} unoptimized alt={`${MOVE_IN_READY_ROOMS.find((room) => room.id === reference.roomId)?.label ?? reference.roomId} source frame`} />
+                              <Image src={src} width={320} height={240} unoptimized alt={`${roomLabel(reference.roomId)} source frame`} />
                               <figcaption>{roomLabel(reference.roomId)} · {formatTimestamp(reference.timestampMs / 1000)}</figcaption>
                             </figure>)}
                           </div>
@@ -2856,7 +3300,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
               <div className={`${styles.resultPanel} ${styles.resultPanelCompact}`}>
                 <h2>Inspection result</h2>
                 {completedResult ? <p className={`${styles.resultValue} ${completedResult === "approved" ? styles.resultApproved : styles.resultNotApproved}`} data-testid="inspection-result">{completedResult === "approved" ? "Approved" : "Not Approved"}</p> : <p className={`${styles.resultValue} ${styles.resultNeedsReview}`} data-testid="inspection-result">Needs review</p>}
-                <p className={styles.supportingText}>{completedResult ? "Based on the evaluator’s 11 saved decisions." : `${capturedRoomCount} of ${MOVE_IN_READY_ROOMS.length} room clips · ${reviewCounts.resolved} of ${MOVE_IN_READY_ELEMENTS.length} decisions · no result recorded`}</p>
+                <p className={styles.supportingText}>{completedResult ? "Based on the evaluator’s 11 saved decisions." : `${capturedRoomCount} of ${rooms.length} room clips · ${reviewCounts.resolved} of ${MOVE_IN_READY_ELEMENTS.length} decisions · no result recorded`}</p>
                 {finalization?.blockers.length ? <details className={styles.blockerDetails}><summary>{finalization.blockers.length} requirements need attention</summary><ul className={styles.blockerList}>{finalization.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul></details> : null}
               </div>
 
@@ -2877,7 +3321,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   </> : <div className={`${styles.callout} ${styles.calloutWarning} ${styles.signoffGate}`} role="status">
                     <p>{!record.evaluatorName.trim() || form1083Blocker
                       ? "Complete the required Profile details before signing."
-                      : "Capture all four room videos and finish the 11 evaluator decisions before signing."}</p>
+                      : "Capture every room video and finish the 11 evaluator decisions before signing."}</p>
                     <button className={styles.textButton} type="button" onClick={() => !record.evaluatorName.trim() || form1083Blocker ? openProfileForRequiredDetails() : changeStep("review")}>
                       {!record.evaluatorName.trim() || form1083Blocker ? "Fix Profile details" : "Continue review"}
                     </button>
@@ -2903,7 +3347,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   </div>
                 </div>
                 {exporting && <p className={styles.statusText} role="status"><LoaderCircle className={styles.spinner} size={16} aria-hidden="true" /> Preparing local export…</p>}
-                {(!completedResult || !record.signoff) && <p className={styles.helpText}>Exports unlock after all four room clips, 11 evaluator decisions, required Form 1083 details, sign-off, and attestation.</p>}
+                {(!completedResult || !record.signoff) && <p className={styles.helpText}>Exports unlock after every room clip, 11 evaluator decisions, required Form 1083 details, sign-off, and attestation.</p>}
                 <details className={styles.exportPrivacy}><summary>Handling notes</summary><p className={styles.privacyText}>Downloads stay on this device unless you share them. Local deletion does not remove downloaded exports or provider-side processing. This app does not submit to HMIS or confirm acceptance by LAHSA.</p></details>
               </div>
               </>}
@@ -2961,10 +3405,63 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   <div className={styles.profileFields}>
                     <div className={styles.field}><label htmlFor="profile-pseudonym">Unit pseudonym</label><input id="profile-pseudonym" className={styles.formInput} value={record.pseudonym} maxLength={80} placeholder="Demo Unit 04" onChange={(event) => setProfileField("pseudonym", event.currentTarget.value)} /></div>
                     <div className={styles.field}><label htmlFor="profile-funding">Funding type</label><select id="profile-funding" className={styles.formSelect} value={record.fundingType} onChange={(event) => setProfileField("fundingType", event.currentTarget.value as FundingType)}><option value="unknown">Choose funding type</option><option value="lahsa">LAHSA / Form 1083</option><option value="hud">HUD-funded / HQS</option></select></div>
+                    <div className={styles.field}><label htmlFor="profile-unit-type">Unit type</label><select id="profile-unit-type" className={styles.formSelect} value={record.unitType} onChange={(event) => { const next = event.currentTarget.value as MoveInReadyUnitType | ""; if (next !== "") setUnitDescription(next, record.bathCount, record.roomIds.includes("hallway")); }}><option value="">Choose unit type</option><option value="studio">Studio</option><option value="1-bedroom">1 bedroom</option><option value="2-bedroom">2 bedroom</option><option value="3-bedroom">3 bedroom</option><option value="4-bedroom">4 bedroom</option></select></div>
+                    <div className={styles.field}><label htmlFor="profile-baths">Bathrooms</label><select id="profile-baths" className={styles.formSelect} value={String(record.bathCount)} disabled={record.unitType === ""} onChange={(event) => { if (record.unitType !== "") setUnitDescription(record.unitType, Number(event.currentTarget.value), record.roomIds.includes("hallway")); }}><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></div>
                   </div>
+                  {setupVoiceStep === null ? (
+                    <button className={styles.secondaryButton} type="button" onClick={() => { setSetupVoiceTranscript(null); setSetupVoiceStep("unit"); }}>
+                      <Mic size={16} aria-hidden="true" /> Describe by voice
+                    </button>
+                  ) : (
+                    <VoicePrompt
+                      key={setupVoiceStep}
+                      question={setupVoiceStep === "unit" ? "What type of unit is this? Say studio, or how many bedrooms." : "How many bathrooms?"}
+                      autoSpeak
+                      transcript={setupVoiceTranscript}
+                      onTranscript={(text) => {
+                        setSetupVoiceTranscript(text);
+                        if (setupVoiceStep === "unit") {
+                          const unit = parseUnitType(text);
+                          if (unit) {
+                            setUnitDescription(unit, recordRef.current?.bathCount ?? 1, recordRef.current?.roomIds.includes("hallway") ?? true);
+                            setSetupVoiceTranscript(null);
+                            setSetupVoiceStep("baths");
+                          }
+                        } else {
+                          const baths = parseBathCount(text);
+                          const unit = recordRef.current?.unitType;
+                          if (baths && unit) {
+                            setUnitDescription(unit, baths, recordRef.current?.roomIds.includes("hallway") ?? true);
+                            setSetupVoiceTranscript(null);
+                            setSetupVoiceStep(null);
+                          }
+                        }
+                      }}
+                    >
+                      <div className={styles.voiceTapRow}>
+                        <button className={styles.secondaryButton} type="button" onClick={() => { setSetupVoiceTranscript(null); setSetupVoiceStep(null); }}>Use the menus instead</button>
+                      </div>
+                    </VoicePrompt>
+                  )}
+                  {record.unitType !== "" && (
+                    <fieldset className={styles.field} style={{ border: "none", padding: 0, margin: "12px 0 0" }}>
+                      <legend className={styles.helpText} style={{ marginBottom: 8 }}>Rooms to film — uncheck any this unit doesn&apos;t have.</legend>
+                      {roomsForUnit(record.unitType, record.bathCount).map((roomId) => (
+                        <label key={roomId} className={styles.checkLabel} style={{ marginBottom: 4 }}>
+                          <input
+                            type="checkbox"
+                            checked={record.roomIds.includes(roomId)}
+                            disabled={record.roomIds.includes(roomId) && record.roomIds.length === 1}
+                            onChange={() => toggleInspectionRoom(roomId)}
+                          />
+                          <span>{roomLabel(roomId)}{clips[roomId] ? " · filmed" : ""}</span>
+                        </label>
+                      ))}
+                    </fieldset>
+                  )}
                   {record.fundingType === "hud" && <div className={`${styles.callout} ${styles.calloutWarning} ${styles.profileNotice}`} role="status"><strong>HQS inspection required.</strong> This HUD-funded unit cannot continue through the LAHSA Form 1083 walkthrough.</div>}
                   <div className={styles.profilePanelActions}>
-                    <span>{profileSectionReady.unit ? "Unit and funding details are ready." : "Enter a unit pseudonym and select a funding type."}</span>
+                    <span>{profileSectionReady.unit ? "Unit and funding details are ready." : "Enter a pseudonym, funding type, and unit type."}</span>
                     <button className={styles.button} type="button" disabled={!profileSectionReady.unit || record.fundingType === "hud"} onClick={() => setProfileSection("evaluator")}>Continue to evaluator <ArrowRight size={16} aria-hidden="true" /></button>
                   </div>
                 </section>
@@ -3089,7 +3586,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
           if (!next) cancelSpeech();
           else speakText(assistantNode.speak);
         }}
-        onReplay={() => speakText(recordingInProgress ? ASSISTANT_FILMING_SCRIPTS[selectedRoomId][0] ?? assistantNode.speak : assistantNode.speak)}
+        onReplay={() => speakText(recordingInProgress ? filmingScriptForRoom(selectedRoomId)[0] ?? assistantNode.speak : assistantNode.speak)}
         onClose={() => { cancelSpeech(); setAssistantOpen(false); }}
       />
     </div>
@@ -3373,19 +3870,54 @@ function replaceRoomProposals(
 }
 
 function clearRoomAnalysisState(current: MoveInReadyInspection, roomId: MoveInReadyRoomId): MoveInReadyInspection {
+  // Element proof clips are filmed in a room but bound to their own videoId;
+  // clearing a room clip must not strip element-bound evidence.
+  const roomVideoId = current.clipIdentities[roomId]?.videoId;
+  const belongsToRoomClip = (reference: EvidenceReference): boolean =>
+    reference.roomId === roomId && (roomVideoId === undefined || reference.videoId === roomVideoId);
   const decisions = { ...current.decisions };
   for (const elementId of MOVE_IN_READY_ELEMENT_IDS) {
     const decision = decisions[elementId];
-    if ((decision.status === "A" || decision.status === "D") && decision.evidence.some((reference) => reference.roomId === roomId)) {
+    if ((decision.status === "A" || decision.status === "D") && decision.evidence.some(belongsToRoomClip)) {
       decisions[elementId] = { status: "unreviewed" };
     }
   }
   return {
     ...current,
     updatedAt: new Date().toISOString(),
-    proposals: Object.fromEntries(Object.entries(current.proposals).filter(([, proposal]) => !proposal || proposal.evidence.every((reference) => reference.roomId !== roomId))),
+    proposals: Object.fromEntries(Object.entries(current.proposals).filter(([, proposal]) => !proposal || proposal.evidence.every((reference) => !belongsToRoomClip(reference)))),
     decisions,
     pendingAnalysisIntent: current.pendingAnalysisIntent?.roomId === roomId ? null : current.pendingAnalysisIntent,
+    signoff: null,
+  };
+}
+
+function invalidateElementEvidence(
+  current: MoveInReadyInspection,
+  elementId: MoveInReadyElementId,
+): MoveInReadyInspection {
+  const oldVideoId = current.elementClipIdentities[elementId]?.videoId;
+  const decisions = { ...current.decisions };
+  for (const id of MOVE_IN_READY_ELEMENT_IDS) {
+    const decision = decisions[id];
+    if ((decision.status === "A" || decision.status === "D") &&
+        decision.evidence.some((reference) => reference.videoId === oldVideoId)) {
+      decisions[id] = { status: "unreviewed" };
+    }
+  }
+  const elementClipIdentities = { ...current.elementClipIdentities };
+  delete elementClipIdentities[elementId];
+  const liveProofs = { ...current.liveProofs };
+  delete liveProofs[elementId];
+  const proposals = Object.fromEntries(Object.entries(current.proposals).filter(([, proposal]) =>
+    !proposal || proposal.evidence.every((reference) => reference.videoId !== oldVideoId)));
+  return {
+    ...current,
+    updatedAt: new Date().toISOString(),
+    elementClipIdentities,
+    liveProofs,
+    proposals,
+    decisions,
     signoff: null,
   };
 }
@@ -3419,7 +3951,10 @@ function invalidateRoomEvidence(
 }
 
 function allCurrentEvidence(current: MoveInReadyInspection): EvidenceReference[] {
-  return Object.values(current.clipIdentities).flatMap((identity) => identity?.evidence ?? []);
+  return [
+    ...Object.values(current.clipIdentities).flatMap((identity) => identity?.evidence ?? []),
+    ...Object.values(current.elementClipIdentities ?? {}).flatMap((identity) => identity?.evidence ?? []),
+  ];
 }
 
 function isEvidenceCurrent(
@@ -3442,8 +3977,8 @@ function evidenceReferenceBaseKey(reference: EvidenceReference): string {
 }
 
 function selectedEvidence(elementId: MoveInReadyElementId, stillIds: string[], current: MoveInReadyInspection): EvidenceReference[] {
-  const allowedRooms = MOVE_IN_READY_ELEMENTS.find((element) => element.id === elementId)?.roomIds ?? [];
-  const currentRefs = allCurrentEvidence(current).filter((reference) => allowedRooms.some((roomId) => roomId === reference.roomId) && isEvidenceCurrent(reference, current.clipIdentities[reference.roomId], current));
+  const element = MOVE_IN_READY_ELEMENTS.find((item) => item.id === elementId);
+  const currentRefs = allCurrentEvidence(current).filter((reference) => (element ? roomContributesToElement(reference.roomId, element) : false) && isEvidenceCurrent(reference, identityForEvidenceReference(current, reference), current));
   const wanted = new Set(stillIds.slice(0, 5));
   return currentRefs.filter((reference) => wanted.has(reference.stillId));
 }
@@ -3560,6 +4095,27 @@ export function selectIssueElements(
     .map((element) => element.id);
 }
 
+/**
+ * Checklist order, hardest first: manual-only items, then D/check drafts,
+ * then A drafts, then decided. Original numbering is preserved per row.
+ */
+export function sortedReviewElements(
+  proposals: Partial<Record<MoveInReadyElementId, ModelElementProposal>>,
+  decisions: EvaluatorDecisionSet,
+): Array<{ element: (typeof MOVE_IN_READY_ELEMENTS)[number]; index: number }> {
+  const rankOf = (elementId: MoveInReadyElementId): number => {
+    const status = decisions[elementId]?.status ?? "unreviewed";
+    if (status !== "unreviewed") return 3;
+    const proposal = proposals[elementId];
+    if (!proposal) return 0;
+    if (proposal.modelSuggestion === "D" || proposal.state === "needs-human-check") return 1;
+    return 2;
+  };
+  return MOVE_IN_READY_ELEMENTS
+    .map((element, index) => ({ element, index }))
+    .sort((a, b) => rankOf(a.element.id) - rankOf(b.element.id) || a.index - b.index);
+}
+
 function updateChecked(values: string[], value: string, checked: boolean, limit: number): string[] {
   if (checked) return values.includes(value) || values.length >= limit ? values : [...values, value];
   return values.filter((item) => item !== value);
@@ -3588,10 +4144,6 @@ function statusClass(decision: EvaluatorDecision): string {
   if (decision.status === "D") return styles.statusDeficient;
   if (decision.status === "needs-human-check") return styles.statusCheck;
   return "";
-}
-
-function roomLabel(roomId: MoveInReadyRoomId): string {
-  return MOVE_IN_READY_ROOMS.find((room) => room.id === roomId)?.label ?? roomId;
 }
 
 function recordObject(value: unknown, message: string): Record<string, unknown> {
