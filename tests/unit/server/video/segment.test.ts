@@ -1082,6 +1082,48 @@ describe("POST /api/video/segment", () => {
     expect(await rejected.json()).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
   });
 
+  it("falls back to the Referer origin when the proxy strips the Origin header", async () => {
+    const bytes = makeMp4();
+    const form = new FormData();
+    form.append("stage", "segment");
+    form.append("room", "kitchen");
+    form.append("video", new File([bytes], "client-name.mp4", { type: "video/mp4" }));
+    form.append("sessionId", IDENTITY_BASE.sessionId);
+    form.append("schemaVersion", IDENTITY_BASE.schemaVersion);
+    form.append("videoId", IDENTITY_BASE.videoId);
+    form.append("videoRevision", IDENTITY_BASE.videoRevision);
+    form.append("analysisId", IDENTITY_BASE.analysisId);
+    form.append("attempt", IDENTITY_BASE.attempt);
+    form.append("catalogVersion", IDENTITY_BASE.catalogVersion);
+    form.append("expectedVideoSha256", "0".repeat(64));
+    // Azure Container Apps ingress strips the Origin header, so a same-app
+    // Referer must clear the origin gate and fail later, on the hash check.
+    const refererOnly = new Request(`${ORIGIN}/api/video/segment?stage=segment`, {
+      method: "POST",
+      headers: { referer: `${ORIGIN}/walkthrough`, "content-length": "65536" },
+      body: form,
+    });
+    const { fetchImpl } = mockMetaFetch();
+    const response = await handleVideoSegmentRequest(refererOnly, { env: LIVE_ENV, fetch: fetchImpl });
+    expect(response.status).toBe(409);
+    const foreignReferer = new Request(`${ORIGIN}/api/video/segment?stage=segment`, {
+      method: "POST",
+      headers: { referer: "https://attacker.example/lure", "content-length": "65536" },
+      body: form,
+    });
+    const rejected = await handleVideoSegmentRequest(foreignReferer, { env: LIVE_ENV, fetch: fetchImpl });
+    expect(rejected.status).toBe(400);
+    expect(await rejected.json()).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+    const noHeaders = new Request(`${ORIGIN}/api/video/segment?stage=segment`, {
+      method: "POST",
+      headers: { "content-length": "65536" },
+      body: form,
+    });
+    const missing = await handleVideoSegmentRequest(noHeaders, { env: LIVE_ENV, fetch: fetchImpl });
+    expect(missing.status).toBe(400);
+    expect(await missing.json()).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+  });
+
   it("rejects a stale mapping identity before the Muse call", async () => {
     const { fetchImpl: segmentFetch } = mockMetaFetch();
     const segmented = await segment({ identity: identityFor("bad-map") }, segmentFetch);

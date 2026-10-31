@@ -310,8 +310,21 @@ function loopbackNormalized(origin: string): string {
   return origin;
 }
 
+function refererOrigin(request: Request): string | null {
+  const referer = request.headers.get("referer");
+  if (!referer) return null;
+  try {
+    return new URL(referer).origin;
+  } catch {
+    return null;
+  }
+}
+
 function assertSameOrigin(request: Request, configuredPublicOrigin?: string): void {
-  const origin = request.headers.get("origin");
+  // Some managed ingresses (Azure Container Apps) strip the Origin header.
+  // Fall back to the Referer origin, which browsers always send on same-app
+  // POST fetches and cannot be set cross-origin. Either header must match.
+  const origin = request.headers.get("origin") ?? refererOrigin(request);
   let requestOrigin: string;
   let originUrl: URL;
   try {
