@@ -1047,6 +1047,41 @@ describe("POST /api/video/segment", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("treats loopback spellings as the same app origin (Next serves request.url as localhost)", async () => {
+    const bytes = makeMp4();
+    const form = new FormData();
+    form.append("stage", "segment");
+    form.append("room", "kitchen");
+    form.append("video", new File([bytes], "client-name.mp4", { type: "video/mp4" }));
+    form.append("sessionId", IDENTITY_BASE.sessionId);
+    form.append("schemaVersion", IDENTITY_BASE.schemaVersion);
+    form.append("videoId", IDENTITY_BASE.videoId);
+    form.append("videoRevision", IDENTITY_BASE.videoRevision);
+    form.append("analysisId", IDENTITY_BASE.analysisId);
+    form.append("attempt", IDENTITY_BASE.attempt);
+    form.append("catalogVersion", IDENTITY_BASE.catalogVersion);
+    form.append("expectedVideoSha256", "0".repeat(64));
+    // Request URL host (localhost) differs from the browser Origin header
+    // (127.0.0.1) exactly as `next start -H 127.0.0.1` produces. The request
+    // must clear the origin gate and fail later, on the hash check.
+    const loopback = new Request("http://localhost:3110/api/video/segment?stage=segment", {
+      method: "POST",
+      headers: { origin: "http://127.0.0.1:3110", "content-length": "65536" },
+      body: form,
+    });
+    const { fetchImpl } = mockMetaFetch();
+    const response = await handleVideoSegmentRequest(loopback, { env: LIVE_ENV, fetch: fetchImpl });
+    expect(response.status).toBe(409);
+    const foreign = new Request("http://localhost:3110/api/video/segment?stage=segment", {
+      method: "POST",
+      headers: { origin: "https://attacker.example", "content-length": "65536" },
+      body: form,
+    });
+    const rejected = await handleVideoSegmentRequest(foreign, { env: LIVE_ENV, fetch: fetchImpl });
+    expect(rejected.status).toBe(400);
+    expect(await rejected.json()).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+  });
+
   it("rejects a stale mapping identity before the Muse call", async () => {
     const { fetchImpl: segmentFetch } = mockMetaFetch();
     const segmented = await segment({ identity: identityFor("bad-map") }, segmentFetch);
@@ -1327,5 +1362,76 @@ describe("POST /api/video/segment", () => {
     expect(replay.status).toBe(409);
     expect(await json(replay)).toMatchObject({ ok: false, error: { code: "STALE_REQUEST" } });
     expect(museCalls).toBe(1);
+  });
+});
+
+describe("SAM per-concept concurrency", () => {
+  it("overlaps concept requests within a bound and keeps prompt order", async () => {
+    // Six sequential provider round trips exceed the coded stage deadline on
+    // longer clips (observed kitchen 23 s clip). Concepts for one room must
+    // overlap, bounded so a burst cannot stampede the provider.
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let releaseGate!: () => void;
+    const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
+    const seenConcepts: string[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/files")) return Response.json({ id: "file-concurrency-probe" });
+      if (!url.endsWith("/responses")) throw new Error("unexpected endpoint");
+      const payload = JSON.parse(String(init?.body)) as {
+        input: Array<{ content: Array<{ text?: string }> }>;
+      };
+      seenConcepts.push(String(payload.input[0]?.content[0]?.text));
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      if (inFlight >= 2) releaseGate();
+      try {
+        await Promise.race([
+          gate,
+          new Promise((_, reject) => setTimeout(() => reject(new Error("concepts ran sequentially")), 2000)),
+        ]);
+      } finally {
+        inFlight -= 1;
+      }
+      return streamResponse();
+    };
+    const { response, body } = await segment({ identity: identityFor("concurrency") }, fetchImpl);
+    expect(response.status).toBe(200);
+    expect(maxInFlight).toBeGreaterThanOrEqual(2);
+    expect(maxInFlight).toBeLessThanOrEqual(3);
+    expect(seenConcepts).toHaveLength(VIDEO_PROMPTS.kitchen.length);
+    const candidates = body.candidates as Array<{ concept: string }>;
+    expect(candidates.map((candidate) => candidate.concept)).toEqual(
+      VIDEO_PROMPTS.kitchen.map((prompt) => prompt.concept),
+    );
+  });
+
+  it("fails fast on a concept error and aborts in-flight siblings", async () => {
+    const firstConcept = VIDEO_PROMPTS.kitchen[0]?.concept;
+    const siblingSignals: AbortSignal[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/files")) return Response.json({ id: "file-failfast-probe" });
+      if (!url.endsWith("/responses")) throw new Error("unexpected endpoint");
+      const payload = JSON.parse(String(init?.body)) as {
+        input: Array<{ content: Array<{ text?: string }> }>;
+      };
+      if (String(payload.input[0]?.content[0]?.text) === firstConcept) {
+        return new Response("provider exploded", { status: 500 });
+      }
+      const signal = init?.signal as AbortSignal | undefined;
+      if (signal) siblingSignals.push(signal);
+      await new Promise<void>((_, reject) => {
+        signal?.addEventListener("abort", () => reject(new Error("sibling aborted")), { once: true });
+        setTimeout(() => reject(new Error("sibling never released")), 3000);
+      });
+      return streamResponse();
+    };
+    const { response, body } = await segment({ identity: identityFor("failfast") }, fetchImpl);
+    expect(response.status).toBe(502);
+    expect(body).toMatchObject({ ok: false });
+    expect(siblingSignals.length).toBeGreaterThanOrEqual(1);
+    expect(siblingSignals.every((signal) => signal.aborted)).toBe(true);
   });
 });

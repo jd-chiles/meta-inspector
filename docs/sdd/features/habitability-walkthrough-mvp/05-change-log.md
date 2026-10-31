@@ -104,3 +104,7 @@ Mobile cutoff repair: requirement/AI-report grids and content stacks now constra
 ## 2026-10-31
 
 Saved inspections: list/switch/start-new/delete from Home with per-inspection clips, drafts, decisions, and signatures. InspectionStore gains list(); VideoClipStore gains removeSession(); switching resets all per-inspection UI state and reloads clips from the session id. Starting new keeps prior work saved; deletion confirms and removes record plus clips. Covered by list/switch/delete e2e.
+
+## 2026-10-31
+
+Live pipeline unblocked: Next.js serves request.url with a localhost host even when bound to 127.0.0.1, so the same-origin gate rejected every live video request. Loopback spellings (localhost, 127.0.0.1, [::1]) now compare as one app origin; foreign origins still rejected (regression test). First real live proof: SAM segmentation plus Muse mapping returned unreviewed suggestions end to end. Also adds baseline production response headers and a no-store service-worker response.

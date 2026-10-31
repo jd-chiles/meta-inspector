@@ -45,6 +45,8 @@ export const MUSE_BASETEN_MODEL = "muse-spark-open-baseten";
 const BASETEN_MUSE_API_MODEL = "meta-models/muse-spark-open";
 const BASETEN_MUSE_URL = "https://inference.baseten.co/v1/chat/completions";
 export const SAM_VIDEO_TIMEOUT_MS = 150_000;
+/** Max simultaneous SAM concept calls within one segment request. */
+const MAX_CONCURRENT_SAM_CONCEPTS = 3;
 const CANCEL_REQUEST_TIMEOUT_MS = 10_000;
 export const META_UPLOAD_EXPIRY_SECONDS = 3_600;
 const MAX_PROVIDER_JSON_BYTES = 64 * 1024;
@@ -294,6 +296,20 @@ function jsonResponse(body: unknown, status: number): Response {
   });
 }
 
+function loopbackNormalized(origin: string): string {
+  try {
+    const url = new URL(origin);
+    const host = url.hostname.toLowerCase();
+    if (host === "localhost" || host === "127.0.0.1" || host === "[::1]") {
+      url.hostname = "localhost";
+      return url.origin;
+    }
+  } catch {
+    // Unparseable input fails the comparison below.
+  }
+  return origin;
+}
+
 function assertSameOrigin(request: Request, configuredPublicOrigin?: string): void {
   const origin = request.headers.get("origin");
   let requestOrigin: string;
@@ -308,7 +324,9 @@ function assertSameOrigin(request: Request, configuredPublicOrigin?: string): vo
   }
   try {
     originUrl = new URL(origin);
-    const trustedOrigins = new Set([requestOrigin]);
+    // Next.js normalizes 127.0.0.1 to localhost in request.url, so compare
+    // loopback hosts by equivalence: all loopback spellings are this app.
+    const trustedOrigins = new Set([loopbackNormalized(requestOrigin)]);
     const publicOrigin = configuredPublicOrigin?.trim();
     if (publicOrigin) {
       const configured = new URL(publicOrigin);
@@ -316,9 +334,9 @@ function assertSameOrigin(request: Request, configuredPublicOrigin?: string): vo
           configured.origin !== publicOrigin.replace(/\/$/, "")) {
         throw new VideoSegmentError(503, "SETUP_REQUIRED", "The public app origin must be an HTTP(S) origin without a path.");
       }
-      trustedOrigins.add(configured.origin);
+      trustedOrigins.add(loopbackNormalized(configured.origin));
     }
-    if (!trustedOrigins.has(originUrl.origin)) {
+    if (!trustedOrigins.has(loopbackNormalized(originUrl.origin))) {
       throw new VideoSegmentError(400, "INVALID_REQUEST", "Submit the video from this app.");
     }
   } catch (error) {
@@ -1119,6 +1137,56 @@ async function uploadVideo(
   return fileIdFromUpload(await boundedJson(response));
 }
 
+/**
+ * Run per-concept SAM calls with bounded overlap, preserving prompt order.
+ * Sequential round trips exceed the coded stage deadline on longer clips
+ * (observed: 23 s kitchen clip), while an unbounded burst could stampede
+ * the provider. Fail fast: the first error aborts in-flight siblings, no
+ * further concepts start, and the first error is thrown.
+ */
+async function mapVideoConcepts<T>(
+  prompts: readonly FixedVideoPrompt[],
+  run: (prompt: FixedVideoPrompt, signal: AbortSignal) => Promise<T>,
+  parentSignal: AbortSignal,
+): Promise<T[]> {
+  const results: T[] = new Array(prompts.length);
+  let nextIndex = 0;
+  let failed = false;
+  let firstError: unknown = null;
+  const controller = new AbortController();
+  const onParentAbort = () => controller.abort();
+  if (parentSignal.aborted) controller.abort();
+  else parentSignal.addEventListener("abort", onParentAbort, { once: true });
+  try {
+    const workers = Array.from(
+      { length: Math.min(MAX_CONCURRENT_SAM_CONCEPTS, prompts.length) },
+      async () => {
+        for (;;) {
+          if (failed) return;
+          const index = nextIndex;
+          nextIndex += 1;
+          if (index >= prompts.length) return;
+          try {
+            results[index] = await run(prompts[index], controller.signal);
+          } catch (error) {
+            if (!failed) {
+              failed = true;
+              firstError = error;
+              controller.abort();
+            }
+            return;
+          }
+        }
+      },
+    );
+    await Promise.all(workers);
+  } finally {
+    parentSignal.removeEventListener("abort", onParentAbort);
+  }
+  if (failed) throw firstError;
+  return results;
+}
+
 async function segmentPrompt(
   baseUrl: string,
   apiKey: string,
@@ -1741,11 +1809,12 @@ export async function handleVideoSegmentRequest(request: Request, deps: Dependen
 
           const fileId = await uploadVideo(config.baseUrl, config.apiKey, upload, fetchImpl, deadline.signal);
           const prompts = VIDEO_PROMPTS[upload.room];
-          const results: VideoPromptResult[] = [];
           // One fixed concept per SAM request; reuse the same short-lived upload.
-          for (const prompt of prompts) {
-            results.push(await segmentPrompt(config.baseUrl, config.apiKey, fileId, prompt, upload.video, fetchImpl, deadline.signal));
-          }
+          const results = await mapVideoConcepts(
+            prompts,
+            (prompt, signal) => segmentPrompt(config.baseUrl, config.apiKey, fileId, prompt, upload.video, fetchImpl, signal),
+            deadline.signal,
+          );
           const candidates = makeCandidates(results);
           const mappingExpiresAt = Date.now() + MAPPING_TOKEN_TTL_MS;
           const durationMs = upload.video.durationMs;
