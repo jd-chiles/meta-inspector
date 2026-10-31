@@ -95,6 +95,7 @@
   min-height: 3.6rem;
   padding: 0.45rem 0.25rem;
   border-bottom: 1px solid #dce4ec;
+  scroll-margin-bottom: 12px;
 }
 .promptRow[data-markable="false"] { grid-template-columns: 1.8rem minmax(0, 1fr); }
 .promptRow:last-child { border-bottom: 0; }

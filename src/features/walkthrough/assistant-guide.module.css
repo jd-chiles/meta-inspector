@@ -1,0 +1,112 @@
+.fab {
+  position: fixed;
+  z-index: 60;
+  right: 14px;
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 999px;
+  padding: 11px 16px;
+  background: #123f73;
+  color: #fff;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 800;
+  box-shadow: 0 6px 20px rgb(18 63 115 / 35%);
+  cursor: pointer;
+}
+
+.panel {
+  position: fixed;
+  z-index: 60;
+  right: 12px;
+  bottom: calc(80px + env(safe-area-inset-bottom));
+  left: 12px;
+  max-width: 520px;
+  margin-left: auto;
+  border: 1px solid #c9d8ec;
+  border-radius: 14px;
+  background: #fbfdff;
+  box-shadow: 0 12px 36px rgb(18 63 115 / 22%);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-bottom: 1px solid #e1e9f3;
+  padding: 9px 10px 9px 12px;
+}
+
+.avatar {
+  display: grid;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  background: #123f73;
+  color: #fff;
+}
+
+.headerCopy { min-width: 0; flex: 1; }
+.headerCopy strong { display: block; font-size: 0.85rem; }
+.headerCopy small { color: #637183; font-size: 0.7rem; }
+
+.headerActions { display: flex; gap: 2px; }
+
+.iconButton {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #33506e;
+  cursor: pointer;
+}
+
+.iconButton:hover { background: #e8f0fa; }
+
+.body { display: grid; gap: 8px; padding: 11px 12px 12px; }
+
+.title { margin: 0; font-size: 0.95rem; font-weight: 800; letter-spacing: -0.01em; }
+.message { margin: 0; color: #2c3c4f; font-size: 0.85rem; line-height: 1.45; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.primaryButton {
+  border: 0;
+  border-radius: 9px;
+  padding: 10px 16px;
+  background: #1b57a6;
+  color: #fff;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.secondaryButton {
+  border: 1px solid #b9cbe2;
+  border-radius: 9px;
+  padding: 10px 14px;
+  background: #fff;
+  color: #123f73;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+@media (min-width: 960px) {
+  .fab { right: 28px; bottom: 28px; }
+  .panel { right: 28px; bottom: 28px; left: auto; width: 380px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fab, .panel { box-shadow: 0 2px 8px rgb(18 63 115 / 18%); }
+}

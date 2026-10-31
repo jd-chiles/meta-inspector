@@ -532,6 +532,11 @@
 .homeRoomButton:disabled { cursor: not-allowed; opacity: 0.6; }
 .captureNextBar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .captureNextBar > div { min-width: 220px; flex: 1; }
+.batchDisclosure { flex-basis: 100%; border-top: 1px solid #e1e9f3; padding-top: 8px; }
+.batchDisclosure > summary { display: flex; min-height: 44px; align-items: center; cursor: pointer; font-size: 0.85rem; }
+.batchDisclosure > summary strong { display: block; font-size: 0.85rem; }
+.batchDisclosure > summary small { color: var(--muted); font-size: 0.74rem; }
+.batchBody { display: grid; gap: 8px; padding: 4px 0 2px; }
 @media (prefers-reduced-motion: reduce) { .homeProgressTrack > span { transition: none; } }
 
 .statusText { margin: 0; color: var(--muted); font-size: 0.8rem; }

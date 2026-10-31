@@ -5,7 +5,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { goToCapture, openProfilePanel, selectRoom } from "./navigation";
 
-const APP_SHELL_CACHE = "habitability-walkthrough-shell-v2";
+const APP_SHELL_CACHE = "habitability-walkthrough-shell-v3";
 
 test.use({
   serviceWorkers: "allow",

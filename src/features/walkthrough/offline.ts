@@ -31,7 +31,7 @@ export const OFFLINE_QUEUE_STORAGE_KEY =
   "habitability-walkthrough:offline-queue:v1";
 
 /** App-shell cache name. Mirrors `SHELL_CACHE` in `public/sw.js`. */
-export const APP_SHELL_CACHE_NAME = "habitability-walkthrough-shell-v2";
+export const APP_SHELL_CACHE_NAME = "habitability-walkthrough-shell-v3";
 
 /** Service-worker script URL (served from the web root). */
 export const SERVICE_WORKER_URL = "/sw.js";

@@ -87,6 +87,8 @@ export interface WalkthroughVideoCaptureProps {
   detailsExpanded?: boolean;
   onDetailsExpandedChange?: (expanded: boolean) => void;
   children?: ReactNode;
+  /** Lets the AI guide start the same capture the Start button triggers. */
+  controlRef?: { current: { startCapture: () => void } | null };
 }
 
 export const DEFAULT_ROOM_PROMPTS: Readonly<Record<string, readonly string[]>> = {
@@ -146,6 +148,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
     detailsExpanded,
     onDetailsExpandedChange,
     children,
+    controlRef,
   } = props;
   const effectiveMaxDurationSeconds = getEffectiveRecordingDurationSeconds(maxDurationSeconds);
 
@@ -610,6 +613,21 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
       setBusy(false);
     }
   }
+
+  useEffect(() => {
+    if (controlRef) {
+      controlRef.current = {
+        startCapture: () => {
+          if (disabled || busy) return;
+          if (supportsInAppRecording) void startCameraRecording();
+          else openCameraPicker();
+        },
+      };
+    }
+    return () => {
+      if (controlRef) controlRef.current = null;
+    };
+  });
 
   function openCameraPicker(): void {
     cameraInputRef.current?.click();

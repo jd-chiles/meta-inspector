@@ -84,3 +84,7 @@ Repair REQ-006/design schemaVersion omission: name schema version and catalog ve
 ## 2026-10-31
 
 Requirement-first UX redesign: app opens on Inspection Home (next-step hero, stage progress, 11-requirement status list, room shortcuts) instead of the Capture form; bottom navigation gains Home. Capture is headed "Film the unit" with a next-room/checklist bar above the camera. Review is headed "Requirement checklist": ordered Form 1083 checklist with progress bar, continue-to-next-undecided, and an explicit "Use AI draft to pre-fill" action that fills editable fields only — the in-person acknowledgment and save stay evaluator actions, so no AI text completes a manual check. Headings/back-labels and e2e specs updated; new home-checklist-flow spec covers the sequence.
+
+## 2026-10-31
+
+Voice-guided inspection agent: auto-opening AI Guide overlay with speech readout (SpeechSynthesis, mutable, persisted) narrates every stage and timed filming cues during takes; tap-to-respond actions deep-link setup, per-room camera start, one-tap batch analysis, requirement confirm, and sign-off. Batch analysis runs the guarded per-room pipeline sequentially with per-room consent derivation and proposal-proven success. Checklist gains pre-fill-all and save-all-confirmed (in-person acknowledgments stay per-item and explicit). GuideSheet FAB removed and superseded. Service-worker shell cache bumped v2 to v3 so installed devices pick up new builds.

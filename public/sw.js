@@ -19,7 +19,7 @@
 
 /* global self, caches, fetch, Response, URL */
 
-var SHELL_CACHE = "habitability-walkthrough-shell-v2";
+var SHELL_CACHE = "habitability-walkthrough-shell-v3";
 var APP_CACHE_PREFIX = "habitability-walkthrough-";
 
 /** Core shell: required for an honest offline launch. */

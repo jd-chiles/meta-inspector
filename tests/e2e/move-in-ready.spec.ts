@@ -1238,7 +1238,7 @@ test.describe("Move-in Ready mobile flow", () => {
       try {
         await prepareMockLiveVideo(page, videoBytes);
         await page.context().setOffline(true);
-        await expect(page.getByText(/Offline\./)).toBeVisible();
+        await expect(page.getByText("Offline. Capture and review stay on this device; live analysis needs a connection.", { exact: true })).toBeVisible();
         const analyze = page.getByRole("button", { name: "Queue analysis for when connected", exact: true });
         await expect(analyze).toBeEnabled();
         await analyze.click();
