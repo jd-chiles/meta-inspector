@@ -11,6 +11,7 @@ test.use({
 test("home leads through film into the requirement-by-requirement checklist", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
+  await expect(page.getByTestId("synthetic-data-banner")).toBeVisible();
   await expect(page.getByTestId("analysis-mode")).toHaveText("Sample only");
 
   const home = page.getByTestId("inspection-home");

@@ -2351,6 +2351,9 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
 
   return (
     <div className={styles.app} data-step={step} data-review-detail={mobileReviewDetailOpen ? "true" : "false"} data-testid="move-in-ready-app">
+      <p className={styles.demoBanner} data-testid="synthetic-data-banner" role="note">
+        Demo build · staged mock-unit data only — no real client data. Stills come only from filmed clips.
+      </p>
       <header className={`${styles.topBar} ${analysisMode === "live" ? styles.topBarConfigured : ""}`}>
         <div className={styles.brand}>
           <span className={styles.brandMark} aria-hidden="true">MR</span>

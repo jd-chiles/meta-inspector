@@ -3,12 +3,12 @@
     "width": 360,
     "height": 640
   },
-  "uploadBottomToNavigationGap": 78.078125,
-  "lastPromptBottomToNavigationGap": 11.796875,
-  "privacyDisclosureBottomToNavigationGap": 11.625,
+  "uploadBottomToNavigationGap": 32.703125,
+  "lastPromptBottomToNavigationGap": 58.421875,
+  "privacyDisclosureBottomToNavigationGap": 11.25,
   "mainScrollHeight": 710,
-  "mainClientHeight": 562,
-  "scrollTopAfterLastPrompt": 148,
+  "mainClientHeight": 517,
+  "scrollTopAfterLastPrompt": 193,
   "navigationBottom": 640,
   "horizontalOverflow": false
 }

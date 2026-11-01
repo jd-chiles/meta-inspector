@@ -535,6 +535,7 @@
 .homeStageCopy small { color: var(--muted); font-size: 0.76rem; }
 .homeStageState { font-size: 0.72rem; font-weight: 800; color: #445163; }
 .homeProgressTrack { overflow: hidden; height: 8px; flex-shrink: 0; border-radius: 999px; background: #e6ecf3; }
+.demoBanner { margin: 0; padding: 6px 12px; background: #1c2330; color: #f8fafc; font-size: 0.72rem; font-weight: 600; text-align: center; }
 .homeProgressTrack > span { display: block; height: 100%; border-radius: inherit; background: #1b57a6; transition: width 240ms ease; }
 .homeRequirementList { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin: 10px 0 0; padding: 0; list-style: none; }
 .homeRequirementList > li { min-width: 0; }
