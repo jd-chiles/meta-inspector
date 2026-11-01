@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseRoomId } from "../../../src/domain/move-in-ready";
+import {
+  parseRoomId,
+  type EvaluatorDecision,
+  type ModelElementProposal,
+} from "../../../src/domain/move-in-ready";
 import {
   createInitialInspectionRecord,
   type MoveInReadyInspection,
@@ -74,7 +78,11 @@ describe("deriveTourNode", () => {
     for (const roomId of record.roomIds) {
       const parsed = parseRoomId(roomId);
       answered[roomId] = parsed
-        ? VOICE_ROOM_CHECKS[parsed.type].map((question) => ({ question, answer: "yes" as const }))
+        ? VOICE_ROOM_CHECKS[parsed.type].map((question) => ({
+          question,
+          answer: "yes" as const,
+          recordedAt: "2026-11-01T00:00:00.000Z",
+        }))
         : [];
     }
     const filmed = { ...record, voiceChecks: answered };
@@ -114,7 +122,7 @@ describe("deriveTourNode", () => {
       "demo-interior-air",
       "demo-item-07",
     ] as const);
-    const proposal = {
+    const proposal: ModelElementProposal = {
       elementId: "demo-smoke-co",
       state: "draft-proposal",
       modelSuggestion: "D",
@@ -132,21 +140,33 @@ describe("deriveTourNode", () => {
         attempt: 1,
         catalogVersion: record.catalogVersion,
       },
-    } as const;
-    const withProposal = {
+    };
+    const withProposal: MoveInReadyInspection = {
       ...noRooms,
-      proposals: { "demo-smoke-co": { ...proposal } },
-    } as MoveInReadyInspection;
+      proposals: { "demo-smoke-co": proposal },
+    };
     expect(deriveTourNode(baseInput({ record: withProposal, skippedElementIds: new Set(skippedOtherLive) })))
       .toEqual({ kind: "review-item", elementId: "demo-smoke-co" });
     expect(guidedReviewQueue(withProposal, new Set(skippedOtherLive))).toEqual(["demo-smoke-co"]);
-    const decided = {
-      ...withProposal,
-      decisions: {
-        ...withProposal.decisions,
-        "demo-smoke-co": { status: "D", rationale: "Confirmed missing.", decidedBy: "Rae", decidedAt: "2026-11-01T00:00:00.000Z" },
+    const smokeDecision: EvaluatorDecision = {
+      status: "D",
+      evaluatorName: "Rae Evaluator",
+      decidedAt: "2026-11-01T00:00:00.000Z",
+      inPersonCheckAcknowledgment: { evaluatorName: "Rae Evaluator", completedAt: "2026-11-01T00:00:00.000Z" },
+      rationale: "Confirmed missing.",
+      evidence: [],
+      analysisIdentity: null,
+      deficiency: {
+        issueDescription: "Detector missing.",
+        correction: "Install a detector.",
+        completionDate: "2026-11-10",
+        reinspectionDate: "2026-11-12",
       },
-    } as MoveInReadyInspection;
+    };
+    const decided: MoveInReadyInspection = {
+      ...withProposal,
+      decisions: { ...withProposal.decisions, "demo-smoke-co": smokeDecision },
+    };
     expect(deriveTourNode(baseInput({ record: decided, skippedElementIds: new Set(skippedOtherLive) })).kind)
       .toBe("finish");
   });
