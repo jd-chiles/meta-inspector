@@ -1265,7 +1265,7 @@ test.describe("Move-in Ready mobile flow", () => {
         expect(mock.rooms.filter((entry) => entry.startsWith("map:"))).toHaveLength(4);
 
         const overview = page.getByRole("region", { name: "All 11 inspection elements" });
-        await overview.locator("#element-overview-list").getByRole("button", { name: /Water supply/ }).click();
+        await overview.locator("#element-overview-list").getByRole("button", { name: /^\d+ Water supply/ }).click();
         await expect(page.getByTestId("review-element-demo-water-supply")).toContainText("Mock hallway water supply proposal.");
       } finally {
         await page.unroute("**/api/video/segment*");
@@ -1396,8 +1396,8 @@ test.describe("Move-in Ready mobile flow", () => {
         await page.getByRole("button", { name: "Review", exact: true }).click();
         await waterSupplyRow.click();
         await expect(waterSupply).toContainText("Mock bathroom water supply proposal.");
-        await page.getByRole("button", { name: "Back to all 11 requirements", exact: true }).click();
-        await expect(waterSupplyRow).toContainText("Open");
+        await page.getByRole("button", { name: "Back to checklist", exact: true }).click();
+        await expect(waterSupplyRow).toContainText("Mock bathroom water supply proposal.");
         expect(await readSavedWaterSupplyDecision(page)).toMatchObject({
           status: "unreviewed",
           analysisRoom: null,
@@ -1408,11 +1408,11 @@ test.describe("Move-in Ready mobile flow", () => {
         await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
         await page.getByRole("button", { name: "Review", exact: true }).click();
         const reloadedOverview = page.getByRole("region", { name: "All 11 inspection elements" });
-        const reloadedWaterSupplyRow = reloadedOverview.locator("#element-overview-list").getByRole("button", { name: /Water supply/ });
+        const reloadedWaterSupplyRow = reloadedOverview.locator("#element-overview-list").getByRole("button", { name: /^\d+ Water supply/ });
         await reloadedWaterSupplyRow.click();
         await expect(page.getByTestId("review-element-demo-water-supply")).toContainText("Mock bathroom water supply proposal.");
-        await page.getByRole("button", { name: "Back to all 11 requirements", exact: true }).click();
-        await expect(reloadedWaterSupplyRow).toContainText("Open");
+        await page.getByRole("button", { name: "Back to checklist", exact: true }).click();
+        await expect(reloadedWaterSupplyRow).toContainText("Mock bathroom water supply proposal.");
         expect(await readSavedWaterSupplyDecision(page)).toMatchObject({ status: "unreviewed" });
       } finally {
         if (!page.isClosed()) await page.unroute("**/api/video/segment*");
@@ -1515,7 +1515,7 @@ test.describe("Move-in Ready mobile flow", () => {
         await expect(page.getByText("replacement-during-map.mp4", { exact: true })).toBeVisible();
         await page.getByRole("button", { name: "Review", exact: true }).click();
         const overview = page.getByRole("region", { name: "All 11 inspection elements" });
-        const waterSupplyRow = overview.locator("#element-overview-list").getByRole("button", { name: /Water supply/ });
+        const waterSupplyRow = overview.locator("#element-overview-list").getByRole("button", { name: /^\d+ Water supply/ });
         await waterSupplyRow.click();
         await expect(page.getByTestId("review-element-demo-water-supply").getByText(/No AI draft for this element\./)).toBeVisible();
         expect(await readSavedWaterSupplyDecision(page)).toMatchObject({
@@ -1663,7 +1663,7 @@ test.describe("Move-in Ready mobile flow", () => {
     await waterSupply.getByRole("checkbox", { name: "I completed every required in-person check for this element" }).check();
     await page.getByRole("button", { name: "Save evaluator decision", exact: true }).click();
     await expect(page.getByRole("alert").filter({ hasText: /source still|deficient area|correction|completion date/i })).toContainText(/source still|deficient area|correction|completion date/i);
-    await page.getByRole("button", { name: "Back to all 11 requirements", exact: true }).click();
+    await page.getByRole("button", { name: "Back to checklist", exact: true }).click();
     await expect(waterSupplyRow).toContainText("Open");
     await waterSupplyRow.click();
 
@@ -1677,10 +1677,11 @@ test.describe("Move-in Ready mobile flow", () => {
     await page.getByRole("button", { name: "Save evaluator decision", exact: true }).click();
     await expect(waterSupplyRow).toContainText("Deficient");
 
-    for (let index = 0; index < await overviewButtons.count(); index += 1) {
-      const button = overviewButtons.nth(index);
-      if ((await button.innerText()).includes("Water supply")) continue;
-      await button.click();
+    // The overview re-sorts hardest-first after every save, so always open
+    // the next undecided requirement instead of a fixed position.
+    const openButtons = overview.locator("#element-overview-list").getByRole("button", { name: /Open/ });
+    for (let index = 0; index < 10; index += 1) {
+      await openButtons.first().click();
       const activeElement = page.locator('[data-testid^="review-element-"]');
       await markCurrentElementAcceptable(activeElement);
       await page.getByLabel("Evaluator observation").fill("I assessed this item in person in the staged unit.");
@@ -1716,8 +1717,11 @@ test.describe("Move-in Ready mobile flow", () => {
 
     const elementButtons = page.getByRole("region", { name: "All 11 inspection elements" }).locator("#element-overview-list").getByRole("button");
     await expect(elementButtons).toHaveCount(11);
+    // The overview re-sorts hardest-first after every save, so always open
+    // the next undecided requirement instead of a fixed position.
+    const openButtons = page.getByRole("region", { name: "All 11 inspection elements" }).locator("#element-overview-list").getByRole("button", { name: /Open/ });
     for (let index = 0; index < 11; index += 1) {
-      await elementButtons.nth(index).click();
+      await openButtons.first().click();
       const activeElement = page.locator('[data-testid^="review-element-"]');
       await expect(activeElement).toBeVisible();
       await markCurrentElementAcceptable(activeElement);

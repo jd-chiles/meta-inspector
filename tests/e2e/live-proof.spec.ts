@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
 import { test, expect, type Page } from "@playwright/test";
 
 import { goToCapture, openProfilePanel } from "./navigation";
@@ -18,6 +21,23 @@ test.use({
   },
 });
 
+async function browserCanDecodeH264(page: Page): Promise<boolean> {
+  return page.evaluate(async () => {
+    const nativeCanDecode = document.createElement("video").canPlayType('video/mp4; codecs="avc1.42E01E"') !== "";
+    if (typeof VideoDecoder === "undefined") return nativeCanDecode;
+    try {
+      const webCodecs = await VideoDecoder.isConfigSupported({
+        codec: "avc1.42E01E",
+        codedWidth: 320,
+        codedHeight: 180,
+      });
+      return nativeCanDecode || webCodecs.supported === true;
+    } catch {
+      return nativeCanDecode;
+    }
+  });
+}
+
 async function completeCaptureSetup(page: Page): Promise<void> {
   await page.goto("/");
   await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
@@ -27,10 +47,20 @@ async function completeCaptureSetup(page: Page): Promise<void> {
   await page.getByLabel("Funding type").selectOption("lahsa");
   await page.getByLabel("Unit type").selectOption("studio");
   await goToCapture(page);
+  // The live-proof card appears once filming has started.
+  const videoBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern.mp4"));
+  await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
+    name: "live-proof-kitchen-test-pattern.mp4",
+    mimeType: "video/mp4",
+    buffer: videoBytes,
+  });
+  await expect(page.getByTestId("live-proof-card")).toBeVisible();
 }
 
 test("live proof card lists the four provable elements with a human-check escape", async ({ page }) => {
   test.setTimeout(90_000);
+  await page.goto("/");
+  test.skip(!await browserCanDecodeH264(page), "this live-proof flow needs a browser that can decode the synthetic H.264 clip");
   await completeCaptureSetup(page);
 
   const card = page.getByTestId("live-proof-card");
@@ -50,6 +80,8 @@ test("live proof card lists the four provable elements with a human-check escape
 
 test("live proof records a tracked clip and previews the draft before saving", async ({ page }) => {
   test.setTimeout(120_000);
+  await page.goto("/");
+  test.skip(!await browserCanDecodeH264(page), "this live-proof flow needs a browser that can decode the synthetic H.264 clip");
   await page.route("/api/video/track", async (route) => {
     await route.fulfill({
       status: 200,

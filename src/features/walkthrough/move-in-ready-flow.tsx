@@ -2656,7 +2656,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                       )}
                     </div>
                   )}
-                  {canCapture && (
+                  {canCapture && capturedRoomCount > 0 && (
                     <div className={styles.card} data-testid="live-proof-card">
                       <strong>Live proof clips</strong>
                       <p className={styles.cardLead}>

@@ -73,8 +73,8 @@ test("desktop Capture uses five-tab navigation and places prompts beside the vid
   const elementList = page.locator("#element-overview-list");
   await elementList.getByRole("button", { name: /Structure and materials/ }).click();
   await expect(elementList.locator("button[aria-pressed='true']")).toHaveCount(1);
-  await expect(page.getByRole("heading", { level: 1, name: "All 11 requirements", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Back to checklist", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Requirement checklist", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back to home", exact: true })).toBeVisible();
   await page.getByRole("navigation", { name: "Main navigation" })
     .getByRole("button", { name: "Review", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Requirement checklist", exact: true })).toBeVisible();

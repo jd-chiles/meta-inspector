@@ -30,6 +30,19 @@ The required staged 30-second kitchen/bathroom test clip was not supplied. Until
 - The browser video path uses Meta's `@meta-sam/video` with Mediabunny 1.63.0 for frame-aware WebCodecs decoding, bounded packet-copy remux, and timestamped still extraction, plus a native media/canvas fallback when a browser cannot decode the selected codec through WebCodecs. Mediabunny is pinned by npm override because the Meta wrapper pins an older exact release. No full-frame-rate ffmpeg WebAssembly transcode is added to the phone path.
 - A local delete removes local clips, stills, decisions, and signatures only. It does not claim to delete provider-side files or downloaded exports.
 
+## Meta integration (Live Copilot v2)
+
+Synthetic staged-unit data only. No real client data, no live HMIS connection, no generated inspection photos: every still is decoded from a filmed clip.
+
+| Meta product | Job in v2, not a bolt-on |
+|---|---|
+| Muse Spark (Meta Model API) | Multimodal reasoning over server-derived 1 fps frames for strict-JSON Form 1083 drafts, citations, and fix-list ranking |
+| SAM 3.1 | Live 1 fps tracking of faucet, fan, lock, and detector during per-element capture (`/api/video/track`), plus room-clip segmentation |
+| Muse Code | Build agent for scaffolding and API routes |
+| Muse Image | Not used for inspection evidence, by design, to preserve trust in stills and clips |
+
+Baseten Muse Spark Open is a mapping-only fallback when Meta Muse has an eligible provider failure; it never replaces SAM. As of 2026-10-31 the demo ran against a little over $100 in Muse credits with Baseten untouched; per-element clips stay under 2 minutes total so tracking cost stays well below the long-video estimate.
+
 ## Run locally
 
 Node.js 22 is the project runtime.
