@@ -127,12 +127,13 @@ import {
 } from "./assistant-script";
 import { cancelSpeech, readVoiceEnabled, speakText, writeVoiceEnabled } from "./voice-guide";
 import VoicePrompt from "./voice-prompt";
+import GuidedTourView from "./guided-tour-view";
 import { VOICE_ROOM_CHECKS } from "./voice-checks";
 import { parseBathCount, parseUnitType, parseYesNo } from "./voice-parse";
 import styles from "./move-in-ready-flow.module.css";
 
 export type AnalysisMode = "live" | "fixture" | "unconfigured";
-type Step = "home" | "capture" | "review" | "signoff" | "profile";
+type Step = "home" | "capture" | "review" | "signoff" | "profile" | "guided";
 type ProfileSection = "unit" | "evaluator" | "agency";
 type AnalysisStatus = "idle" | "segmenting" | "mapping" | "complete" | "error";
 type DecisionChoice = "unreviewed" | "needs-human-check" | "A" | "D";
@@ -415,6 +416,55 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     updateRecord((current) => ({
       ...current,
       decisions: { ...current.decisions, [elementId]: { status: "needs-human-check", note: reason.slice(0, 300) } },
+      signoff: null,
+    }));
+  }, [updateRecord]);
+
+  const grantBatchConsent = useCallback(() => {
+    setBatchAttested(true);
+    setBatchSendConsent(true);
+  }, []);
+
+  const grantTourConsent = useCallback(() => {
+    setWalkthroughAttested(true);
+    setWalkthroughSendConsent(true);
+    setBatchAttested(true);
+    setBatchSendConsent(true);
+    updateRecord((current) => ({
+      ...current,
+      fundingType: "lahsa",
+      pseudonym: current.pseudonym.trim() || `Demo Unit ${current.sessionId.replace(/[^a-z0-9]/gi, "").slice(-4).toUpperCase() || "A"}`,
+    }));
+  }, [updateRecord]);
+
+  const saveLiveDraft = useCallback((elementId: MoveInReadyElementId): boolean => {
+    const current = recordRef.current;
+    if (!current || current.proposals[elementId]) return false;
+    const spec = LIVE_ELEMENT_SPECS.find((item) => item.elementId === elementId);
+    const identity = current.elementClipIdentities[elementId];
+    const proof = current.liveProofs[elementId];
+    if (!spec || !identity || !proof) return false;
+    const filmingRoomId = filmingRoomForLiveElement(spec, current.roomIds, current.selectedRoomId);
+    const draft = buildLiveProofDraft({
+      spec,
+      sessionId: current.sessionId,
+      roomLabel: roomLabel(filmingRoomId),
+      identity,
+      proof,
+      analysisId: makeId("analysis"),
+    });
+    if (!draft) return false;
+    updateRecord((latest) => ({
+      ...latest,
+      proposals: { ...latest.proposals, [elementId]: draft },
+    }));
+    return true;
+  }, [updateRecord]);
+
+  const markNeedsCheck = useCallback((elementId: MoveInReadyElementId, note: string) => {
+    updateRecord((current) => ({
+      ...current,
+      decisions: { ...current.decisions, [elementId]: { status: "needs-human-check", note: note.slice(0, 300) } },
       signoff: null,
     }));
   }, [updateRecord]);
@@ -808,6 +858,18 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   );
   const completedResult = currentRecord?.fundingType === "lahsa" && finalization?.status === "complete" && !form1083Blocker ? finalization.result : null;
   const canCapture = isCaptureSetupComplete(currentRecord);
+  const tourAnalysisComplete = useMemo(() => {
+    if (!currentRecord) return false;
+    return currentRecord.roomIds.every((roomId) => {
+      const identity = currentRecord.clipIdentities[roomId];
+      if (!identity) return true;
+      return Object.values(currentRecord.proposals).some((proposal) =>
+        Boolean(proposal) &&
+        proposal!.analysisIdentity.roomId === roomId &&
+        proposal!.analysisIdentity.videoId === identity.videoId &&
+        proposal!.analysisIdentity.videoRevision === identity.videoRevision);
+    });
+  }, [currentRecord]);
   const guideModel = useMemo(() => deriveGuideModel({
     fundingType: currentRecord?.fundingType === "hud" ? "hud" : currentRecord?.fundingType === "lahsa" ? "lahsa" : "unknown",
     canCapture: isCaptureSetupComplete(currentRecord),
@@ -2396,6 +2458,14 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                     <button
                       className={`${styles.button} ${styles.wideButton}`}
                       type="button"
+                      data-testid="start-guided-tour"
+                      onClick={() => changeStep("guided")}
+                    >
+                      <Mic size={17} aria-hidden="true" /> Start guided inspection
+                    </button>
+                    <button
+                      className={`${styles.button} ${styles.wideButton}`}
+                      type="button"
                       onClick={() => {
                         if (guideModel && guideModel.nextAction.type !== "none") handleGuideAction(guideModel.nextAction);
                         else if (!canCapture) { changeStep("capture"); setSetupExpanded(true); }
@@ -2526,6 +2596,58 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                 </div>
                 {!canCapture && <p className={styles.helpText}>Finish unit setup first — Continue above takes you there.</p>}
               </section>
+            </section>
+          </>
+        )}
+
+        {step === "guided" && (
+          <>
+            <StepHeader headingRef={stepHeadingRef} compact eyebrow="GUIDED INSPECTION" title="Guided inspection" lead="The voice guide narrates every step. Answer by voice or tap." backLabel="home" onBack={() => changeStep("home")} />
+            <section className={styles.contentStack} aria-label="Guided inspection">
+              <GuidedTourView
+                bindings={{
+                  sessionId,
+                  record,
+                  rooms,
+                  capturedRoomIds,
+                  capturedRoomCount,
+                  analysisMode,
+                  online,
+                  videoStore: videoStoreRef.current,
+                  voiceTranscript,
+                  onVoiceTranscript: setVoiceTranscript,
+                  batchActive,
+                  batchProgress,
+                  batchFailedRooms,
+                  analysisComplete: tourAnalysisComplete,
+                  setEvaluatorName: (name) => setProfileField("evaluatorName", name),
+                  setUnitType: (unit) => setUnitDescription(
+                    unit,
+                    recordRef.current?.bathCount ?? 1,
+                    recordRef.current?.roomIds.includes("hallway") ?? false,
+                  ),
+                  setBathCount: (count) => {
+                    const unit = recordRef.current?.unitType;
+                    if (unit) {
+                      setUnitDescription(unit, count, recordRef.current?.roomIds.includes("hallway") ?? false);
+                    }
+                  },
+                  grantTourConsent,
+                  selectRoom,
+                  onClipChange: (clip, roomId) => handleClipChange(clip, roomId),
+                  onRecordingStateChange: setRecordingInProgress,
+                  answerVoiceCheck,
+                  grantBatchConsent,
+                  startBatchAnalysis,
+                  cancelBatchAnalysis,
+                  saveLiveDraft,
+                  onLiveClipSaved: (elementId, result) => handleLiveClipSaved(elementId, result),
+                  onLiveNeedsCheck: (elementId, reason) => handleLiveNeedsCheck(elementId, reason),
+                  confirmProposal,
+                  markNeedsCheck,
+                  changeStep,
+                }}
+              />
             </section>
           </>
         )}

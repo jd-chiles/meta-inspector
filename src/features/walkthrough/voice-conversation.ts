@@ -121,10 +121,16 @@ export function listenOnce(options: { maxMs?: number } = {}): {
   stop: () => void;
 } {
   const maxMs = Math.min(Math.max(options.maxMs ?? 20_000, 3000), 60_000);
-  let stopRecording: () => void = () => undefined;
+  let stoppedEarly = false;
+  let stopRecording: () => void = () => {
+    stoppedEarly = true;
+  };
   const done = (async (): Promise<ListenResult> => {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     try {
+      // A Stop tap during mic acquisition must cancel, not strand the
+      // recorder for the full window.
+      if (stoppedEarly) throw new Error("mic recording stopped before it started");
       const mimeType = pickMimeType();
       const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       const chunks: BlobPart[] = [];

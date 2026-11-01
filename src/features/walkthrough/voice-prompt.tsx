@@ -15,12 +15,14 @@ interface VoicePromptProps {
   autoSpeak?: boolean;
   transcript: string | null;
   onTranscript: (text: string) => void;
+  onPhaseChange?: (phase: VoicePromptPhase) => void;
   children?: ReactNode;
 }
 
-type Phase = "idle" | "speaking" | "ready" | "listening" | "transcribing" | "error";
+export type VoicePromptPhase = "idle" | "speaking" | "ready" | "listening" | "transcribing" | "error";
+type Phase = VoicePromptPhase;
 
-export default function VoicePrompt({ question, autoSpeak, transcript, onTranscript, children }: VoicePromptProps) {
+export default function VoicePrompt({ question, autoSpeak, transcript, onTranscript, onPhaseChange, children }: VoicePromptProps) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [engine, setEngine] = useState<VoiceEngine>("none");
   const [listeningAvailable] = useState(() => canListen());
@@ -35,6 +37,10 @@ export default function VoicePrompt({ question, autoSpeak, transcript, onTranscr
   }, []);
 
   useEffect(() => stopAll, [stopAll]);
+
+  useEffect(() => {
+    onPhaseChange?.(phase);
+  }, [phase, onPhaseChange]);
 
   const speak = useCallback(async () => {
     stopAll();
