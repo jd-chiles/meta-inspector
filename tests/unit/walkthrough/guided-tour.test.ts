@@ -62,14 +62,26 @@ describe("deriveTourNode", () => {
     expect(first.kind).toBe("film-room");
     const firstRoom = (first as { roomId: string }).roomId;
     expect(firstRoom).toBe(record.roomIds[0]);
-    const filmedFirst = deriveTourNode(baseInput({ record, capturedRoomIds: [record.roomIds[0]!] }));
-    expect(filmedFirst).toEqual({ kind: "film-room", roomId: record.roomIds[1] });
   });
 
-  it("asks in-person checks after each room is filmed", () => {
+  it("asks each room's checks right after it is filmed, before the next room", () => {
     const record = withSetup(createInitialInspectionRecord("tour-session-4"));
-    const node = deriveTourNode(baseInput({ record, capturedRoomIds: [...record.roomIds] }));
-    expect(node).toEqual({ kind: "room-check", roomId: record.roomIds[0], index: 0 });
+    const roomId = record.roomIds[0]!;
+    const parsed = parseRoomId(roomId)!;
+    const afterFilm = deriveTourNode(baseInput({ record, capturedRoomIds: [roomId] }));
+    expect(afterFilm).toEqual({ kind: "room-check", roomId, index: 0 });
+    const answered = {
+      ...record,
+      voiceChecks: {
+        [roomId]: VOICE_ROOM_CHECKS[parsed.type].map((question) => ({
+          question,
+          answer: "yes" as const,
+          recordedAt: "2026-11-01T00:00:00.000Z",
+        })),
+      },
+    };
+    expect(deriveTourNode(baseInput({ record: answered, capturedRoomIds: [roomId] })))
+      .toEqual({ kind: "film-room", roomId: record.roomIds[1] });
   });
 
   it("holds on analyze until the batch settles", () => {
@@ -177,8 +189,25 @@ describe("deriveTourNode", () => {
     expect(tourNodeKey({ kind: "film-room", roomId: "kitchen" })).toBe("film-room:kitchen");
     expect(tourScriptForNode({ kind: "welcome" }, context).length).toBeGreaterThan(0);
     expect(tourScriptForNode({ kind: "ask-unit" }, context)).toBe("");
-    expect(tourScriptForNode({ kind: "film-room", roomId: "kitchen" }, context)).toContain("Kitchen");
+    const filmScript = tourScriptForNode({ kind: "film-room", roomId: "kitchen" }, context);
+    expect(filmScript).toContain("Kitchen");
+    expect(filmScript.length).toBeLessThanOrEqual(500);
     expect(tourScriptForNode({ kind: "finish" }, context).length).toBeGreaterThan(0);
+  });
+
+  it("briefs every shot on the room's filming list, not just the room name", () => {
+    const record = withSetup(createInitialInspectionRecord("tour-session-11"));
+    const context = { record, capturedRoomCount: 0, batchActive: false, reviewPosition: null };
+    const kitchen = tourScriptForNode({ kind: "film-room", roomId: "kitchen" }, context);
+    expect(kitchen).toMatch(/room 1 of \d+/);
+    for (const shot of ["faucet", "sink", "lock", "detector"]) {
+      expect(kitchen.toLowerCase()).toContain(shot);
+    }
+    const bathroom = tourScriptForNode({ kind: "film-room", roomId: "bathroom" }, context);
+    for (const shot of ["faucet", "toilet", "fan", "detector"]) {
+      expect(bathroom.toLowerCase()).toContain(shot);
+    }
+    expect(bathroom.length).toBeLessThanOrEqual(500);
   });
 
   it("tracks section progress from inspection data", () => {

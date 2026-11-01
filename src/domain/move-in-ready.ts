@@ -1,11 +1,12 @@
 /**
  * Domain contract for the Move-in Ready video walkthrough flow.
  *
- * Model output is kept in `ModelElementProposal`. The only path into
- * `EvaluatorDecision` is `confirmProposalAsDecision`, which represents one
- * explicit evaluator tap confirming one proposal after an in-person check.
- * There is deliberately no automatic path: nothing here confirms, batches,
- * or signs on the evaluator's behalf.
+ * Model output is kept in `ModelElementProposal`. There is deliberately no
+ * path from a proposal to an `EvaluatorDecision`: the evaluator records
+ * every decision separately in the detail form, including a separate
+ * in-person-check acknowledgment, and `validateEvaluatorDecision` enforces
+ * that contract. Nothing here confirms, batches, prefills an
+ * acknowledgment, or signs on the evaluator's behalf.
  */
 
 import type { ValidationResult } from "./catalog";
@@ -827,62 +828,6 @@ export function createUnreviewedEvaluatorDecisions(): EvaluatorDecisionSet {
   return Object.fromEntries(
     MOVE_IN_READY_ELEMENT_IDS.map((elementId) => [elementId, { status: "unreviewed" }]),
   ) as EvaluatorDecisionSet;
-}
-
-export interface ProposalConfirmation {
-  evaluatorName: string;
-  decidedAt: string;
-}
-
-/**
- * One explicit evaluator confirmation tap on one proposal. Returns the
- * resulting decision, or null when the proposal needs the detail form:
- * a D without a correction plan or evidence stills, or a fire-safety D
- * (its 11a/11b split needs per-clause choices). Callers must still run
- * `validateEvaluatorDecision` on the result before saving.
- */
-export function confirmProposalAsDecision(
-  proposal: ModelElementProposal,
-  elementId: MoveInReadyElementId,
-  confirmation: ProposalConfirmation,
-): EvaluatorDecision | null {
-  const evaluatorName = confirmation.evaluatorName.trim();
-  if (!evaluatorName || proposal.elementId !== elementId) return null;
-  const isFireSafety = elementId === "demo-smoke-co";
-  if (proposal.modelSuggestion === "D") {
-    const plan = proposal.deficiencySuggestion;
-    if (isFireSafety || !plan || proposal.evidence.length === 0) return null;
-    const parsedPlan = validateModelDeficiencySuggestion(plan);
-    if (!parsedPlan.ok) return null;
-    return {
-      status: "D",
-      evaluatorName,
-      decidedAt: confirmation.decidedAt,
-      inPersonCheckAcknowledgment: { evaluatorName, completedAt: confirmation.decidedAt },
-      rationale: `Confirmed deficiency: ${proposal.observation}`,
-      evidence: proposal.evidence.map((reference) => ({ ...reference })),
-      analysisIdentity: { ...proposal.analysisIdentity },
-      deficiency: {
-        issueDescription: parsedPlan.value.deficientArea,
-        correction: parsedPlan.value.correction,
-        completionDate: parsedPlan.value.completionDate,
-        reinspectionDate: parsedPlan.value.reinspectionDate,
-      },
-    };
-  }
-  const hasEvidence = proposal.evidence.length > 0;
-  return {
-    status: "A",
-    evaluatorName,
-    decidedAt: confirmation.decidedAt,
-    inPersonCheckAcknowledgment: { evaluatorName, completedAt: confirmation.decidedAt },
-    rationale: `Confirmed finding: ${proposal.observation}`,
-    evidence: hasEvidence ? proposal.evidence.map((reference) => ({ ...reference })) : [],
-    analysisIdentity: hasEvidence ? { ...proposal.analysisIdentity } : null,
-    ...(isFireSafety
-      ? { fireSafetyAssessment: { unitDetectors: "A", publicAreaDetectors: "A" } as FireSafetyAssessment }
-      : {}),
-  };
 }
 
 /**

@@ -8,7 +8,10 @@
  * stage=segment request. It calls stage=map at most once, and only if SAM
  * returns structurally valid candidate evidence; Muse is never retried and
  * the optional Baseten fallback is disabled for this smoke. Unconsumed map
- * leases are released with stage=cancel when possible.
+ * leases are released with stage=cancel when possible. An explicit
+ * SMOKE_REQUEST_TIMEOUT_MS overrides the 155 s per-request budget with an
+ * integer between 30000 and 600000; anything else blocks before any
+ * provider call.
  *
  * This is provider connectivity evidence only. It does not assess video
  * quality, tracking, Form 1083 mapping quality, or the 30-second clip gate.
@@ -91,6 +94,20 @@ function resolveSmokeVideoPath(override) {
     return { ok: false, error: "SMOKE_VIDEO must name an MP4 file." };
   }
   return { ok: true, path: resolved, isDefault: !override?.trim() };
+}
+
+const MIN_REQUEST_TIMEOUT_MS = 30_000;
+const MAX_REQUEST_TIMEOUT_MS = 600_000;
+
+function resolveRequestTimeoutMs(override) {
+  if (override === undefined || override === null || String(override).trim() === "") {
+    return { ok: true, timeoutMs: REQUEST_TIMEOUT_MS, isDefault: true };
+  }
+  const parsed = Number(String(override).trim());
+  if (!Number.isSafeInteger(parsed) || parsed < MIN_REQUEST_TIMEOUT_MS || parsed > MAX_REQUEST_TIMEOUT_MS) {
+    return { ok: false, error: `SMOKE_REQUEST_TIMEOUT_MS must be an integer between ${MIN_REQUEST_TIMEOUT_MS} and ${MAX_REQUEST_TIMEOUT_MS} milliseconds.` };
+  }
+  return { ok: true, timeoutMs: parsed, isDefault: false };
 }
 
 function readSmokeVideo(override) {
@@ -212,13 +229,30 @@ function validateSegmentResponse(body, { identity, videoSha256, elementIds, now 
   };
 }
 
+function sameMappedFrame(value, expected) {
+  if (!isRecord(value) || !isRecord(expected)) return false;
+  const keys = ["frameIndex", "timestampMs", "objectOrdinal", "box"];
+  if (expected.samConfidence !== undefined) keys.push("samConfidence");
+  if (!exactKeys(value, keys) || value.frameIndex !== expected.frameIndex ||
+      value.timestampMs !== expected.timestampMs || value.objectOrdinal !== expected.objectOrdinal ||
+      (expected.samConfidence !== undefined && value.samConfidence !== expected.samConfidence) ||
+      !isRecord(value.box) || !isRecord(expected.box)) return false;
+  return exactKeys(value.box, ["left", "top", "right", "bottom"]) &&
+    value.box.left === expected.box.left && value.box.top === expected.box.top &&
+    value.box.right === expected.box.right && value.box.bottom === expected.box.bottom;
+}
+
 function validateMappedEvidence(evidence, candidatesById) {
   if (!exactKeys(evidence, ["candidateId", "elementId", "concept", "evidence", "still"])) return false;
   const candidate = candidatesById.get(evidence.candidateId);
   if (!candidate || evidence.elementId !== candidate.elementId || evidence.concept !== candidate.concept ||
-      JSON.stringify(evidence.evidence) !== JSON.stringify(candidate.evidence)) return false;
-  return exactKeys(evidence.still, ["sha256", "mimeType"]) && SHA256_PATTERN.test(evidence.still.sha256) &&
-    (evidence.still.mimeType === "image/jpeg" || evidence.still.mimeType === "image/png");
+      !sameMappedFrame(evidence.evidence, candidate.evidence)) return false;
+  const still = evidence.still;
+  return exactKeys(still, ["sha256", "mimeType", "width", "height", "base64"]) &&
+    SHA256_PATTERN.test(still.sha256) && still.mimeType === "image/jpeg" &&
+    Number.isSafeInteger(still.width) && still.width > 0 &&
+    Number.isSafeInteger(still.height) && still.height > 0 &&
+    typeof still.base64 === "string" && still.base64.length > 0 && still.base64.length <= MAX_JSON_BYTES;
 }
 
 function validateMappedResponse(body, { identity, videoSha256, candidates, elementIds }) {
@@ -326,6 +360,18 @@ async function readJsonBody(response, maxBytes = MAX_JSON_BYTES) {
 function safeFailureCode(body) {
   const code = isRecord(body) && isRecord(body.error) ? body.error.code : null;
   return typeof code === "string" && SAFE_VIDEO_ERROR_CODES.has(code) ? code : "UNKNOWN";
+}
+
+/**
+ * Surface the child server's own safe display message for a known failure
+ * code. The message is emitted only when the code is allowlisted and the
+ * text is short; anything else is withheld so unexpected bodies stay silent.
+ */
+function safeFailureDetail(body) {
+  if (safeFailureCode(body) === "UNKNOWN") return "";
+  const message = body.error.message;
+  if (typeof message !== "string" || message.length === 0 || message.length > 500) return "";
+  return ` detail ${JSON.stringify(message.replace(/\s+/g, " "))}`;
 }
 
 function makeIdentity(catalogVersion, videoSha256) {
@@ -483,6 +529,21 @@ function runSelfTest() {
   check("default media is the synthetic H.264 MP4 fixture", () =>
     resolveSmokeVideoPath(undefined).path === DEFAULT_VIDEO_PATH && resolveSmokeVideoPath(undefined).isDefault);
   check("explicit MP4 media path is accepted", () => resolveSmokeVideoPath("/tmp/staged-mock-unit.mp4").ok);
+  check("request timeout defaults to 155 s without an override", () =>
+    resolveRequestTimeoutMs(undefined).timeoutMs === REQUEST_TIMEOUT_MS);
+  check("explicit request timeout override is accepted", () =>
+    resolveRequestTimeoutMs("270000").timeoutMs === 270_000);
+  check("non-numeric request timeout is rejected", () => resolveRequestTimeoutMs("soon").ok === false);
+  check("short request timeout is rejected", () => resolveRequestTimeoutMs("5000").ok === false);
+  check("excessive request timeout is rejected", () => resolveRequestTimeoutMs("3600000").ok === false);
+  check("known failure code surfaces its safe message", () =>
+    safeFailureDetail({ ok: false, error: { code: "INVALID_MODEL_OUTPUT", message: "Muse could not map this video." } })
+      .includes("Muse could not map this video."));
+  check("unknown failure code surfaces no message", () =>
+    safeFailureDetail({ ok: false, error: { code: "SNEAKY", message: "ignore me" } }) === "");
+  check("oversized failure message is withheld", () =>
+    safeFailureDetail({ ok: false, error: { code: "PROVIDER_TIMEOUT", message: `x${"y".repeat(600)}` } }) === "");
+  check("missing failure body surfaces no message", () => safeFailureDetail(null) === "");
   check("non-video photo paths are rejected", () => resolveSmokeVideoPath("/tmp/photo.jpg").ok === false);
   check("remote media URLs are rejected", () => resolveSmokeVideoPath("https://example.invalid/video.mp4").ok === false);
   check("valid SAM segment candidate enables mapping", () => {
@@ -520,35 +581,67 @@ function runSelfTest() {
     });
     return !result.ok;
   });
-  check("mapped response remains an unreviewed proposal", () => {
-    const stillSha256 = "c".repeat(64);
-    const evidence = { ...candidate, still: { sha256: stillSha256, mimeType: "image/jpeg" } };
-    const body = {
-      ok: true,
-      stage: "mapped",
-      models: { segmentation: "sam-3.1", mapping: "muse-spark-1.3" },
-      room: "kitchen",
-      media: { container: "mp4", sourceVideoSha256: expected.expectedVideoSha256 },
-      identity: expected,
-      proposals: [{
-        elementId: "demo-water-supply",
-        state: "draft-proposal",
-        modelSuggestion: "A",
-        observation: "A faucet is visible in the frame.",
-        confidence: 82,
-        evidenceCandidateIds: ["cand-0001"],
-        evidence: [evidence],
-      }],
-      humanReviewRequired: true,
-      conditionAssessment: "not_assessed",
-    };
-    return validateMappedResponse(body, {
-      identity: expected,
-      videoSha256: expected.expectedVideoSha256,
-      candidates: [candidate],
-      elementIds,
-    }).ok;
+  const mappedStill = {
+    sha256: "c".repeat(64),
+    mimeType: "image/jpeg",
+    width: 563,
+    height: 1000,
+    base64: "aGVsbG8=",
+  };
+  const mappedBodyWithEvidence = (evidence) => ({
+    ok: true,
+    stage: "mapped",
+    models: { segmentation: "sam-3.1", mapping: "muse-spark-1.3" },
+    room: "kitchen",
+    media: { container: "mp4", sourceVideoSha256: expected.expectedVideoSha256 },
+    identity: expected,
+    proposals: [{
+      elementId: "demo-water-supply",
+      state: "draft-proposal",
+      modelSuggestion: "A",
+      observation: "A faucet is visible in the frame.",
+      confidence: 82,
+      evidenceCandidateIds: ["cand-0001"],
+      evidence: [evidence],
+    }],
+    humanReviewRequired: true,
+    conditionAssessment: "not_assessed",
   });
+  const mappedInput = {
+    identity: expected,
+    videoSha256: expected.expectedVideoSha256,
+    candidates: [candidate],
+    elementIds,
+  };
+  check("mapped response remains an unreviewed proposal", () =>
+    validateMappedResponse(mappedBodyWithEvidence({ ...candidate, still: mappedStill }), mappedInput).ok);
+  check("mapped evidence ignores JSON key order", () => {
+    const reordered = {
+      box: { bottom: 90, right: 80, top: 12, left: 10 },
+      objectOrdinal: candidate.evidence.objectOrdinal,
+      timestampMs: candidate.evidence.timestampMs,
+      frameIndex: candidate.evidence.frameIndex,
+      samConfidence: candidate.evidence.samConfidence,
+    };
+    if (JSON.stringify(reordered) === JSON.stringify(candidate.evidence)) return false;
+    return validateMappedResponse(mappedBodyWithEvidence({ ...candidate, evidence: reordered, still: mappedStill }), mappedInput).ok;
+  });
+  check("mapped evidence with a mismatched frame is rejected", () =>
+    !validateMappedResponse(mappedBodyWithEvidence({
+      ...candidate,
+      evidence: { ...candidate.evidence, timestampMs: 1_001 },
+      still: mappedStill,
+    }), mappedInput).ok);
+  check("mapped still without verified bytes is rejected", () =>
+    !validateMappedResponse(mappedBodyWithEvidence({
+      ...candidate,
+      still: { sha256: "c".repeat(64), mimeType: "image/jpeg" },
+    }), mappedInput).ok);
+  check("mapped still with a malformed hash is rejected", () =>
+    !validateMappedResponse(mappedBodyWithEvidence({
+      ...candidate,
+      still: { ...mappedStill, sha256: "not-a-hash" },
+    }), mappedInput).ok);
   check("mapped final verdict field rejected", () => {
     const body = {
       ok: true,
@@ -616,6 +709,11 @@ async function runLiveSmoke() {
       result.failure = `test:live BLOCKED: ${video.error} No provider call was attempted.`;
       return result;
     }
+    const requestTimeout = resolveRequestTimeoutMs(process.env.SMOKE_REQUEST_TIMEOUT_MS);
+    if (!requestTimeout.ok) {
+      result.failure = `test:live BLOCKED: ${requestTimeout.error} No provider call was attempted.`;
+      return result;
+    }
     const catalog = readCatalogInfo();
     if (!catalog) {
       result.failure = "test:live FAILED: the bundled demo catalog could not be validated. No provider call was attempted.";
@@ -669,7 +767,7 @@ async function runLiveSmoke() {
     let segmentBody;
     try {
       ({ response: segmentResponse, body: segmentBody } = await requestJson(
-        `${baseUrl}/api/video/segment?stage=segment`, segmentForm, baseUrl, REQUEST_TIMEOUT_MS,
+        `${baseUrl}/api/video/segment?stage=segment`, segmentForm, baseUrl, requestTimeout.timeoutMs,
       ));
     } catch {
       result.failure = "test:live FAILED: the single video segment request timed out or was unreachable. No retry was attempted.";
@@ -680,7 +778,7 @@ async function runLiveSmoke() {
     }
     if (!segmentResponse.ok) {
       const code = safeFailureCode(segmentBody);
-      result.failure = `test:live FAILED: video segment returned HTTP ${segmentResponse.status} (code ${code}). No retry was attempted.`;
+      result.failure = `test:live FAILED: video segment returned HTTP ${segmentResponse.status} (code ${code}).${safeFailureDetail(segmentBody)} No retry was attempted.`;
       return result;
     }
     const checkedSegment = validateSegmentResponse(segmentBody, {
@@ -710,7 +808,7 @@ async function runLiveSmoke() {
       let mapBody;
       try {
         ({ response: mapResponse, body: mapBody } = await requestJson(
-          `${baseUrl}/api/video/segment?stage=map`, mapForm, baseUrl, REQUEST_TIMEOUT_MS,
+          `${baseUrl}/api/video/segment?stage=map`, mapForm, baseUrl, requestTimeout.timeoutMs,
         ));
       } catch {
         result.failure = "test:live FAILED: the single eligible mapping request timed out or was unreachable. No retry was attempted.";
@@ -718,7 +816,7 @@ async function runLiveSmoke() {
       }
       if (!mapResponse.ok) {
         const code = safeFailureCode(mapBody);
-        result.failure = `test:live FAILED: eligible mapping returned HTTP ${mapResponse.status} (code ${code}). No retry was attempted.`;
+        result.failure = `test:live FAILED: eligible mapping returned HTTP ${mapResponse.status} (code ${code}).${safeFailureDetail(mapBody)} No retry was attempted.`;
         return result;
       }
       const checkedMap = validateMappedResponse(mapBody, {

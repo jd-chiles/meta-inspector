@@ -1,6 +1,313 @@
 # Release record
 
-Status: Ready to deploy, not yet deployed (2026-10-31)
+Status: Not ready (2026-11-01 mvp8 deployed + verified; see latest entry)
+
+## mvp8 redeploy — 2026-11-01 (Muse Code)
+
+Status stays Not ready. Owner-approved redeploy of the current tree
+(HEAD `4fe3218` + verified uncommitted work; pre-build gates green):
+built `metainspectprod.azurecr.io/metainspect:mvp8`
+(sha256:81facfdf…), smoke-tested locally (boots, 307 gate, headers,
+ffmpeg 9.0.2 present), pushed, and updated `metainspect-app` —
+revision `metainspect-app--0000010` active at 100% traffic. Verified
+live $0: root answers 307 with baseline headers; a browser-identical
+video request passes the origin check. Build note: ffmpeg.org was
+unreachable from all networks here, so the image reuses `/opt/ffmpeg`
+from `metainspect:prod-proof` (script-identical bytes, verified);
+Dockerfile workaround reverted; rebuild from source when upstream
+recovers. Remaining: physical-phone LTE proof on the new revision,
+recipient acceptance, custom domain, quota alerts, ops owner, native
+evidence. Not task acceptance or a release decision.
+
+## Azure origin fix — 2026-11-01 (Muse Code)
+
+Status stays Not ready. Owner-approved production config change:
+`APP_PUBLIC_ORIGIN=https://<app-fqdn>` set on `metainspect-app`
+(revision `metainspect-app--0000009`, upsert — all existing env and
+secret refs preserved). Verified with a $0 browser-identical probe:
+request now passes the origin check and fails only on the
+intentionally bad stage ("Choose a supported video processing
+stage."), where before it failed 400 "Submit the video from this
+app." No provider spend. The video path is now open to real browsers
+on Azure (deployed code is still `mvp7`, predating the Slice 2/4
+fixes — redeploy still pending). Not task acceptance or a release
+decision.
+
+## Azure video validation — 2026-11-01 (Muse Code)
+
+Status stays Not ready. Owner-authorized: both staged clips through the
+Container App — kitchen 200/200 (127 s segment, 4 proposals, 8/8
+stills verified), bathroom 200/200 (37 s segment, 2 proposals, 4/4
+verified); one transient map 502 passed on retry. First live proof the
+1 vCPU sizing works. Deployment finding: browsers currently fail every
+video request with 400 because `APP_PUBLIC_ORIGIN` is unset and ACA
+preserves Origin against an internal request URL (marker fallback only
+covers absent Origin). Runbook corrected to REQUIRED with the one-line
+fix; setting it is owner-authorized production work, not taken. Spend:
+3 segments + 3 maps (2 early origin-400s cost $0); owner confirms on
+the dashboard. Records in `docs/evaluation/video-clip-gate.md`. Not
+task acceptance or a quality claim.
+
+## Azure verification + Slice 6 reviews — 2026-11-01 (Muse Code)
+
+Status stays Not ready. Correction: Azure was already provisioned (not
+by this agent) — `metainspect-prod` RG, env, running `metainspect-app`,
+and registry, with Meta/passcode/Fish secrets. Verified read-only: the
+app answers `307 → /unlock` with baseline headers, so the passcode
+gate is active. Deployed `mvp7` (01:32 UTC) predates today's Slice 2/4
+fixes — a redeploy is owner-authorized work, not taken. Runbook
+updated to the provisioned reality plus redeploy steps; `APP_PUBLIC_ORIGIN`
+corrected to recommended-with-fallback (deployment works without it).
+Ran the approved fresh reviews (recorded in `docs/REVIEW_AND_CI.md`,
+same-agent independence limit disclosed, no native evidence): spec
+PASS + 1 minor obs (prompt-completion trigger wording drift), plan
+PASS, code PASS, security PASS + 2 LOWs (unlock throttle XFF parsing
+and unbounded attempt map — fix before wider launch), QA PASS + 1
+minor obs (no dedicated in-flight version-bump client test). No
+blocking finding. Checks: docs exit 0 (review/doc updates only).
+Remaining: redeploy, custom domain, quota alerts, ops owner, physical
+phones, recipient acceptance, native evidence. Not task acceptance or
+a release decision.
+
+## Slice 5 deployment controls — 2026-11-01 (Muse Code)
+
+Status stays Not ready. Audited production controls against the code:
+passcode middleware covers pages + `/api/video/*` (timing-safe check,
+HMAC cookie, 10/10min/IP throttle, unit-tested), Dockerfile is
+non-root standalone, no `NEXT_PUBLIC_*` secrets, `.env` git-ignored,
+baseline headers set. Repaired the stale runbook: it still claimed "no
+auth" after the passcode gate landed — now documents the gate,
+mandatory `INSPECTION_PASSCODE` container secret (gate is OPEN without
+it), instant rotation, pilot limits, as-implemented retention
+(device-local data, 15-min/6-h memory-only server state, 3600 s
+provider upload expiry, no secret logging), and host-level HSTS/CSP
+notes. Added `.env*` to `.dockerignore` (defense in depth; final image
+never contained it) and wrote the owner-executable
+`docs/PHYSICAL_DEVICE_CHECKS.md` for the iOS/Android LTE pass.
+Checks: docs exit 0 (docs/infra-only change; no code behavior touched;
+docker image not rebuilt — FFmpeg compile cost, build reads no `.env`).
+Still owner-side: Azure subscription + quota alerts, operational owner
+name, both physical-phone passes, recipient acceptance, independent
+reviews, native evidence. Not task acceptance or a release decision.
+
+## Slice 4 form/export verification — 2026-11-01 (Muse Code)
+
+Status stays Not ready. Verified the export set against the Slice 4
+exit criteria: official template hash-pinned and verified on disk
+(`9c9faf90…`), all 12 note/decision/deficiency/date/identity field
+mappings compared against the template inventory, 11a/11b marks proven
+against named field-geometry anchors (unit→11a band, public→11b band;
+landlord/leadership dates likewise), completed-date blank with planned
+date in notes, blank mock identity/address, D-only landlord list, no AI
+draft text in PDFs/JSON, gating on decisions/sign-off/rooms, and text
+sanitization. One demonstrated gap repaired: client/landlord PDFs
+carried the manual-upload notice on page 1 only — now a footer on every
+generated page (official form pages stay clean), appendix wording
+unified to the shared constant, with a new unit test asserting
+per-page presence (failed 1-vs-5 before, passes after).
+
+Checks: docs/typecheck/lint exit 0; unit 442 passed / 3 skipped;
+e2e 41 passed. Note: the first e2e run showed 31/41 with 10 mock-live
+load crashes, diagnosed as a stale detached `next start --port 3102`
+(05:49, older build) shadowing the spec's mock-live server — not the
+code change. Owner authorized its removal; clean rerun is 41/41.
+Recipient/agency acceptance of the manual outputs remains owner-side.
+Not task acceptance, native evidence, or a release decision.
+
+## Deadline final + kitchen scoring — 2026-11-01 (Muse Code)
+
+Status stays Not ready. Finalized the server per-stage deadline at 240 s
+from observed latency (kitchen segment ~140-170 s; ~50% headroom);
+unit 441/3 + typecheck green on the change. Then scored the kitchen
+variance set from a fresh owner-authorized run: segment 200 in 163.5 s
+(8 candidates), map 200 in 10.2 s (4 As), all stills hash-verified, 3/3
+timestamp spot checks match source. Two quality cautions recorded: Muse
+asserted visible water flow the cited stills don't show, and late-clip
+under-sink frames carry loose concept labels (identity/timestamps
+correct). Stove/detector/vent-fan/AC gaps are footage/prompt-scope, not
+model misses. Authored single-clip gate still unmeasured. Spend: one
+segment + one map; owner confirms on the dashboard. Records in
+`docs/evaluation/video-clip-gate.md`. Not task acceptance, native
+evidence, or a release decision.
+
+## Live kitchen confirmation — 2026-11-01 (Muse Code)
+
+Owner-authorized confirmation with the fixed runner: `test:live` exit 0
+on the saved kitchen clip — sam-3.1 + muse-spark-1.3, 1 segment + 1 map,
+4 proposals, ~192 s total, no leftover lease. Slice 2 timeout resolved
+and measured (192 s fits the provisional 240/270 s budgets, exceeded
+the old 150/155 s). Connectivity only; proposals unscored, gate rows
+unchanged. Spend: one segment + one map; owner confirms on the
+dashboard. Sanitized record in `docs/evaluation/video-clip-gate.md`.
+Status stays Not ready (scorecard, form/recipient, devices, hosting,
+reviews, native evidence still open). Not task acceptance or a quality
+claim.
+
+## Live kitchen diagnostic — 2026-11-01 (Muse Code)
+
+Status stays Not ready. Owner-authorized diagnostic run: server returned
+HTTP 200 for BOTH segment and map on the saved kitchen clip — the first
+fully successful kitchen run — but the runner rejected the map response
+("mapping evidence is invalid"). Root cause was stale runner tooling:
+it required a 2-key evidence still while the server contract (type, app
+verifier, e2e mocks) is 5 keys with verified bytes, so no real map
+response could ever validate. Fixed the runner to the 5-key shape plus
+field-wise frame comparison (was order-sensitive stringify); self-test
+28/28, lint clean; no product change. Spend: one segment + one map;
+owner confirms on the dashboard. Sanitized record in
+`docs/evaluation/video-clip-gate.md`. Not task acceptance, native
+evidence, or a quality claim.
+
+## Live kitchen measurement — 2026-11-01 (Muse Code)
+
+Status stays Not ready. Owner-authorized measurement after the
+provisional deadline raise (server 150 s → 240 s; runner override to
+270 s, self-tested): kitchen segment SUCCEEDED within budget — the
+timeout is resolved — but map failed with HTTP 502 INVALID_MODEL_OUTPUT
+(Muse output rejected by strict validation; exact sub-cause unobserved).
+No retry. Spend: one segment + one map; owner confirms on the dashboard.
+Runner now surfaces the safe display message for known codes (self-test
+24/24, lint clean) so a future attempt names the failing rule.
+Sanitized record in `docs/evaluation/video-clip-gate.md`. Not task
+acceptance, native evidence, or a quality claim.
+
+## Live kitchen attempt — 2026-11-01 (Muse Code)
+
+Status stays Not ready. Owner-initiated live validation of the overlap
+fix using the saved staged kitchen clip: `SMOKE_VIDEO=/tmp/kitchen-clean.mp4
+npm run test:live` exit 1 — the runner's segment fetch failed inside its
+155 s budget, so no segment response, no map call, and no retry. The
+server passed its ready gate and the provider was reachable (keyless
+401 probe), but server-side behavior is unobserved; pre-fix kitchen-02
+took 189 s server-side, which alone exceeds the 155 s runner budget, so
+this attempt cannot confirm or refute the overlap improvement. Likely
+one billed segment attempt, no map spend; owner confirms on the
+dashboard. Sanitized record in `docs/evaluation/video-clip-gate.md`.
+This entry is not task acceptance, native evidence, or a quality claim.
+No fixture or CI result is affected; local checks remain green as logged
+in the previous entry.
+
+## Resume + Slice 2 audit — 2026-11-01 (Muse Code)
+
+Status stays Not ready. Resumed the sprint on the dirty tree (commit
+`4fe3218` + prior uncommitted guided/batch work, still uncommitted),
+re-verified the full baseline, and audited the Slice 2 live-video path.
+This entry is not task acceptance, native SDD approval/evidence, or a
+release decision.
+
+Audit result: the recorded kitchen-02 504 (189 s, serial SAM round trips
+vs the coded 150 s/stage deadline) predates the `e685615` bounded-overlap
+(3-way) + fail-fast repair, so that fix is implemented but still
+unvalidated live. Server claim/lease release on abort/timeout, client
+Cancel/replace/room-change invalidation, pagehide keepalive cancel,
+identity-only + token cancel, and user-initiated retry with consumed
+attempts were all verified in code and already covered by mocked unit
+tests. The one coverage gap found and closed: no test proved the client
+abort path notifies the server. Added e2e "cancelling an in-flight
+segment request releases the server lease and keeps retry available",
+which asserts the cancel request carries the exact segment identity with
+no token, the late segment body starts no mapping and saves nothing, and
+retry stays available.
+
+Checks on this tree: docs exit 0; lint exit 0 (same 3 pre-existing
+exhaustive-deps warnings); typecheck exit 0; unit 441 passed / 3 skipped
+(33 files); full `npm run test:e2e` 41 passed including the new test
+(build included); standalone `npm run build` exit 0. `test:live` not run
+(needs separate explicit authorization).
+
+Open gates carried forward unchanged: live validation of the overlap fix
+(owner-initiated attempt only), authored single-clip gate unmeasured,
+form/recipient acceptance, physical iOS/Android checks, production
+hosting/auth/retention controls, independent reviews (TASK-111/112),
+native SDD evidence, and the SDD scope decision for unscoped additions
+(voice-agent tour, live copilot v2, passcode gate).
+
+## Guided Inspection + batch loop fixes — 2026-11-01 (Muse Code)
+
+Status stays Not ready. Owner-prioritized Guided Inspection work plus the
+phone-reported batch restart. Not task acceptance or native SDD evidence.
+
+- Tour narration: each film-room brief now speaks the room's full shot
+  list conversationally, and the agent talks through one cue at a time
+  while a take records. Stale "Tap Confirm" wording updated to Review draft.
+- Tour checks: in-person checks now follow each room's filming (not all
+  filming), with big Yes/No tap buttons next to the voice prompt.
+- Batch loop: any batch start now consumes the walkthrough auto-start, so
+  a finished batch can never auto-restart itself; an early return leaves
+  it armed instead of silently losing the run. New browser test failed
+  before (extra segment calls after filming the last room) and passes after.
+- Voice: verified the spoken path is Fish-first (/api/voice/speak,
+  FISH_API_KEY + FISH_VOICE_ID server-side) with device-voice fallback;
+  local env has both set. Added the Fish vars to the deploy runbook; the
+  phone-facing server needs them set or it keeps the device voice.
+
+Checks: typecheck exit 0; lint exit 0 (same 3 pre-existing warnings);
+unit 441 passed / 3 skipped; full e2e 40 passed. test:live not run.
+
+## Slice 1 one-tap-confirm repair — 2026-11-01 (Muse Code)
+
+Status stays Not ready. Slice 1 audit found one demonstrated gap and repaired
+it; no other behavior was changed. This entry is not task acceptance, native
+SDD approval/evidence, or a release decision.
+
+Gap: three UI surfaces saved A/D evaluator decisions with an
+auto-fabricated in-person acknowledgment, bypassing the detail form's
+separate acknowledgment checkbox — the review-overview per-row Confirm
+button, the "Confirm N from AI drafts" batch button plus assistant
+"confirm-all" action, and the guided-tour per-item Confirm button. One tap
+accepted AI text and completed the manual check in the same action,
+against REQ-009, the design's separate-acknowledgment rule, and the
+human-only-decisions exit criterion.
+
+Repair: the per-row and tour actions now copy the draft into editable
+fields (voice notes included) and open the detail form; they never save
+and never touch the acknowledgment. The batch path is removed; the
+overview wide button is now "Review next: {label}" (continue to next
+undecided) and the assistant guides per-requirement review. The domain
+proposal-to-decision converter is deleted. All saves flow through the
+existing acknowledgment-gated detail save.
+
+Checks on the repaired tree: typecheck exit 0; lint exit 0 (same 3
+pre-existing exhaustive-deps warnings); unit 440 passed / 3 skipped
+(33 files); full `npm run test:e2e` 39 passed including the new
+"opening an AI draft never saves a decision or an in-person
+acknowledgment" browser test, which failed before the fix (batch control
+present) and passes after. `test:live` still not run (needs separate
+explicit authorization).
+
+## Slice 0 current-tree baseline — 2026-11-01 (Muse Code)
+
+Status is Not ready. The 2026-10-31 "Ready to deploy" header is superseded:
+code-green is not release-ready while the roadmap gates below remain open.
+This entry records executed checks on the current tree only; it is not task
+acceptance, native SDD approval/evidence, or a release decision.
+
+Tree: commit `4fe3218` on `main`, Node v22.23.2. Dirty files are the six
+TASK-109-owned `artifacts/design-qa/*.png` screenshots only (regenerated
+binaries, no source edits); they are preserved untouched. No native
+`.sdd/state` or `.sdd/evidence` was modified.
+
+Executed checks and exact results:
+- docs: `node scripts/verify-sdd.mjs` exit 0 (15 requirements, 11 active
+  acyclic tasks, 7 named checks).
+- lint: `npm run lint` exit 0 with 3 pre-existing react-hooks/exhaustive-deps
+  warnings in `src/features/walkthrough/move-in-ready-flow.tsx` (batch-driver
+  effects; functionally guarded, batch e2e tests pass). Recorded, not changed.
+- typecheck: `npm run typecheck` exit 0.
+- unit: `npm run test:unit` exit 0 — 33 files, 442 passed, 3 skipped,
+  including `tests/unit/sdd/verify-sdd.test.ts` (7 tests).
+- browser: `npm run test:e2e` exit 0 — 38 passed (includes production build).
+- build: `npm run build` exit 0, standalone rerun.
+- live: `npm run test:live` deliberately not run; it requires separate
+  explicit authorization and a real Meta call, and fixture tests never prove it.
+
+Open gates carried forward: kitchen live reliability (reproducible timeout),
+authored single-clip gate unmeasured (bathroom variance scored, kitchen
+unscored), form/recipient acceptance, physical iOS/Android checks, production
+hosting/auth/retention controls, independent reviews (TASK-111/112), and
+native SDD evidence. Recent unscoped additions (voice-agent tour, live copilot
+v2 loop, passcode gate replacing Entra) need an explicit SDD scope decision
+before any release claim.
 
 ## Production candidate — 2026-10-31 (Muse Code)
 

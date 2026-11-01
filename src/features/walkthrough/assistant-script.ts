@@ -18,7 +18,6 @@ export type AssistantActionId =
   | "film-room"
   | "analyze-all"
   | "open-requirement"
-  | "confirm-all"
   | "signoff"
   | "dismiss";
 
@@ -101,7 +100,7 @@ export function deriveAssistantNode(input: AssistantScriptInput): AssistantNode 
     return {
       key: "setup",
       title: "Let's set up this inspection",
-      message: "I'm your inspection guide. I'll walk you through filming, run the AI analysis, and confirm all 11 requirements with you. First: give the unit a nickname and pick its funding type.",
+      message: "I'm your inspection guide. I'll walk you through filming, run the AI analysis, and review all 11 requirements with you. First: give the unit a nickname and pick its funding type.",
       speak: "Hi! I'm your inspection guide. I'll walk you through the whole thing. First, let's set up the unit.",
       actions: [{ id: "setup", label: "Set up the unit", primary: true }],
     };
@@ -140,17 +139,15 @@ export function deriveAssistantNode(input: AssistantScriptInput): AssistantNode 
   }
   if (input.resolvedDecisions < MOVE_IN_READY_ELEMENTS.length) {
     const remaining = MOVE_IN_READY_ELEMENTS.length - input.resolvedDecisions;
-    const actions: AssistantAction[] = [
-      { id: "confirm-all", label: `Confirm ${remaining} from AI drafts`, primary: true },
-    ];
+    const actions: AssistantAction[] = [];
     if (input.nextUndecidedId) {
-      actions.push({ id: "open-requirement", label: `Review: ${input.nextUndecidedLabel ?? "requirement"}`, primary: false, elementId: input.nextUndecidedId });
+      actions.push({ id: "open-requirement", label: `Review: ${input.nextUndecidedLabel ?? "requirement"}`, primary: true, elementId: input.nextUndecidedId });
     }
     return {
-      key: "confirm",
-      title: `${remaining} requirement${remaining === 1 ? "" : "s"} left to confirm`,
-      message: "The AI drafts are applied below. Confirm them all at once after your in-person walk, or open any requirement to inspect its evidence first. Nothing is decided until you confirm it.",
-      speak: `${remaining} items left. Confirm them all, or review each one.`,
+      key: "review",
+      title: `${remaining} requirement${remaining === 1 ? "" : "s"} left to decide`,
+      message: "The AI drafts are proposed below. Open each requirement, complete your in-person check, and record your own decision. Nothing is decided until you decide it.",
+      speak: `${remaining} items left. Review each one and record your decision.`,
       actions,
     };
   }

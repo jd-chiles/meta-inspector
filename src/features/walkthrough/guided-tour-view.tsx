@@ -31,6 +31,7 @@ import type { StoredVideoClip, VideoClipStore } from "./video-store";
 import { LIVE_ELEMENT_SPECS, filmingRoomForLiveElement } from "./live-elements";
 import { fixListTier, reinspectionChecklist } from "./fix-list";
 import { VOICE_ROOM_CHECKS } from "./voice-checks";
+import { filmingScriptForRoom } from "./assistant-script";
 import { parseRoomId } from "../../domain/move-in-ready";
 import { parseBathCount, parseUnitType, parseYesNo } from "./voice-parse";
 import { speakPrompt } from "./voice-conversation";
@@ -79,7 +80,7 @@ export interface GuidedTourBindings {
   saveLiveDraft: (elementId: MoveInReadyElementId) => boolean;
   onLiveClipSaved: (elementId: MoveInReadyElementId, result: LiveElementClipResult) => void;
   onLiveNeedsCheck: (elementId: MoveInReadyElementId, reason: string) => void;
-  confirmProposal: (elementId: MoveInReadyElementId) => boolean;
+  reviewProposalDraft: (elementId: MoveInReadyElementId) => void;
   markNeedsCheck: (elementId: MoveInReadyElementId, note: string) => void;
   changeStep: (step: "home" | "capture" | "review" | "signoff" | "profile") => void;
 }
@@ -116,6 +117,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
   const [batchSeen, setBatchSeen] = useState(false);
   const [skipped, setSkipped] = useState<ReadonlySet<MoveInReadyElementId>>(new Set());
   const [speakOn, setSpeakOn] = useState(true);
+  const [tourRecording, setTourRecording] = useState(false);
   const [tourSpeaking, setTourSpeaking] = useState(false);
   const [voicePhase, setVoicePhase] = useState<VoicePromptPhase | null>(null);
   const [speechNonce, setSpeechNonce] = useState(0);
@@ -255,6 +257,21 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
       setAnalysisSettled(true);
     }
   }, [node.kind, nodeKey, batchSeen, bindings.batchActive, bindings.batchFailedRooms]);
+
+  // Talk through the shot list while a take is recording: one cue at a
+  // time so the evaluator covers every shot conversationally. Stops the
+  // moment recording stops or the node advances (clip saved).
+  useEffect(() => {
+    if (node.kind !== "film-room" || !tourRecording || !speakOn) return;
+    const cues = filmingScriptForRoom(node.roomId);
+    const timers = cues.map((cue, index) =>
+      window.setTimeout(() => sayNow(cue), 1500 + index * 8000));
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+      stopSpeech();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeKey, tourRecording, speakOn]);
 
   const skipElement = useCallback((elementId: MoveInReadyElementId) => {
     setSkipped((current) => new Set(current).add(elementId));
@@ -473,7 +490,10 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
               capturedRoomCount={bindings.capturedRoomCount}
               capturedRoomIds={bindings.capturedRoomIds}
               onRoomChange={(roomId) => bindings.selectRoom(roomId)}
-              onRecordingStateChange={bindings.onRecordingStateChange}
+              onRecordingStateChange={(recording) => {
+                bindings.onRecordingStateChange(recording);
+                setTourRecording(recording);
+              }}
               onClipChange={(clip, roomId) => bindings.onClipChange(clip, roomId)}
             />
           </div>
@@ -495,9 +515,9 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
                 onPhaseChange={setVoicePhase}
               >
                 <div className={flowStyles.voiceTapRow}>
-                  <button className={flowStyles.secondaryButton} type="button" onClick={() => bindings.answerVoiceCheck(node.roomId, question, "yes")}>Yes</button>
-                  <button className={flowStyles.secondaryButton} type="button" onClick={() => bindings.answerVoiceCheck(node.roomId, question, "no")}>No</button>
-                  <button className={flowStyles.secondaryButton} type="button" onClick={() => bindings.answerVoiceCheck(node.roomId, question, "skipped")}>Skip</button>
+                  <button className={flowStyles.button} type="button" data-testid="tour-check-yes" onClick={() => bindings.answerVoiceCheck(node.roomId, question, "yes")}>Yes</button>
+                  <button className={flowStyles.button} type="button" data-testid="tour-check-no" onClick={() => bindings.answerVoiceCheck(node.roomId, question, "no")}>No</button>
+                  <button className={flowStyles.textButton} type="button" onClick={() => bindings.answerVoiceCheck(node.roomId, question, "skipped")}>Skip</button>
                 </div>
               </VoicePrompt>
             </div>
@@ -613,16 +633,10 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
                 <button
                   className={flowStyles.button}
                   type="button"
-                  data-testid="tour-confirm"
-                  onClick={() => {
-                    const confirmed = bindings.confirmProposal(node.elementId);
-                    if (!confirmed) {
-                      skipElement(node.elementId);
-                      sayNow("This one needs the detail form. I moved it to manual review.");
-                    }
-                  }}
+                  data-testid="tour-review-draft"
+                  onClick={() => bindings.reviewProposalDraft(node.elementId)}
                 >
-                  Confirm {proposal.modelSuggestion} <ArrowRight size={17} aria-hidden="true" />
+                  Review {proposal.modelSuggestion} draft <ArrowRight size={17} aria-hidden="true" />
                 </button>
                 <button
                   className={flowStyles.secondaryButton}

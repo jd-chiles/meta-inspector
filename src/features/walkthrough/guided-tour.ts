@@ -15,6 +15,7 @@ import {
   type MoveInReadyRoomId,
 } from "../../domain/move-in-ready";
 import type { MoveInReadyInspection } from "./inspection-store";
+import { ASSISTANT_FILMING_SCRIPTS } from "./assistant-script";
 import { FIX_LIST_TIERS } from "./fix-list";
 import { LIVE_ELEMENT_SPECS } from "./live-elements";
 import { VOICE_ROOM_CHECKS } from "./voice-checks";
@@ -104,12 +105,11 @@ export function deriveTourNode(input: GuidedTourInput): GuidedTourNode {
   if (!input.bathsConfirmed) return { kind: "ask-baths" };
   if (record.fundingType !== "lahsa") return { kind: "consent" };
 
+  // Conversational order: film one room, answer its in-person checks, then
+  // move to the next room. Nothing waits until every room is filmed.
   const filmed = new Set(input.capturedRoomIds);
-  const unfilmed = record.roomIds.find((roomId) => !filmed.has(roomId));
-  if (unfilmed) return { kind: "film-room", roomId: unfilmed };
-
   for (const roomId of record.roomIds) {
-    if (!filmed.has(roomId)) continue;
+    if (!filmed.has(roomId)) return { kind: "film-room", roomId };
     const index = firstUnansweredCheck(record, roomId);
     if (index !== null) return { kind: "room-check", roomId, index };
   }
@@ -144,6 +144,27 @@ function suggestionWord(proposal: ModelElementProposal): string {
 }
 
 /**
+ * Conversational filming brief: room position plus every shot on that
+ * room's filming list, so the agent talks the evaluator through the full
+ * checklist instead of just naming the room. Stays under the 500-char
+ * voice prompt cap.
+ */
+export function filmRoomScript(roomId: MoveInReadyRoomId, position: number, total: number): string {
+  const label = roomLabel(roomId);
+  const intro = `Let's film the ${label}, room ${position} of ${total}.`;
+  const outro = "I will tell you when it is saved.";
+  const parsed = parseRoomId(roomId);
+  const steps = ASSISTANT_FILMING_SCRIPTS[parsed?.type ?? "hallway"]
+    .map((cue) => cue.replace(/^Recording\.\s*/i, "").replace(/\.\s*$/, "").trim())
+    .filter((step) => step.length > 0);
+  if (steps.length === 0) return `${intro} Hold your phone steady and film one slow take. ${outro}`;
+  const last = steps[steps.length - 1]!;
+  const listed = steps.length === 1 ? last : `${steps.slice(0, -1).join("; ")}; and finally ${last.charAt(0).toLowerCase() + last.slice(1)}`;
+  const first = `${listed.charAt(0).toLowerCase() + listed.slice(1)}`;
+  return `${intro} Start recording, then ${first}. ${outro}`;
+}
+
+/**
  * The exact sentence the agent speaks on node entry. Question nodes return
  * "" because the voice prompt speaks the question itself.
  */
@@ -151,7 +172,7 @@ export function tourScriptForNode(node: GuidedTourNode, context: TourScriptConte
   const { record } = context;
   switch (node.kind) {
     case "welcome":
-      return "I will guide this inspection step by step. You film each room, answer a few questions by voice, and confirm the A I drafts. About ten minutes. Tap Start when you are ready.";
+      return "I will guide this inspection step by step. You film each room, answer a few questions by voice, and review the A I drafts. About ten minutes. Tap Start when you are ready.";
     case "ask-name":
     case "ask-unit":
     case "ask-baths":
@@ -160,10 +181,9 @@ export function tourScriptForNode(node: GuidedTourNode, context: TourScriptConte
     case "consent":
       return "Quick consent before we film. This demo inspects a staged mock unit only, with no tenants, faces, or real case data. Each clip you film is sent to Meta for A I analysis. Tap I understand, let's film, to continue.";
     case "film-room": {
-      const label = roomLabel(node.roomId);
       const total = record.roomIds.length;
       const position = record.roomIds.indexOf(node.roomId) + 1;
-      return `Let's film the ${label}, room ${position} of ${total}. Hold your phone steady and film one slow take. I will tell you when it is saved.`;
+      return filmRoomScript(node.roomId, position, total);
     }
     case "analyze":
       return "Every room is filmed. Sending your clips for A I analysis now. This takes a few minutes. Stay on this screen.";
@@ -183,7 +203,7 @@ export function tourScriptForNode(node: GuidedTourNode, context: TourScriptConte
       const excerpt = proposal.observation.length > 220
         ? `${proposal.observation.slice(0, 217).trimEnd()}…`
         : proposal.observation;
-      return `${prefix}${label}. The A I suggests ${suggestionWord(proposal)}, confidence ${proposal.confidence} percent. ${excerpt} Tap Confirm, or Needs human check.`;
+      return `${prefix}${label}. The A I suggests ${suggestionWord(proposal)}, confidence ${proposal.confidence} percent. ${excerpt} Tap Review draft, or Needs human check.`;
     }
     case "finish": {
       const decided = MOVE_IN_READY_ELEMENTS.filter(

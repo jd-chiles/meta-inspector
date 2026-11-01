@@ -1456,6 +1456,48 @@ test.describe("Move-in Ready mobile flow", () => {
       }
     });
 
+    test("cancelling an in-flight segment request releases the server lease and keeps retry available", async ({ page }) => {
+      test.setTimeout(90_000);
+      const videoBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern.mp4"));
+      const mock = await installDelayedSegmentMock(page, "cancel-race");
+      try {
+        await prepareMockLiveVideo(page, videoBytes);
+        await page.getByRole("button", { name: "Analyze this room", exact: true }).click();
+        const started = await mock.requestStarted;
+        expect(started.room).toBe("kitchen");
+
+        const cancelRequestPromise = page.waitForRequest(
+          (request) => request.url().includes("/api/video/segment") && request.url().includes("stage=cancel"),
+          { timeout: 30_000 },
+        );
+        await expect(page.getByRole("button", { name: "Cancel", exact: true })).toBeVisible();
+        await page.getByRole("button", { name: "Cancel", exact: true }).click();
+        await expect(page.getByRole("status").filter({ hasText: "Analysis was cancelled. No result was saved." })).toBeVisible({ timeout: 30_000 });
+
+        const cancelRequest = await cancelRequestPromise;
+        const cancelBody = cancelRequest.postDataBuffer();
+        expect(cancelBody, "the abort path must notify the server to release its lease").not.toBeNull();
+        const cancelContentType = cancelRequest.headers()["content-type"] ?? "";
+        expect(videoIdentityFromRequest(cancelBody!, cancelContentType)).toMatchObject({
+          sessionId: started.identity.sessionId,
+          videoId: started.identity.videoId,
+          analysisId: started.identity.analysisId,
+          attempt: started.identity.attempt,
+        });
+        expect(cancelBody!.toString("latin1")).not.toContain('name="candidateToken"');
+
+        mock.releaseResponse();
+        await mock.responseSettled;
+        expect(mock.stages.filter((stage) => stage === "map"), "a cancelled segmentation must not start Muse mapping").toHaveLength(0);
+        await expect(page.getByRole("status").filter({ hasText: "Analysis was cancelled. No result was saved." })).toBeVisible();
+        await expect(page.getByRole("button", { name: "Analyze this room", exact: true })).toBeEnabled();
+      } finally {
+        mock.releaseResponse();
+        await Promise.race([mock.responseSettled, delay(2_000)]);
+        await page.unroute("**/api/video/segment*");
+      }
+    });
+
     test("a late response cannot restore a clip removed from local storage", async ({ page }) => {
       test.setTimeout(90_000);
       const videoBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern.mp4"));
@@ -1580,6 +1622,103 @@ test.describe("Move-in Ready mobile flow", () => {
         mock.releaseMappingResponse();
         await Promise.race([mock.responseSettled, mock.mappingResponseSettled, delay(2_000)]);
         await page.unroute("**/api/video/segment*");
+      }
+    });
+
+    test("opening an AI draft never saves a decision or an in-person acknowledgment", async ({ page }) => {
+      test.setTimeout(120_000);
+      const videoBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern.mp4"));
+      await installSharedElementAnalysisMock(page);
+
+      try {
+        await prepareMockLiveVideo(page, videoBytes);
+        await page.getByRole("button", { name: "Profile", exact: true }).click();
+        await page.getByLabel("Evaluator name").fill("Mock Evaluator");
+        await goToCapture(page);
+        await selectRoom(page, "kitchen");
+        await expandAnalysisDetails(page);
+        await page.getByRole("checkbox", { name: /I attest this is staged\/mock-unit footage/ }).check();
+        await page.getByRole("checkbox", { name: /I understand this selected mock-unit video/ }).check();
+        await page.getByRole("button", { name: "Analyze this room", exact: true }).click();
+        await expect(page.getByTestId("analysis-disclosure")).toHaveJSProperty("open", false);
+        await expandAnalysisDetails(page);
+        await expect(page.getByRole("button", { name: "Analyze this room again", exact: true })).toBeVisible({ timeout: 30_000 });
+
+        await page.getByRole("button", { name: "Review", exact: true }).click();
+        const overview = page.getByRole("region", { name: "All 11 inspection elements" });
+        await expect(overview.getByText("Mock kitchen water supply proposal.")).toBeVisible();
+        await expect(page.getByRole("button", { name: /from AI drafts/ })).toHaveCount(0);
+
+        await overview.getByRole("button", { name: "Review A draft for Water supply" }).click();
+        const waterSupply = page.getByTestId("review-element-demo-water-supply");
+        await expect(waterSupply).toBeVisible();
+        await expect(waterSupply).toContainText("Mock kitchen water supply proposal.");
+        await expect(waterSupply.getByRole("checkbox", { name: "I completed every required in-person check for this element" })).not.toBeChecked();
+        expect(await readSavedWaterSupplyDecision(page)).toMatchObject({ status: "unreviewed" });
+        await expect(page.getByRole("progressbar", { name: "Checklist progress" })).toHaveAttribute("aria-valuenow", "0");
+      } finally {
+        if (!page.isClosed()) await page.unroute("**/api/video/segment*");
+      }
+    });
+
+    test("a finished manual batch never auto-restarts even when rooms still need work", async ({ page }) => {
+      test.setTimeout(180_000);
+      const videoBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern.mp4"));
+      const stages: string[] = [];
+      await page.route("**/api/video/segment*", async (route) => {
+        stages.push(new URL(route.request().url()).searchParams.get("stage") ?? "unknown");
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: false, error: { code: "MOCK_BATCH_FAIL", message: "Forced batch failure." } }),
+        });
+      });
+
+      try {
+        await page.goto(MOCK_LIVE_BASE_URL);
+        await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
+        await expect(page.getByTestId("analysis-mode")).toHaveText("Meta live · untested");
+        await setLahsaProfile(page);
+        await page.getByLabel("Evaluator name").fill("Mock Evaluator");
+        await goToCapture(page);
+        expect(await browserCanDecodeH264(page), "this E2E needs the bundled synthetic MP4 to decode in Chromium").toBe(true);
+
+        const consent = page.getByTestId("walkthrough-consent");
+        await expect(consent).toBeVisible();
+        await consent.getByRole("checkbox", { name: /Every clip I film is staged\/mock-unit footage/ }).check();
+        await consent.getByRole("checkbox", { name: /I understand each filmed clip will be sent/ }).check();
+
+        for (const roomId of ["kitchen", "bathroom", "living-room"] as const) {
+          await selectRoom(page, roomId);
+          await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
+            name: `synthetic-${roomId}-test-pattern.mp4`,
+            mimeType: "video/mp4",
+            buffer: videoBytes,
+          });
+          await expect(page.getByText(/Clip saved on this device\./)).toBeVisible({ timeout: 20_000 });
+        }
+
+        const disclosure = page.getByTestId("batch-analysis-disclosure");
+        const batchOpen = await disclosure.evaluate((element) => (element as HTMLDetailsElement).open);
+        if (!batchOpen) await disclosure.locator("summary").click();
+        await page.getByRole("checkbox", { name: /All 3 filmed clips are staged\/mock-unit footage/ }).check();
+        await page.getByRole("checkbox", { name: /I understand the filmed clips will be sent one room at a time/ }).check();
+        await page.getByRole("button", { name: "Analyze 3 filmed rooms", exact: true }).click();
+        await expect(page.getByText(/3 rooms needing attention/)).toBeVisible({ timeout: 60_000 });
+        expect(stages.filter((stage) => stage === "segment")).toHaveLength(3);
+
+        await selectRoom(page, "hallway");
+        await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
+          name: "synthetic-hallway-test-pattern.mp4",
+          mimeType: "video/mp4",
+          buffer: videoBytes,
+        });
+        await expect(page.getByText("4 of 4 clips saved", { exact: true })).toBeVisible({ timeout: 20_000 });
+        await page.waitForTimeout(3_000);
+        expect(stages.filter((stage) => stage === "segment"), "filming the last room must not restart a finished batch").toHaveLength(3);
+        await expect(page.getByText(/3 rooms needing attention/)).toBeVisible();
+      } finally {
+        if (!page.isClosed()) await page.unroute("**/api/video/segment*");
       }
     });
   });

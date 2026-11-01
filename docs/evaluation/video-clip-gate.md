@@ -2,9 +2,8 @@
 
 Status: **open — the authored single-clip gate below is unchanged and
 unevaluated.** Under the owner-authorized two-room variance recorded in this
-file (2026-10-31), the bathroom room set produced a reviewable SAM+Muse
-result and is scored; the kitchen room set produced no reviewable result
-(repeated provider timeouts) and is unscored. Synthetic test patterns
+file, both room sets have now produced reviewable SAM+Muse results and are
+scored (bathroom 2026-10-31, kitchen 2026-11-01). Synthetic test patterns
 and fixture responses cannot satisfy this gate.
 
 ## Required input
@@ -83,6 +82,167 @@ responses and the server log carries no per-request entries. Total
 provider-touching calls this session: 4 segment + 1 map. The owner confirms
 dollar spend on the provider dashboard against the $10 approval.
 
+## Run record — 2026-11-01 kitchen validation attempt (Muse Code)
+
+Method: `SMOKE_VIDEO=/tmp/kitchen-clean.mp4 npm run test:live`
+(sanctioned runner: exactly one stage=segment, at most one stage=map,
+no retries, Baseten fallback disabled), user-initiated 2026-11-01 after
+the `e685615` bounded-overlap (3-way) + fail-fast repair. Same
+owner-authorized staged kitchen clip as before (~23.1 s, 43.3 MB).
+
+Result: the runner's segment fetch failed inside its 155 s budget
+("timed out or was unreachable"). No segment response was received, so
+no candidate validation, no map call, and no retry occurred. The child
+server passed its ready gate and the provider endpoint was separately
+reachable (keyless probe returned HTTP 401), but server-side behavior
+during the attempt is unobserved from this output.
+
+Interpretation limit: pre-fix kitchen-02 took 189.4 s server-side
+(150 s deadline + overhead), which alone exceeds the runner's 155 s
+budget — so this output cannot distinguish "overlap helped but still
+slower than 155 s" from "no improvement" or a mid-request local
+failure. The overlap fix remains unvalidated live. No quality, tracking,
+mapping, or gate claim follows from this attempt.
+
+Spend: most likely one billed segment attempt (upload + SAM concept
+calls started server-side before the runner gave up); no map spend. The
+owner confirms actual spend on the provider dashboard against the $10
+approval. No clip bytes, credentials, file IDs, or provider bodies are
+recorded here or in the repository.
+
+## Run record — 2026-11-01 kitchen measurement attempt (Muse Code)
+
+Method: `SMOKE_VIDEO=/tmp/kitchen-clean.mp4
+SMOKE_REQUEST_TIMEOUT_MS=270000 npm run test:live` after two code
+changes: server per-stage deadline 150 s → 240 s (provisional; final
+value follows observed latency) and a validated runner timeout override
+(self-tested). Same owner-authorized staged kitchen clip (~23.1 s).
+User-authorized measurement run; no retries.
+
+Result: the segment stage SUCCEEDED within budget — the first
+successful kitchen segmentation (under the 240 s server / 270 s runner
+budgets; exact latency unrecorded). The follow-on map stage failed with
+HTTP 502 code INVALID_MODEL_OUTPUT: Muse Spark output was rejected by
+strict response validation. The exact sub-cause (refusal, non-JSON,
+schema violation) is unobserved — the runner printed the code only. No
+retry was attempted and no quality/score claim follows.
+
+Spend: one billed segment attempt plus one billed Muse mapping call. The
+owner confirms actual spend on the provider dashboard against the $10
+approval. No clip bytes, credentials, file IDs, or provider bodies are
+recorded here or in the repository.
+
+Follow-up: the runner now appends the child server's own safe display
+message for allowlisted failure codes (self-tested 24/24), so a future
+attempt reports which validation rule failed instead of the code alone.
+
+## Run record — 2026-11-01 kitchen diagnostic attempt (Muse Code)
+
+Method: same measured command as the previous attempt, with the
+safe-message runner. User-authorized; no retries.
+
+Result: segment HTTP 200 AND map HTTP 200 — the first fully successful
+kitchen segment+map at the server. The RUNNER then rejected the map
+response with "mapping evidence is invalid", so the run still exited 1
+with no scoreable summary.
+
+Root cause (verified in code, no provider data needed): the runner's
+`validateMappedEvidence` required exactly `{sha256, mimeType}` on
+evidence stills, but the server contract emits `{sha256, mimeType,
+width, height, base64}` (`VideoMappedEvidence`, the app's own
+`verifyMappedServerEvidence`, and the e2e mocks all agree). The runner
+could never validate a real map response. Fixed the runner to the
+5-key still shape with field sanity, and replaced its latent
+order-sensitive `JSON.stringify` frame comparison with the app's
+field-wise comparison. Self-test 28/28, lint clean. This was test
+tooling only; no product behavior changed.
+
+Spend: one billed segment attempt plus one billed Muse mapping call. The
+owner confirms actual spend on the provider dashboard against the $10
+approval. No clip bytes, credentials, file IDs, or provider bodies are
+recorded here or in the repository.
+
+Net: the kitchen path very likely works end to end now (server
+200/200); a confirmation run with the fixed runner is still needed for
+a green `test:live` and any scoreable evidence.
+
+## Run record — 2026-11-01 kitchen confirmation (Muse Code)
+
+Method: same measured command with the fixed runner. User-authorized;
+no retries. Sanitized runner output: mode live, room kitchen,
+sam-3.1 + muse-spark-1.3, 43,348,324 bytes submitted (sha256
+`37db37ad…18346`), 1 segment + 1 map request, mapping completed with 4
+proposals, total latencyMs 192261, no leftover lease. Exit 0.
+
+This is the first green `test:live` on the staged kitchen clip: the
+Slice 2 timeout is resolved and measured — kitchen end to end takes
+about 192 s with 3-way SAM overlap, inside the provisional 240 s
+server / 270 s runner budgets (and conclusively outside the old
+150/155 s budgets). Mapping validation passed on both server and runner.
+
+Scope limit: the runner assesses connectivity only (`videoQuality:
+not-assessed`). The 4 proposals are unscored — no tracking, mapping, or
+still-identity scoring happened here, and no gate row changes. Scoring
+is Slice 3 work over retained sanitized evidence.
+
+Spend: one billed segment attempt plus one billed Muse mapping call. The
+owner confirms actual spend on the provider dashboard against the $10
+approval. No clip bytes, credentials, file IDs, or provider bodies are
+recorded here or in the repository.
+
+## Run record — 2026-11-01 kitchen scoring run (Muse Code)
+
+Method: direct same-origin route calls (multipart stage=segment then
+identity/token-only stage=map) against a locally spawned production
+server, same method as the 2026-10-31 variance; no browser, no fixture
+substitution, no retries, Baseten fallback disabled. Owner-authorized
+staged kitchen clip (~23.1 s, 43.3 MB). Evidence retained as sanitized
+summaries plus /tmp stills/frames only (not in the repository).
+
+Result: segment HTTP 200 in 163.5 s — 8 SAM candidates (faucet frames
+386/612, refuse-bin frames 41/689, wall frames 0/690, countertop frames
+0/690), 24 sample timestamps, media hash matched. Map HTTP 200 in
+10.2 s via muse-spark-1.3 — 4 proposals, all A: demo-water-supply 0.86,
+demo-item-10 0.72, demo-item-05 0.75, demo-item-11 0.78. All 8 served
+stills SHA-256-verified against served bytes; 3/3 timestamp spot checks
+match FFmpeg-decoded source frames. No stove or CO-detector candidates;
+no faces, addresses, or documents observed in viewed stills.
+
+Spend: one billed segment attempt plus one billed Muse mapping call. The
+owner confirms actual spend on the provider dashboard against the $10
+approval. No clip bytes, credentials, file IDs, tokens, or provider
+bodies are recorded here or in the repository.
+
+## Run record — 2026-11-01 Azure deployment validation (Muse Code)
+
+Method: direct route calls against the Container App (unlock via pilot
+passcode, then multipart stage=segment and identity/token-only
+stage=map), both staged clips, no browser. User-authorized; one retry
+of a transient map 502, nothing else.
+
+Results: kitchen segment 200 in 127 s (8 candidates, 24 samples), map
+200 in 14.5 s (4 proposals, 8/8 stills hash-verified, spot still shows
+the faucet frame). Bathroom segment 200 in 37.4 s (6 candidates, 10
+samples), map 200 in 12.4 s (2 proposals, 4/4 stills verified).
+Unlock 22.5 s cold / ~150 ms warm. First live proof on the 1 vCPU
+sizing — decode and both stages healthy; provider variance dominates
+latency, not replica size.
+
+Deployment finding: with `APP_PUBLIC_ORIGIN` unset, requests carrying
+`Origin: https://<fqdn>` fail 400 "Submit the video from this app."
+because the container sees an internal request URL (ACA preserves the
+browser Origin; the marker fallback only engages when Origin is
+absent). Green runs above used marker-only sender proof. Every real
+browser video request fails until `APP_PUBLIC_ORIGIN` is set — recorded
+as REQUIRED in the runbook; the config change itself is owner-authorized
+work, not taken here.
+
+Spend: three billed segments + three billed maps (one kitchen map 502
+retried once); two early origin-400 attempts never reached the
+provider ($0). The owner confirms on the provider dashboard against the
+$10 approval. No clip bytes, credentials, file IDs, tokens, or provider
+bodies are recorded here or in the repository.
+
 ## Room-set scorecard (owner variance)
 
 Scored from served still bytes (SHA-256-verified), segment/map payloads, and
@@ -96,9 +256,13 @@ spot-verified (served cand-0004 matches source frame 289).
 | Bathroom faucet | Pass: SAM frames 189, 289 | Pass: demo-water-supply A, conf 0.85, still verified visually (sink+faucet+drain) | Served still hash-verified; flow visible at source ~8.5 s |
 | Bathroom vent fan | Not tracked (no candidate) | Not mapped | Not observed in 9 sampled moments spanning the clip — footage gap, not established as a model miss |
 | Bathroom smoke detector (not in room list; observed) | SAM frames 130, 157 on an ambiguous round ceiling fixture | Correctly declined: no demo-smoke-co proposal | Caution, not failure: uncertain detection was not mapped |
-| Kitchen vent fan / sink / AC | Unmeasured: no segment response | Unmeasured | Footage check only: AC visible ~2 s, range hood (fan housing) ~10 s, sink+faucet+drain ~18 s. Kitchen prompts lack vent-fan/AC concepts, so tracking them also needs a prompt change. |
-| Timestamp accuracy | Pass (bathroom spot check) | — | Served frame 289@9642ms selects the faucet moment in source decode |
-| Still identity | Pass | — | Both served stills match their SHA-256; bytes are crops of the hash-verified upload (media hash matched submit hash) |
+| Kitchen vent fan / sink / AC | Sink: SAM faucet frames 386, 612. Vent fan + AC visible in footage but not kitchen concepts (prompt-scope gap, pre-recorded) | demo-water-supply A, conf 0.86 (cand-0001 frame 386@12878ms, cand-0005 frame 612@20418ms) | Served stills hash-verified; faucet still matches source frame 386 (sink, faucet, drain visible) |
+| Kitchen refuse / wall / countertop | Pass: refuse frames 41, 689; wall frames 0, 690; countertop frames 0, 690 (8 candidates, 24 samples) | Pass: demo-item-10 A 0.72, demo-item-05 A 0.75, demo-item-11 A 0.78 | Served stills hash-verified; frame-41 and frame-612 stills match source decodes |
+| Kitchen stove / CO detector | Not tracked (no candidate) | Not mapped | Not observed in surveyed moments — footage gap, not established as a model miss |
+| Kitchen observation overstatement | — | Caution: "water stream visible flowing toward drain" is unsupported by the cited stills (sink closeup + under-sink views show no stream) | Mapping-quality miss: the A suggestion is fine, the flow detail is unobserved — exactly what human review must catch |
+| Kitchen late-clip concept stretch | Caution: frames 612/689/690 are under-sink views labeled faucet/refuse/wall/countertop | Mapped As stay sensible via paired early stills | Identity and timestamps correct; semantic precision loose at clip end |
+| Timestamp accuracy | Pass (bathroom + kitchen spot checks) | — | Bathroom frame 289@9642ms; kitchen frames 41/386/612 stills match source decodes |
+| Still identity | Pass (both rooms) | — | Bathroom stills verified; all 8 kitchen stills match their SHA-256; bytes derive from the hash-verified upload |
 | Human-review boundary | Pass | — | Proposals carry draft state/confidence only; no decision, signature, or result was produced by any call |
 
 ## Scorecard

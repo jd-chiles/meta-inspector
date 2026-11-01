@@ -1,5 +1,72 @@
 # Codex review and CI
 
+## Fresh independent reviews — 2026-11-01 (Muse Code, Slice 6)
+
+Read-only reviews of the current tree (commit `4fe3218` plus the
+uncommitted sprint work) against the SDD requirements, design, plan,
+and project review rules. Independence limit, stated plainly: the
+reviewer is the same agent as the implementer, so "independent" here
+means a fresh evidence-backed pass, not a separate party. No native SDD
+approval, review, or evidence is claimed; `.sdd/state` and
+`.sdd/evidence` were not edited.
+
+Spec review — PASS with one minor observation. schemaVersion and
+catalogVersion are separate dimensions matched exactly on the client
+(`analysisIsCurrent`) and server (operation identity, map validation);
+version-staleness and migration-invalidation tests exist; element and
+revision identity is stable; HUD exits; no automatic path from proposal
+to decision (converter deleted, e2e-pinned). OBS-1 (minor): the
+prompt-completion trigger drifted from the letter of REQ-009/design —
+implemented "tap while recording completes on save; tap with a
+same-room saved clip completes immediately" versus specified "saved
+after recording, or existing same-room clip opened in review". The
+prohibitions hold (unsaved recordings and other-room clips cannot
+complete; e2e + store tests), and prompts gate nothing
+safety-critical. Recommend an SDD wording alignment or a review-open
+trigger as an owner decision.
+
+Plan review — PASS, no findings. `node scripts/verify-sdd.mjs` exits 0;
+the 7 focused validator tests map to the TASK-113 rejection rules;
+TASK-103–TASK-106 depend on TASK-113; history (TASK-069–TASK-077) is
+preserved and excluded from active checks; all 11 active checkboxes are
+present and honestly unchecked; file ownership is disjoint per phase;
+Capture-fit criteria and the 7-check verification mapping are in place.
+
+Code review (project rules) — PASS, no findings. Evidence identity
+survives async work (generation guards, abort→server-cancel, batch
+auto-start consumed, stale-response e2e including the new cancel test).
+AI output stays an unreviewed proposal through pre-fill, tour, batch,
+and export paths (evaluator-text-only exports tested). Secrets stay
+server-side with no `NEXT_PUBLIC_*` keys; every official-form text call
+site traces to cleaned, validated, or constant values; no client-URL
+fetching and no server body logging. Verification is honest: mock-live
+is labeled "Meta live · untested", fixture and live records stay
+separate, and no assertion was weakened.
+
+Security review — PASS with two LOW findings (pilot-grade; fix before
+wider launch, not MVP-blocking). SEC-1: the unlock throttle keys on the
+leftmost `X-Forwarded-For` entry (`src/app/api/auth/unlock/route.ts`),
+which is spoofable through ingress that appends — recommend
+rightmost-entry parsing. SEC-2: the throttle map is unbounded and never
+swept — recommend a cap plus expiry sweep. Positive: middleware covers
+`/api/video/*` with only static/unlock paths public; cookie is
+HttpOnly/Secure/Lax; passcode comparison is timing-safe; the
+fail-open-when-unset behavior is now documented in the runbook.
+
+QA/gate review — PASS with one minor observation. All configured checks
+were executed honestly (docs/lint/typecheck/unit/browser/build green;
+live kept separate with four authorized kitchen runs recorded). Gate
+states are accurate: the authored single-clip gate stays unmeasured,
+the variance set is scored with misses recorded, and release stays Not
+ready. OBS-2 (minor): no dedicated client test for a pure version bump
+during in-flight work (server map tests, migration tests, and
+replacement-identity e2e cover the mechanism); consider one e2e when
+convenient.
+
+Overall: no blocking review finding. Release stays Not ready on the
+external gates (physical devices, recipient acceptance, Azure redeploy
+of the current tree, named operational owner, native SDD evidence).
+
 ## Current status update — 2026-10-31
 
 The active checkout is heavily modified after the local checks recorded below;

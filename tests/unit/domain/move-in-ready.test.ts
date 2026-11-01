@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import * as domainModule from "../../../src/domain/move-in-ready";
+
 import {
-  confirmProposalAsDecision,
   createUnreviewedEvaluatorDecisions,
   deriveFinalInspectionResult,
   EVALUATOR_ATTESTATION_TEXT,
@@ -703,103 +704,7 @@ describe("Move-in Ready inspection domain", () => {
     expect(hud.blockers[0]).toContain("HQS");
   });
 
-  it("confirms an A proposal into an evaluator decision with provenance", () => {
-    const decision = confirmProposalAsDecision(
-      {
-        elementId: "demo-water-supply",
-        state: "draft-proposal",
-        modelSuggestion: "A",
-        observation: "Faucet runs clear.",
-        confidence: 90,
-        evidence: [EVIDENCE],
-        analysisIdentity: ANALYSIS_IDENTITY,
-      },
-      "demo-water-supply",
-      { evaluatorName: "Alex Morgan", decidedAt: TIMESTAMP },
-    );
-    expect(decision?.status).toBe("A");
-    const parsed = validateEvaluatorDecision(decision, "demo-water-supply");
-    expect(parsed.ok).toBe(true);
-    if (decision?.status === "A") {
-      expect(decision.rationale).toContain("Faucet runs clear.");
-      expect(decision.evidence).toHaveLength(1);
-      expect(decision.analysisIdentity).toEqual(ANALYSIS_IDENTITY);
-      expect(decision.inPersonCheckAcknowledgment).toEqual(IN_PERSON_ACKNOWLEDGMENT);
-    }
-  });
-
-  it("confirms a D proposal with its correction plan, and fire-safety A with both clauses", () => {
-    const deficient = confirmProposalAsDecision(
-      {
-        elementId: "demo-item-05",
-        state: "draft-proposal",
-        modelSuggestion: "D",
-        observation: "Wall damage visible.",
-        confidence: 82,
-        evidence: [{ ...EVIDENCE, roomId: "kitchen" }],
-        analysisIdentity: ANALYSIS_IDENTITY,
-        deficiencySuggestion: {
-          deficientArea: "Kitchen wall",
-          correction: "Patch and repaint.",
-          completionDate: "2026-11-12",
-          reinspectionDate: "2026-11-15",
-        },
-      },
-      "demo-item-05",
-      { evaluatorName: "Alex Morgan", decidedAt: TIMESTAMP },
-    );
-    expect(deficient?.status).toBe("D");
-    expect(validateEvaluatorDecision(deficient, "demo-item-05").ok).toBe(true);
-    const fire = confirmProposalAsDecision(
-      {
-        elementId: "demo-smoke-co",
-        state: "draft-proposal",
-        modelSuggestion: "A",
-        observation: "Detectors present.",
-        confidence: 88,
-        evidence: [EVIDENCE],
-        analysisIdentity: ANALYSIS_IDENTITY,
-      },
-      "demo-smoke-co",
-      { evaluatorName: "Alex Morgan", decidedAt: TIMESTAMP },
-    );
-    expect(fire?.status).toBe("A");
-    expect(validateEvaluatorDecision(fire, "demo-smoke-co").ok).toBe(true);
-  });
-
-  it("sends incomplete proposals to the detail form instead of confirming", () => {
-    const base = {
-      elementId: "demo-item-05" as const,
-      state: "draft-proposal" as const,
-      observation: "Wall damage visible.",
-      confidence: 82,
-      evidence: [EVIDENCE],
-      analysisIdentity: ANALYSIS_IDENTITY,
-    };
-    expect(confirmProposalAsDecision(
-      { ...base, modelSuggestion: "D" as const },
-      "demo-item-05",
-      { evaluatorName: "Alex Morgan", decidedAt: TIMESTAMP },
-    )).toBeNull();
-    expect(confirmProposalAsDecision(
-      {
-        ...base,
-        elementId: "demo-smoke-co",
-        modelSuggestion: "D" as const,
-        deficiencySuggestion: {
-          deficientArea: "Hallway",
-          correction: "Install detector.",
-          completionDate: "2026-11-12",
-          reinspectionDate: "2026-11-15",
-        },
-      },
-      "demo-smoke-co",
-      { evaluatorName: "Alex Morgan", decidedAt: TIMESTAMP },
-    )).toBeNull();
-    expect(confirmProposalAsDecision(
-      { ...base, modelSuggestion: "A" as const },
-      "demo-item-05",
-      { evaluatorName: "  ", decidedAt: TIMESTAMP },
-    )).toBeNull();
+  it("offers no proposal-to-decision conversion: decisions stay evaluator-entered", () => {
+    expect("confirmProposalAsDecision" in domainModule).toBe(false);
   });
 });

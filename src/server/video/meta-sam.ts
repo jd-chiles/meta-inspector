@@ -49,7 +49,15 @@ export const MUSE_VIDEO_MODEL = "muse-spark-1.3";
 export const MUSE_BASETEN_MODEL = "muse-spark-open-baseten";
 const BASETEN_MUSE_API_MODEL = "meta-models/muse-spark-open";
 const BASETEN_MUSE_URL = "https://inference.baseten.co/v1/chat/completions";
-export const SAM_VIDEO_TIMEOUT_MS = 150_000;
+/**
+ * Absolute per-stage deadline (multipart parsing, validation, FFmpeg,
+ * provider calls). Set from observed latency: the staged 23 s kitchen
+ * clip reproducibly exceeded the previous 150 s bound and completes its
+ * segment stage in roughly 140-170 s with 3-way SAM overlap (~192 s wall
+ * for segment plus mapping plus runner overhead on 2026-11-01). The
+ * 240 s bound keeps about 50 percent headroom for provider variance.
+ */
+export const SAM_VIDEO_TIMEOUT_MS = 240_000;
 /** Max simultaneous SAM concept calls within one segment request. */
 const MAX_CONCURRENT_SAM_CONCEPTS = 3;
 const CANCEL_REQUEST_TIMEOUT_MS = 10_000;

@@ -492,6 +492,55 @@ describe("Move-in Ready signed export PDFs", () => {
     expect(json).not.toHaveProperty("proposals");
   });
 
+  it("carries the manual-upload notice on every generated PDF page", async () => {
+    const input = withConfirmedDeficiency();
+    // Force overflow pages so the footer path is exercised, not just page one.
+    // The landlord list shows D items only, so promote three more elements to
+    // D with distinct evidence rows; A rationales paginate the client file.
+    for (const decision of Object.values(input.decisions)) {
+      if (decision.status === "A" || decision.status === "D") {
+        decision.rationale = `${decision.rationale} ${"Additional in-person detail recorded for the export. ".repeat(6)}`;
+      }
+    }
+    const extraStillEvidence = (["demo-item-10", "demo-item-05", "demo-item-11"] as const).map((elementId, index) => {
+      const evidence = { ...EVIDENCE, stillId: `still-demo-multipage-${index}` };
+      input.decisions[elementId] = {
+        status: "D",
+        evaluatorName: "Demo Evaluator",
+        decidedAt: SIGNED_AT,
+        inPersonCheckAcknowledgment: {
+          evaluatorName: "Demo Evaluator",
+          completedAt: SIGNED_AT,
+        },
+        rationale: `Deficiency confirmed in person. ${"Supporting detail recorded at the walkthrough. ".repeat(6)}`,
+        evidence: [evidence],
+        analysisIdentity: null,
+        deficiency: {
+          issueDescription: `Confirmed issue in ${elementId}.`,
+          correction: `Correct the confirmed issue. ${"Step detail recorded for the landlord fix list. ".repeat(8)}`,
+          completionDate: "2026-11-02",
+          reinspectionDate: "2026-11-05",
+        },
+      };
+      return { evidence, jpegBytes: syntheticJpeg() };
+    });
+    input.stills = [...input.stills, ...extraStillEvidence];
+    const exports = await buildMoveInReadyExportSet(input);
+    const needle = "Local draft for manual handling";
+    for (const [name, bytes] of [
+      ["client-file", exports.clientFilePdf],
+      ["landlord-fix-list", exports.landlordFixListPdf],
+    ] as const) {
+      const pageCount = (await PDFDocument.load(bytes)).getPages().length;
+      expect(pageCount, `${name} fixture must span overflow pages`).toBeGreaterThan(1);
+      expect(countOccurrences(decodedPdfStreams(bytes), needle), `${name} must carry the notice on every page`).toBe(pageCount);
+    }
+    expect(decodedPdfStreams(officialFormFixture), "official template must stay free of app notices").not.toContain(needle);
+    const hmisPages = (await PDFDocument.load(exports.hmisReadyPdf)).getPages().length;
+    expect(hmisPages - 3, "hmis-ready fixture must include appendix pages").toBeGreaterThan(0);
+    expect(countOccurrences(decodedPdfStreams(exports.hmisReadyPdf), needle), "every appendix page must carry the notice").toBe(hmisPages - 3);
+  });
+
   it("preserves evaluator, analysis, and full source-frame identity in HMIS JSON", async () => {
     const input = withAnalysisProvenance();
     const json = await buildHmisReadyJson(input);

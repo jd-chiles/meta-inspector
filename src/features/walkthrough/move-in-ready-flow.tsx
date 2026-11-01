@@ -41,7 +41,6 @@ import {
   LEGACY_DEFAULT_ROOM_IDS,
   MOVE_IN_READY_ELEMENTS,
   MOVE_IN_READY_ELEMENT_IDS,
-  confirmProposalAsDecision,
   createUnreviewedEvaluatorDecisions,
   deriveFinalInspectionResult,
   isMoveInReadyElementId,
@@ -1069,9 +1068,10 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     const needsWork = rooms.some((room) =>
       clips[room.id] && clips[room.id]?.mime !== "video/quicktime" && !roomHasCurrentProposal(room.id));
     if (!needsWork) return;
-    batchAutoStartedRef.current = true;
     setBatchAttested(true);
     setBatchSendConsent(true);
+    // startBatchAnalysis consumes the auto-start itself, and only when a
+    // run actually starts — an early return leaves it armed for later.
     startBatchAnalysis();
   });
 
@@ -1250,6 +1250,9 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     const rooms = current.roomIds
       .filter((roomId) => clips[roomId] && clips[roomId]?.mime !== "video/quicktime" && !roomHasCurrentProposal(roomId));
     if (rooms.length === 0) return;
+    // Any batch start consumes the walkthrough auto-start: a finished batch
+    // must never auto-restart itself, no matter which surface started it.
+    batchAutoStartedRef.current = true;
     batchQueueRef.current = [...rooms];
     batchTotalRef.current = rooms.length;
     setBatchFailedRooms([]);
@@ -1297,9 +1300,6 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     } else if (action.id === "open-requirement" && action.elementId) {
       changeStep("review");
       openReviewElement(action.elementId);
-    } else if (action.id === "confirm-all") {
-      changeStep("review");
-      window.setTimeout(() => confirmAllApproved(), 60);
     } else if (action.id === "signoff") {
       changeStep("signoff");
     } else if (action.id === "dismiss") {
@@ -2012,83 +2012,47 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   }
 
   /**
-   * One evaluator tap confirming one AI proposal after the in-person check.
-   * Returns true when a decision was saved. Proposals that need the detail
-   * form (fire-safety D, D without a plan, stale clips) open it instead.
+   * One evaluator tap opening one AI proposal for review. Copies the draft
+   * into editable fields and opens the detail form. Never saves a decision
+   * and never touches the in-person acknowledgment: the evaluator still
+   * completes the check, acknowledges it, and saves explicitly there.
    */
-  function confirmProposal(elementId: MoveInReadyElementId, options: { silent?: boolean } = {}): boolean {
-    const current = recordRef.current;
-    if (!current) return false;
-    if (current.fundingType !== "lahsa") {
-      if (!options.silent) setReviewError("Choose LAHSA / Form 1083 funding in Profile before recording a decision.");
-      return false;
-    }
-    if (!current.evaluatorName.trim()) {
-      if (!options.silent) setReviewError("Add the evaluator’s name in Profile before confirming.");
-      return false;
-    }
-    if ((current.decisions[elementId]?.status ?? "unreviewed") !== "unreviewed") return true;
-    const proposal = current.proposals[elementId];
-    if (!proposal) {
-      if (!options.silent) {
-        openReviewElement(elementId);
-        setReviewError("No AI draft for this requirement. Assess it in the detail form.");
-      }
-      return false;
-    }
-    if (!proposalIsCurrent(proposal, current)) {
-      if (!options.silent) setReviewError("That room clip changed since analysis. Analyze it again, then confirm.");
-      return false;
-    }
-    const evidence = proposal.evidence.filter((reference) =>
-      isEvidenceCurrent(reference, identityForEvidenceReference(current, reference), current));
-    let decided = confirmProposalAsDecision(
-      { ...proposal, evidence },
-      elementId,
-      { evaluatorName: current.evaluatorName.trim(), decidedAt: new Date().toISOString() },
-    );
-    if (decided && (decided.status === "A" || decided.status === "D")) {
-      const voiceNote = voiceCheckNoteForElement(elementId, current);
-      if (voiceNote) decided = { ...decided, rationale: `${decided.rationale}\n${voiceNote}`.slice(0, 1000) };
-    }
-    if (!decided) {
-      if (!options.silent) {
-        openReviewElement(elementId);
-        setReviewError("This one needs the detail form: review the draft and record each field.");
-      }
-      return false;
-    }
-    const parsed = validateEvaluatorDecision(decided, elementId);
-    if (!parsed.ok) {
-      if (!options.silent) setReviewError(decisionMessage(parsed.errors));
-      return false;
-    }
-    updateRecord((latest) => ({
-      ...latest,
-      decisions: { ...latest.decisions, [elementId]: parsed.value },
-      signoff: null,
-    }));
-    if (!options.silent) setReviewError("");
-    return true;
-  }
-
-  function confirmAllApproved(): void {
+  function reviewProposalDraft(elementId: MoveInReadyElementId): void {
     const current = recordRef.current;
     if (!current) return;
-    let saved = 0;
-    const needsDetail: string[] = [];
-    for (const element of MOVE_IN_READY_ELEMENTS) {
-      if ((recordRef.current?.decisions[element.id]?.status ?? "unreviewed") !== "unreviewed") continue;
-      if (!recordRef.current?.proposals[element.id]) {
-        needsDetail.push(element.label);
-        continue;
-      }
-      if (confirmProposal(element.id, { silent: true })) saved += 1;
-      else needsDetail.push(element.label);
+    if (current.fundingType !== "lahsa") {
+      setReviewError("Choose LAHSA / Form 1083 funding in Profile before recording a decision.");
+      return;
     }
-    if (needsDetail.length === 0) setReviewError("");
-    else if (saved === 0) setReviewError(`Nothing confirmed. Open each requirement in the detail form: ${needsDetail.join(", ")}.`);
-    else setReviewError(`Confirmed ${saved}. Still need the detail form: ${needsDetail.join(", ")}.`);
+    if (!current.evaluatorName.trim()) {
+      setReviewError("Add the evaluator’s name in Profile before recording a decision.");
+      return;
+    }
+    if ((current.decisions[elementId]?.status ?? "unreviewed") !== "unreviewed") {
+      changeStep("review");
+      openReviewElement(elementId);
+      return;
+    }
+    const proposal = current.proposals[elementId];
+    if (!proposal) {
+      changeStep("review");
+      openReviewElement(elementId);
+      setReviewError("No AI draft for this requirement. Assess it in the detail form.");
+      return;
+    }
+    if (!proposalIsCurrent(proposal, current)) {
+      setReviewError("That room clip changed since analysis. Analyze it again, then review the new draft.");
+      return;
+    }
+    const voiceNote = voiceCheckNoteForElement(elementId, current);
+    updateDecisionDraft(elementId, (draft) => {
+      const prefilled = prefillDraftFromProposal(draft, proposal);
+      if (!voiceNote || prefilled.rationale.includes(voiceNote)) return prefilled;
+      return { ...prefilled, rationale: `${prefilled.rationale}\n${voiceNote}`.slice(0, 1000) };
+    });
+    setReviewError("");
+    changeStep("review");
+    openReviewElement(elementId);
   }
 
   function saveSignoff(): void {
@@ -2643,7 +2607,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   saveLiveDraft,
                   onLiveClipSaved: (elementId, result) => handleLiveClipSaved(elementId, result),
                   onLiveNeedsCheck: (elementId, reason) => handleLiveNeedsCheck(elementId, reason),
-                  confirmProposal,
+                  reviewProposalDraft,
                   markNeedsCheck,
                   changeStep,
                 }}
@@ -3097,9 +3061,9 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
               <div className={styles.homeProgressTrack} role="progressbar" aria-label="Checklist progress" aria-valuemin={0} aria-valuemax={MOVE_IN_READY_ELEMENTS.length} aria-valuenow={reviewCounts.resolved}>
                 <span style={{ width: `${(reviewCounts.resolved / MOVE_IN_READY_ELEMENTS.length) * 100}%` }} />
               </div>
-              {!mobileReviewDetailOpen && reviewCounts.resolved < MOVE_IN_READY_ELEMENTS.length && hasAnyProposals && (
-                <button className={`${styles.button} ${styles.wideButton}`} type="button" onClick={confirmAllApproved}>
-                  Confirm {MOVE_IN_READY_ELEMENTS.length - reviewCounts.resolved} from AI drafts <ArrowRight size={16} aria-hidden="true" />
+              {!mobileReviewDetailOpen && reviewCounts.resolved < MOVE_IN_READY_ELEMENTS.length && nextUndecidedElement && (
+                <button className={`${styles.button} ${styles.wideButton}`} type="button" onClick={() => openReviewElement(nextUndecidedElement.id)}>
+                  Review next: {nextUndecidedElement.label} <ArrowRight size={16} aria-hidden="true" />
                 </button>
               )}
               {!mobileReviewDetailOpen && reviewCounts.resolved === MOVE_IN_READY_ELEMENTS.length && (
@@ -3109,8 +3073,8 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
               )}
               <section className={`${styles.card} ${styles.reviewOverview} ${mobileReviewDetailOpen ? styles.reviewOverviewHiddenOnMobile : ""}`} aria-label="All 11 inspection elements">
                 <div className={styles.cardTitleRow}><div><h2>Checklist — hardest first</h2><p className={styles.cardLead}>
-                  {hasAnyProposals ? "AI findings are applied below. Confirm each, or open one to inspect its evidence." : "No AI draft yet. Open each requirement to assess it in person."}
-                  {!record.evaluatorName.trim() && <> Evaluator name is required before confirming. <button className={styles.linkButton} type="button" onClick={openProfileForRequiredDetails}>Set up profile</button></>}
+                  {hasAnyProposals ? "AI drafts are proposed below. Open each requirement, complete your in-person check, and record your own decision." : "No AI draft yet. Open each requirement to assess it in person."}
+                  {!record.evaluatorName.trim() && <> Evaluator name is required before recording a decision. <button className={styles.linkButton} type="button" onClick={openProfileForRequiredDetails}>Set up profile</button></>}
                 </p></div></div>
                 <ul className={styles.elementOverview} id="element-overview-list">
                   {sortedReviewElements(record.proposals, record.decisions).map(({ element, index }) => {
@@ -3139,7 +3103,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                     const state = decision.status === "A" ? styles.elementOverviewApproved
                       : decision.status === "D" ? styles.elementOverviewDeficient
                         : decision.status === "needs-human-check" ? styles.elementOverviewCheck : "";
-                    const confirmable = decision.status === "unreviewed" && Boolean(proposal);
+                    const reviewable = decision.status === "unreviewed" && Boolean(proposal);
                     return <li key={element.id} className={styles.elementOverviewItem}>
                       <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
                         <button type="button" style={{ flex: 1, minWidth: 0 }} className={`${styles.elementOverviewButton} ${overviewEvidenceView ? styles.elementOverviewWithEvidence : ""}`} aria-pressed={element.id === activeElementId && (isWideLayout || mobileReviewDetailOpen)} onClick={() => openReviewElement(element.id)}>
@@ -3151,9 +3115,9 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                           <span className={`${styles.elementOverviewStatus} ${state}`}>{decision.status === "A" ? "Approved" : decision.status === "D" ? "Deficient" : decision.status === "needs-human-check" ? "Check" : proposal ? `AI ${proposal.modelSuggestion}` : "Open"}</span>
                           {overviewEvidenceView && <Image className={styles.elementOverviewThumb} src={overviewEvidenceView.src} alt={`Source still for ${element.label}, ${roomLabel(overviewEvidenceView.reference.roomId)} at ${formatTimestamp(overviewEvidenceView.reference.timestampMs / 1000)}`} width={64} height={48} unoptimized />}
                         </button>
-                        {confirmable && proposal && (
-                          <button type="button" className={styles.secondaryButton} aria-label={`Confirm ${element.label} as ${proposal.modelSuggestion}`} onClick={() => confirmProposal(element.id)}>
-                            Confirm {proposal.modelSuggestion}
+                        {reviewable && proposal && (
+                          <button type="button" className={styles.secondaryButton} aria-label={`Review ${proposal.modelSuggestion} draft for ${element.label}`} onClick={() => reviewProposalDraft(element.id)}>
+                            Review {proposal.modelSuggestion} draft
                           </button>
                         )}
                       </div>

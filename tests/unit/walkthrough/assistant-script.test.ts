@@ -70,9 +70,10 @@ describe("deriveAssistantNode", () => {
       analyzedRoomIds: ["kitchen", "bathroom", "bedroom", "living-room", "hallway"],
       analyzedTotal: 5,
     });
-    expect(node.key).toBe("confirm");
-    expect(node.actions[0]).toMatchObject({ id: "confirm-all" });
-    expect(node.actions[1]).toMatchObject({ id: "open-requirement", elementId: "demo-item-05" });
+    expect(node.key).toBe("review");
+    expect(node.actions.map((action) => action.id as string)).not.toContain("confirm-all");
+    expect(node.actions).toHaveLength(1);
+    expect(node.actions[0]).toMatchObject({ id: "open-requirement", elementId: "demo-item-05", primary: true });
   });
 
   it("ends at sign-off and completion", () => {

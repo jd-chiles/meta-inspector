@@ -259,6 +259,13 @@ async function buildPdf(
   const contentWidth = pageSize[0] - margin * 2;
   let page = document.addPage(pageSize);
   let cursorY = pageSize[1] - margin;
+  const stampFooter = async (target: PDFPage): Promise<void> => {
+    await drawWrappedText(target, MOVE_IN_READY_EXPORT_NOTICE, {
+      x: margin, y: 34, size: 7, lineHeight: 10, maxWidth: contentWidth,
+      fonts, color: rgb(0.35, 0.4, 0.48),
+    });
+  };
+  await stampFooter(page);
 
   const title = titleFor(kind);
   await drawText(page, "MOVE-IN READY · LOCAL DRAFT", {
@@ -315,13 +322,6 @@ async function buildPdf(
       fonts, color: rgb(0.14, 0.18, 0.24),
     });
   }
-  cursorY -= 5;
-  cursorY = await drawWrappedText(page, MOVE_IN_READY_EXPORT_NOTICE, {
-    x: margin, y: cursorY, size: 8, lineHeight: 11, maxWidth: contentWidth,
-    fonts, color: rgb(0.35, 0.4, 0.48),
-  });
-  cursorY -= 14;
-
   const stillByIdentity = new Map(input.stills.map((item) => [evidenceKey(item.evidence), item]));
   const elements = json.elements.filter((element) => {
     return kind !== "landlord-fix-list" || element.decision === "D";
@@ -373,6 +373,7 @@ async function buildPdf(
     if (cursorY - cardHeight < margin + 24) {
       page = document.addPage(pageSize);
       cursorY = pageSize[1] - margin;
+      await stampFooter(page);
     }
     page.drawRectangle({
       x: margin,
@@ -806,7 +807,7 @@ async function appendOfficialForm1083Supplement(options: {
     cursorY -= 12;
     drawRule(page, margin, cursorY, contentWidth, rgb(0.72, 0.77, 0.83));
     cursorY -= 15;
-    page.drawText("Local draft for manual handling; this app does not submit to HMIS or confirm LAHSA acceptance.", {
+    page.drawText(MOVE_IN_READY_EXPORT_NOTICE, {
       x: margin,
       y: 23,
       size: 6,
