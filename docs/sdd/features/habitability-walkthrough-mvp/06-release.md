@@ -1,6 +1,25 @@
 # Release record
 
-Status: Not ready (2026-11-01 mvp10 voice fix deployed; see latest entry)
+Status: Not ready (2026-11-01 mvp11 journey + voice clips deployed; see latest entry)
+
+## mvp11 journey + voice clips — 2026-11-01 (Muse Code)
+
+Status stays Not ready. Owner-approved redeploy with the guided-journey
+simplification (collapsed AI Guide banner, shot lists, film-first-ask-after,
+one-tap confirm) and 31 pre-generated static voice clips (owner voice).
+Built `metainspectprod.azurecr.io/metainspect:mvp11`
+(sha256:f858ff8a…), smoke-tested locally (root/manifest/clip 200,
+audio/mpeg), pushed, updated `metainspect-app` — revision
+`metainspect-app--0000013` active at 100% traffic, Healthy. Deploy note:
+the first push failed on an expired ACR login while the update still
+rolled the revision; re-pushed after `az acr login` and the revision
+provisioned Healthy with no further action. Verified live $0: root,
+manifest, and clip answer 307 to /unlock with baseline headers,
+confirming middleware coverage on the new revision; clip bytes proven
+by same-digest local smoke. Remaining: owner LTE phone run on this
+revision (instant voice is the acceptance check), recipient acceptance,
+custom domain, quota alerts, ops owner, native evidence. Not task
+acceptance or a release decision.
 
 ## mvp10 voice origin fix — 2026-11-01 (Muse Code)
 
