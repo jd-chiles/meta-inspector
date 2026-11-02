@@ -41,6 +41,7 @@ import {
   elementLabel,
   filmRoomShots,
   guidedReviewQueue,
+  reviewVoiceAction,
   tourNodeKey,
   tourProgress,
   tourScriptForNode,
@@ -316,6 +317,20 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
     if (text.trim()) sayNow(TOUR_REPROMPTS.yesNo);
   }, [bindings, sayNow]);
 
+  const handleReviewTranscript = useCallback((elementId: MoveInReadyElementId) => (text: string) => {
+    bindings.onVoiceTranscript(text);
+    const action = reviewVoiceAction(text);
+    if (action === "confirm") {
+      bindings.confirmProposalDraft(elementId);
+      return;
+    }
+    if (action === "edit") {
+      bindings.reviewProposalDraft(elementId);
+      return;
+    }
+    if (text.trim()) sayNow(TOUR_REPROMPTS.yesNo);
+  }, [bindings, sayNow]);
+
   return (
     <div className={styles.tour} data-testid="guided-tour" data-node={nodeKey}>
       <div ref={topRef} />
@@ -385,7 +400,26 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
               transcript={bindings.voiceTranscript}
               onTranscript={(text) => {
                 bindings.onVoiceTranscript(text);
-                if (text.trim()) setNameDraft(text.trim().slice(0, 80));
+                const clean = text.trim().slice(0, 80);
+                if (!clean) return;
+                // First answer fills the draft and is read back; a yes on
+                // the read-back saves without a tap, a no clears it, and a
+                // different name replaces the draft.
+                if (nameDraft.trim().length === 0) {
+                  setNameDraft(clean);
+                  sayNow(`I heard ${clean}. Say yes to save it, or tap Save.`);
+                  return;
+                }
+                const parsed = parseYesNo(clean);
+                if (parsed === "yes") {
+                  bindings.setEvaluatorName(nameDraft.trim().slice(0, 80));
+                } else if (parsed === "no") {
+                  setNameDraft("");
+                  sayNow(SETUP_VOICE_QUESTIONS.evaluatorName);
+                } else {
+                  setNameDraft(clean);
+                  sayNow(`I heard ${clean}. Say yes to save it, or tap Save.`);
+                }
               }}
               onPhaseChange={setVoicePhase}
             >
@@ -608,36 +642,45 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
               {!approved && (
                 <p className={flowStyles.helpText}>{reinspectionChecklist(node.elementId)}</p>
               )}
-              <div className={styles.reviewActions}>
-                <button
-                  className={flowStyles.button}
-                  type="button"
-                  data-testid="tour-confirm-draft"
-                  aria-label={`Confirm: I checked this in person and agree: ${approved ? "Approved" : "Deficient"}`}
-                  onClick={() => bindings.confirmProposalDraft(node.elementId)}
-                >
-                  Confirm: {approved ? "Approved" : "Deficient"} <ArrowRight size={17} aria-hidden="true" />
-                </button>
-                <button
-                  className={flowStyles.secondaryButton}
-                  type="button"
-                  data-testid="tour-review-draft"
-                  onClick={() => bindings.reviewProposalDraft(node.elementId)}
-                >
-                  Review {proposal.modelSuggestion} draft
-                </button>
-                <button
-                  className={flowStyles.secondaryButton}
-                  type="button"
-                  data-testid="tour-needs-check"
-                  onClick={() => bindings.markNeedsCheck(node.elementId, `Inspector marked ${elementLabel(node.elementId)} for a human check during the guided tour.`)}
-                >
-                  <CircleHelp size={16} aria-hidden="true" /> Needs human check
-                </button>
-                <button className={flowStyles.secondaryButton} type="button" data-testid="tour-skip" onClick={() => skipElement(node.elementId)}>
-                  Skip
-                </button>
-              </div>
+              <VoicePrompt
+                key={node.elementId}
+                question="Say yes to confirm this draft, or no to edit it."
+                autoSpeak={false}
+                transcript={bindings.voiceTranscript}
+                onTranscript={handleReviewTranscript(node.elementId)}
+                onPhaseChange={setVoicePhase}
+              >
+                <div className={styles.reviewActions}>
+                  <button
+                    className={flowStyles.button}
+                    type="button"
+                    data-testid="tour-confirm-draft"
+                    aria-label={`Confirm: I checked this in person and agree: ${approved ? "Approved" : "Deficient"}`}
+                    onClick={() => bindings.confirmProposalDraft(node.elementId)}
+                  >
+                    Confirm: {approved ? "Approved" : "Deficient"} <ArrowRight size={17} aria-hidden="true" />
+                  </button>
+                  <button
+                    className={flowStyles.secondaryButton}
+                    type="button"
+                    data-testid="tour-review-draft"
+                    onClick={() => bindings.reviewProposalDraft(node.elementId)}
+                  >
+                    Review {proposal.modelSuggestion} draft
+                  </button>
+                  <button
+                    className={flowStyles.secondaryButton}
+                    type="button"
+                    data-testid="tour-needs-check"
+                    onClick={() => bindings.markNeedsCheck(node.elementId, `Inspector marked ${elementLabel(node.elementId)} for a human check during the guided tour.`)}
+                  >
+                    <CircleHelp size={16} aria-hidden="true" /> Needs human check
+                  </button>
+                  <button className={flowStyles.secondaryButton} type="button" data-testid="tour-skip" onClick={() => skipElement(node.elementId)}>
+                    Skip
+                  </button>
+                </div>
+              </VoicePrompt>
             </div>
           );
         })()}

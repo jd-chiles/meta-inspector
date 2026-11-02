@@ -5,8 +5,8 @@
  */
 import type { MoveInReadyUnitType } from "../../domain/move-in-ready";
 
-const YES_WORDS = ["yes", "yeah", "yep", "yup", "sure", "correct", "right", "affirmative", "definitely"];
-const NO_WORDS = ["no", "nope", "nah", "negative", "not"];
+const YES_WORDS = ["yes", "yeah", "yep", "yup", "sure", "correct", "right", "affirmative", "definitely", "agree", "agreed", "confirm", "confirmed"];
+const NO_WORDS = ["no", "nope", "nah", "negative", "not", "disagree", "disagreed"];
 
 function firstMatchIndex(text: string, words: readonly string[]): number {
   let best = -1;

@@ -1,5 +1,33 @@
 # Change log
 
+## Voice-led review + boot splash — November 2, 2026 (Muse Code)
+
+Owner asked for (1) a loading screen for the ~30 s cold-start wait and
+(2) a voice-led journey from unit setup to a completed form. Tour
+review items now take a spoken yes (same guarded confirm path,
+evaluator identity, and timestamp as the Confirm tap) or no (opens the
+detail form for a differing verdict); the evaluator name fills by
+voice, reads back, and saves on yes; agree/disagree/confirm join the
+yes/no vocabulary. The review voice prompt does not auto-speak (the
+tour script carries the instruction live), so no new static clips were
+needed — inventory still 40 pinned. Start tap stays (browser audio
+policy), consent and needs-human-check stay taps, signature stays
+typed. Launch is voice-first: a fresh Home leads with the voice-agent
+entry (same Start/New labels and testids). Fixed a preview-only voice
+split the owner reported — the tailnet preview had no Fish credentials,
+so every dynamic line fell back to the device voice; audit confirms
+device speech is reachable only through the speakPrompt fallback, and
+the preview now serves Fish for static and live lines. Boot shows an
+inline splash card with staged status and elapsed
+seconds, removed when the app or unlock page renders; shell cache
+bumped v3 to v4. Caught in testing: the splash observer's
+unconditional status write retriggered itself into a renderer hang
+(fixed with compare-before-write), plus a node-turnover race in the
+new tour spec (fixed with transition waits). Verified: docs exit 0;
+lint 0 errors (3 pre-existing warnings); typecheck clean; unit 474
+passed / 3 skipped (38 files); browser 43/43 with no flakes or skips;
+build green. No REQ change; no task acceptance or native evidence.
+
 ## Single entrance + capture dashboard — November 2, 2026 (Muse Code)
 
 Owner-directed: Home had two entrances (guided tour vs manual Continue) for one workflow. Now one Start/Continue button always enters the guided tour, which resumes from saved data; manual screens stay as free-nav stops and tour finish links to sign-off as the single exit. Specs reach manual capture through the AI guide's next action (shared helper rewritten; single-entrance assertion added). The helper dismisses the guide after its action: the first full run showed 29 passed / 12 failed because the open guide panel covered content actions on later screens, a state manual capture never shows. Also: capture dashboard — the camera viewport + record actions pin to the top of the main scroller (app shell uses overflow:clip so sticky works; older browsers degrade to normal scroll), the live filming cue captions on the viewport, and saving a clip scrolls the yes/no checks into view. The pixel-geometry viewport spec was replaced by dashboard-contract tests (pinned dock, nav clearance, no overflow, auto-scroll). Verified this session on the combined tree: docs exit 0; lint 0 errors (3 pre-existing warnings); typecheck exit 0; unit 471 passed / 3 skipped (37 files); browser 41/41 with no flakes or skips; build green. No REQ change; no task acceptance or native evidence.

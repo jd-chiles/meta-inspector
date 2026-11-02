@@ -67,7 +67,7 @@ The JSON is the app's local draft schema, not a confirmed HMIS import schema. Pa
 
 These room associations guide capture and review; they are not an official LAHSA mapping or proof that a visual object satisfies an element. A video cannot establish conditions that require a physical check, such as water temperature, ventilation operation, safe electrical operation, detector operation, or a usable escape route. The evaluator records those checks separately.
 
-Funding type is selected at intake. This build supports the LAHSA/Form 1083 path. HUD-funded units receive an HQS-required route notice; the app must not present an HQS result or let the HUD route produce a Form 1083 export.
+70|Funding type is selected at intake. This build supports the LAHSA/Form 1083 path. Housing Authority or voucher selections route to an HQS-required notice; HUD-funded CoC/ESG selections remain eligible for Form 1083 exports in this app. The app must not present an HQS result or let the Housing Authority/voucher route produce a Form 1083 export.
 
 ## 2. SAM and Muse request contract
 

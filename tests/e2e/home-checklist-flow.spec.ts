@@ -23,6 +23,8 @@ test("home leads through film into the requirement-by-requirement checklist", as
   // One entrance: the single Start button opens the guided tour.
   await expect(home.getByTestId("start-guided-tour")).toHaveText(/Start inspection/);
   await expect(home.getByRole("button", { name: "Continue", exact: true })).toHaveCount(0);
+  // Voice-first launch: a fresh home leads with the voice agent entry.
+  await expect(home.getByTestId("home-voice-entry")).toContainText("answer by voice");
 
   await goToCapture(page);
   const setupToggle = page.getByTestId("capture-setup-toggle");

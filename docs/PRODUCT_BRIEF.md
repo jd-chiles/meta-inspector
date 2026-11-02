@@ -16,7 +16,7 @@ The form in scope is LAHSA Habitability Standards Inspection Form 1083, FY 2022â
 
 ## Main workflow
 
-1. Start a mock-unit inspection using a pseudonym and select funding type. HUD-funded units are routed to an HQS-required notice and cannot be completed as Form 1083 in this app.
+19: 1. Start a mock-unit inspection using a pseudonym and select funding type. Housing Authority or voucher selections are routed to an HQS-required notice and cannot be completed as Form 1083 in this app; HUD-funded CoC/ESG selections remain eligible for Form 1083 exports.
 2. Record or upload a short clip for kitchen, bathroom, bedroom/living area, and hallway. Prompts include operating the faucet, fan, door lock, and visible detector. Save each clip locally and preview, replace, or remove it.
 3. On an explicit connected action, submit a supported clip for server-side Meta SAM 3.1 segmentation and Meta Muse Spark mapping. If Meta Muse is unavailable and a Baseten key is configured, use Baseten-hosted Muse Spark Open for mapping fallback. Muse receives the SAM candidate stills and one original source still sampled near the center of each second, at 1 frame per second. Review timestamped evidence and unreviewed A/D suggestions across all 11 Form 1083 elements.
 4. The evaluator separately records A, D, or needs-human-check, corrects any suggestion, and completes required correction/reinspection fields. AI output never sets the inspection result.
