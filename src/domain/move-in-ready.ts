@@ -1134,6 +1134,15 @@ export interface FinalizationInput {
  * decisions, funding track, and typed sign-off. Model proposal data is not
  * accepted by this API.
  */
+export function normalizeFundingType(value: unknown): FundingType {
+  if (value === "lahsa") return "lahsa";
+  if (value === "hud") return "hud";
+  // Treat known CoC/ESG markers or any explicit "other" as the LAHSA/Form1083
+  // route: the UI exposes a CoC/ESG label but the flow should follow LAHSA.
+  if (value === "other" || value === "coc" || value === "coc_esg" || value === "esg") return "lahsa";
+  return "unknown";
+}
+
 export function deriveFinalInspectionResult(
   input: FinalizationInput,
 ): FinalizationSummary {
