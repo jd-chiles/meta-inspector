@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
 import { test, expect, type Page } from "@playwright/test";
 
 import { expectNoViewportOverflow } from "./navigation";
@@ -72,4 +75,59 @@ test("a spoken unit-type answer advances the tour without tapping", async ({ pag
   await tour.getByRole("button", { name: "Stop", exact: true }).click();
 
   await expect(tour).toHaveAttribute("data-node", "ask-baths");
+});
+
+test("a spoken name saves with a yes and reaches the tour finish", async ({ page }) => {
+  test.setTimeout(240_000);
+  const transcripts = ["Rae Evaluator", "yes"];
+  await page.route("**/api/voice/transcribe", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ ok: true, text: transcripts.shift() ?? "" }),
+  }));
+  const videoBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern.mp4"));
+  await startTour(page);
+  const tour = page.getByTestId("guided-tour");
+
+  // Studio keeps the room list to four so this stays fast.
+  await expect(tour).toHaveAttribute("data-node", "ask-unit");
+  await tour.getByRole("button", { name: "Studio", exact: true }).click();
+  await expect(tour).toHaveAttribute("data-node", "ask-baths");
+  await tour.getByRole("button", { name: "1", exact: true }).click();
+  await expect(tour).toHaveAttribute("data-node", "consent");
+  await page.getByTestId("tour-consent-confirm").click();
+
+  // Film every room and tap through its in-person checks. Each step waits
+  // for the node to actually turn over: instant reads race the async save.
+  for (let room = 0; room < 6; room += 1) {
+    const key = await tour.getAttribute("data-node");
+    if (key === "analyze") break;
+    await expect(tour).toHaveAttribute("data-node", /^film-room:/);
+    await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
+      name: `synthetic-tour-${room}.mp4`,
+      mimeType: "video/mp4",
+      buffer: videoBytes,
+    });
+    await expect(tour).not.toHaveAttribute("data-node", key ?? "never");
+    for (let check = 0; check < 3; check += 1) {
+      const before = await tour.getAttribute("data-node");
+      if (before === "analyze" || (before ?? "").startsWith("film-room:")) break;
+      await expect(tour).toHaveAttribute("data-node", /^room-check:/);
+      await tour.getByTestId("tour-check-yes").click();
+      await expect(tour).not.toHaveAttribute("data-node", before ?? "never");
+    }
+  }
+  await expect(tour).toHaveAttribute("data-node", "analyze");
+  await page.getByTestId("tour-analyze-continue").click();
+
+  // Voice fills the name draft, reads it back, and a yes saves it.
+  await expect(tour).toHaveAttribute("data-node", "ask-name");
+  for (let turn = 0; turn < 2; turn += 1) {
+    await tour.getByRole("button", { name: "Answer by voice", exact: true }).click();
+    await expect(tour.getByText("Listening… tap Stop when done.")).toBeVisible();
+    await page.waitForTimeout(2000);
+    await tour.getByRole("button", { name: "Stop", exact: true }).click();
+    if (turn === 0) await expect(page.getByTestId("tour-name-input")).toHaveValue("Rae Evaluator");
+  }
+  await expect(tour).toHaveAttribute("data-node", "finish");
 });

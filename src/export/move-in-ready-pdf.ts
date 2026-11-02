@@ -42,6 +42,10 @@ export interface MoveInReadyExportInput {
   landlordDiscussionDate?: string;
   leadershipNameAndTitle?: string;
   leadershipSignedAt?: string;
+  // Optional recorded destination and inspection occasion collected by the UI
+  // and carried in local JSON only.
+  recordedDestination?: "HMIS" | "VSP";
+  inspectionOccasion?: { kind: "initial-occupancy" | "annual-coc" | "post-deficiency-reinspection"; date: string };
   generatedAt?: string;
   stills: readonly ExportStill[];
 }
@@ -63,11 +67,30 @@ export interface HmisReadyJson {
     leadershipSignatureRequired: boolean;
     leadershipSignature: string | null;
   };
+  // Inspection occasion is a local-recording field describing which
+  // contractual obligation this inspection satisfies. Not written to the
+  // official AcroForm; included in the companion JSON and appendix only.
+  inspectionOccasion?: {
+    kind: "initial-occupancy" | "annual-coc" | "post-deficiency-reinspection";
+    date: string;
+  } | null;
   form1083: {
     landlordDiscussion: "yes" | "no" | null;
     landlordDiscussionDate: string | null;
     leadershipNameAndTitle: string | null;
     leadershipSignedAt: string | null;
+    // Optional recorded destination for the local appended record only. Values:
+    // - "HMIS": the file is intended for HMIS upload
+    // - "VSP": Victim Services Provider comparable database
+    // This must not be written into the official AcroForm; it appears only in the
+    // appended local supporting record and companion JSON.
+    recordedDestination?: "HMIS" | "VSP" | null;
+    // Inspection occasion records which obligation the inspection satisfies.
+    // Not an official AcroForm field; appended only.
+    inspectionOccasion?: {
+      kind: "initial-occupancy" | "annual-coc" | "post-deficiency-reinspection";
+      date: string;
+    } | null;
     fireSafetyAssessment: {
       unitDetectors: FireSafetyClauseOutcome | null;
       publicAreaDetectors: FireSafetyClauseOutcome | null;
@@ -217,6 +240,9 @@ export async function buildHmisReadyJson(input: MoveInReadyExportInput): Promise
         ? cleanText(input.leadershipSignoff, 120)
         : null,
     },
+    // Carry the inspection occasion at the top-level for easier tests and
+    // human readers; it is still not an official AcroForm field.
+    inspectionOccasion: input.inspectionOccasion ?? null,
     form1083: {
       landlordDiscussion: input.landlordDiscussion ?? null,
       landlordDiscussionDate: input.landlordDiscussion === "yes" && input.landlordDiscussionDate?.trim()
@@ -228,6 +254,11 @@ export async function buildHmisReadyJson(input: MoveInReadyExportInput): Promise
       leadershipSignedAt: input.leadershipSignedAt?.trim()
         ? dateOnly(cleanText(input.leadershipSignedAt, 80))
         : null,
+      // Carry recordedDestination and inspectionOccasion in the companion JSON
+      // only. These are local routing/recording notes and must not touch the
+      // official form's AcroForm fields.
+      recordedDestination: input.recordedDestination ?? null,
+      inspectionOccasion: input.inspectionOccasion ?? null,
       fireSafetyAssessment: {
         unitDetectors: fireSafetyAssessment?.unitDetectors ?? null,
         publicAreaDetectors: fireSafetyAssessment?.publicAreaDetectors ?? null,
@@ -847,7 +878,11 @@ async function appendOfficialForm1083Supplement(options: {
   await appendText("Participant name/HMIS number and unit address are intentionally blank because this workflow contains staged mock-unit data only.");
   await appendText(`Evaluator agency: ${json.evaluator.agencyName ?? "Not recorded"}. Landlord discussion: ${json.form1083.landlordDiscussion?.toUpperCase() ?? "Not recorded"}; date: ${json.form1083.landlordDiscussionDate ?? "Not recorded"}.`);
   await appendText(`Agency leadership name/title: ${json.form1083.leadershipNameAndTitle ?? "Not recorded"}. Leadership signature date: ${json.form1083.leadershipSignedAt ?? "Not recorded"}.`);
-  await appendText("The attached app record includes its aggregate Fire safety evaluator decision. Form 1083 fields 11a and 11b are marked only from the separate unit-detector and public-area-detector assessments supplied for this export; the aggregate result is not copied to either clause.");
+  await appendText(`Recorded destination: ${json.form1083.recordedDestination ?? "Not recorded"} (HMIS or Victim Services Provider comparable database).`);
+  await appendText(`Inspection occasion: ${json.inspectionOccasion?.kind ?? "Not recorded"}; date: ${json.inspectionOccasion?.date ?? "Not recorded"}.`);
+  await appendText(`The attached app record includes its aggregate Fire safety evaluator decision. Form 1083 fields 11a and 11b are marked only from the separate unit-detector and public-area-detector assessments supplied for this export; the aggregate result is not copied to either clause.`);
+  // Landlord instruction sentence verbatim from the official Form 1083.
+  await appendText(`"The changes must be completed before any funds can be given to the landlord, and before the participant can move into the unit." — LAHSA Form 1083`);
 
   if (deficiencies.length > FORM_1083_MAX_DEFICIENCY_ROWS) {
     await appendText(`Deficiency continuation: the official form has ${FORM_1083_MAX_DEFICIENCY_ROWS} correction rows. The remaining ${deficiencies.length - FORM_1083_MAX_DEFICIENCY_ROWS} evaluator-confirmed deficiencies continue here.`, {

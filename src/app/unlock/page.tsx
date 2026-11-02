@@ -37,7 +37,7 @@ export default function UnlockPage() {
   }
 
   return (
-    <main style={pageStyle}>
+    <main style={pageStyle} data-testid="unlock-page">
       <form onSubmit={onSubmit} style={cardStyle}>
         <h1 style={titleStyle}>MetaInspect Pilot</h1>
         <p style={subStyle}>Enter the inspection passcode to continue.</p>

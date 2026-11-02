@@ -8,6 +8,9 @@ describe("voice parsing", () => {
     expect(parseYesNo("It is not working")).toBe("no");
     expect(parseYesNo("No, but yes actually")).toBe("no");
     expect(parseYesNo("Maybe later")).toBeNull();
+    expect(parseYesNo("Yes, I agree with that")).toBe("yes");
+    expect(parseYesNo("Confirmed")).toBe("yes");
+    expect(parseYesNo("I disagree with this one")).toBe("no");
   });
 
   it("parses unit type from words or bare numbers", () => {

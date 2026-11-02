@@ -509,6 +509,8 @@
 .homeContent { gap: 14px; }
 .homeNextCard h2 { margin: 2px 0 6px; font-size: 1.35rem; letter-spacing: -0.01em; }
 .homeContinueRow { display: grid; gap: 8px; }
+.homeAgentRow { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; font-size: 0.9rem; line-height: 1.45; color: var(--muted); }
+.homeAgentAvatar { display: grid; place-items: center; width: 34px; height: 34px; flex: none; border-radius: 50%; background: var(--accent); color: #fff; }
 .inspectionRow { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .inspectionRow > .homeRequirementRow { flex: 1; }
 .iconButton {

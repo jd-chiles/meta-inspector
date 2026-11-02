@@ -18,6 +18,7 @@ import type { MoveInReadyInspection } from "./inspection-store";
 import { ASSISTANT_FILMING_SCRIPTS } from "./assistant-script";
 import { FIX_LIST_TIERS } from "./fix-list";
 import { VOICE_ROOM_CHECKS } from "./voice-checks";
+import { parseYesNo } from "./voice-parse";
 
 export type TourAnalysisMode = "live" | "fixture" | "unconfigured";
 
@@ -180,7 +181,7 @@ export function tourScriptForNode(node: GuidedTourNode, context: TourScriptConte
       const excerpt = proposal.observation.length > 220
         ? `${proposal.observation.slice(0, 217).trimEnd()}…`
         : proposal.observation;
-      return `${prefix}${label}. The A I suggests ${suggestionWord(proposal)}, confidence ${proposal.confidence} percent. ${excerpt} Tap Confirm, edit in Review draft, or Needs human check.`;
+      return `${prefix}${label}. The A I suggests ${suggestionWord(proposal)}, confidence ${proposal.confidence} percent. ${excerpt} Say yes to confirm, no to edit it, or tap Needs human check.`;
     }
     case "finish": {
       const decided = MOVE_IN_READY_ELEMENTS.filter(
@@ -221,6 +222,19 @@ export function tourProgress(
     { key: "analyze", label: "Analyze", done: analysisSettled ? 1 : 0, total: 1 },
     { key: "review", label: "Review", done: reviewDone, total: MOVE_IN_READY_ELEMENTS.length },
   ];
+}
+
+/**
+ * Voice answer on a review-item node: yes confirms the draft through the
+ * same guarded path as the Confirm tap (same evaluator identity,
+ * acknowledgment, and detail-form fallbacks), no opens the detail form
+ * for a differing verdict, anything else re-asks.
+ */
+export function reviewVoiceAction(transcript: string): "confirm" | "edit" | null {
+  const parsed = parseYesNo(transcript);
+  if (parsed === "yes") return "confirm";
+  if (parsed === "no") return "edit";
+  return null;
 }
 
 /** Ordered undecided proposals for the review-item position readout. */

@@ -2440,12 +2440,20 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
             <StepHeader headingRef={stepHeadingRef} eyebrow="INSPECTION HOME" title="Inspection home" lead={canCapture ? record.pseudonym : "One guided pass: film the unit, let AI draft, confirm each requirement."} />
             <section className={`${styles.contentStack} ${styles.homeContent}`} aria-label="Inspection home" data-testid="inspection-home">
               <div className={`${styles.card} ${styles.homeNextCard}`}>
-                <p className={styles.draftLabel}>Next step</p>
+                <p className={styles.draftLabel}>{hasInspectionProgress ? "Next step" : "Your inspection guide"}</p>
                 <h2>{guideModel?.nextLabel ?? "Walkthrough complete"}</h2>
+                {!hasInspectionProgress && record.fundingType !== "hud" && (
+                  <p className={styles.homeAgentRow} data-testid="home-voice-entry">
+                    <span className={styles.homeAgentAvatar} aria-hidden="true"><Mic size={17} /></span>
+                    <span>Voice-led · about 10 minutes. I explain each step out loud — just answer by voice and follow along.</span>
+                  </p>
+                )}
                 <p className={styles.cardLead}>
                   {record.fundingType === "hud"
                     ? "This unit needs the HQS workflow. Form 1083 cannot be completed here."
-                    : "The AI drafts from your room videos. You only confirm each requirement in person — nothing is decided for you."}
+                    : hasInspectionProgress
+                      ? "The AI drafts from your room videos. You only confirm each requirement in person — nothing is decided for you."
+                      : "Tap Start below and I will talk you through setup, filming, and every AI draft to a finished Form 1083."}
                 </p>
                 {record.fundingType !== "hud" && (
                   <div className={styles.homeContinueRow}>
@@ -2655,7 +2663,8 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                       <select id="capture-funding" className={styles.formSelect} value={record.fundingType} onChange={(event) => setProfileField("fundingType", event.currentTarget.value as FundingType)}>
                         <option value="unknown">Choose funding type</option>
                         <option value="lahsa">LAHSA / Form 1083</option>
-                        <option value="hud">HUD-funded / HQS</option>
+                        <option value="hud">Housing Authority or voucher (HQS required)</option>
+                        <option value="other">HUD-funded (CoC/ESG) — Form 1083 applies</option>
                       </select>
                     </div>
                     <div className={styles.field}>
@@ -3400,7 +3409,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   </div>
                   <div className={styles.profileFields}>
                     <div className={styles.field}><label htmlFor="profile-pseudonym">Unit pseudonym</label><input id="profile-pseudonym" className={styles.formInput} value={record.pseudonym} maxLength={80} placeholder="Demo Unit 04" onChange={(event) => setProfileField("pseudonym", event.currentTarget.value)} /></div>
-                    <div className={styles.field}><label htmlFor="profile-funding">Funding type</label><select id="profile-funding" className={styles.formSelect} value={record.fundingType} onChange={(event) => setProfileField("fundingType", event.currentTarget.value as FundingType)}><option value="unknown">Choose funding type</option><option value="lahsa">LAHSA / Form 1083</option><option value="hud">HUD-funded / HQS</option></select></div>
+                    <div className={styles.field}><label htmlFor="profile-funding">Funding type</label><select id="profile-funding" className={styles.formSelect} value={record.fundingType} onChange={(event) => setProfileField("fundingType", event.currentTarget.value as FundingType)}><option value="unknown">Choose funding type</option><option value="lahsa">LAHSA / Form 1083</option><option value="hud">Housing Authority or voucher (HQS required)</option><option value="other">HUD-funded (CoC/ESG) — Form 1083 applies</option></select></div>
                     <div className={styles.field}><label htmlFor="profile-unit-type">Unit type</label><select id="profile-unit-type" className={styles.formSelect} value={record.unitType} onChange={(event) => { const next = event.currentTarget.value as MoveInReadyUnitType | ""; if (next !== "") setUnitDescription(next, record.bathCount, record.roomIds.includes("hallway")); }}><option value="">Choose unit type</option><option value="studio">Studio</option><option value="1-bedroom">1 bedroom</option><option value="2-bedroom">2 bedroom</option><option value="3-bedroom">3 bedroom</option><option value="4-bedroom">4 bedroom</option></select></div>
                     <div className={styles.field}><label htmlFor="profile-baths">Bathrooms</label><select id="profile-baths" className={styles.formSelect} value={String(record.bathCount)} disabled={record.unitType === ""} onChange={(event) => { if (record.unitType !== "") setUnitDescription(record.unitType, Number(event.currentTarget.value), record.roomIds.includes("hallway")); }}><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></div>
                   </div>

@@ -12,6 +12,7 @@ import { VOICE_ROOM_CHECKS } from "../../../src/features/walkthrough/voice-check
 import {
   deriveTourNode,
   guidedReviewQueue,
+  reviewVoiceAction,
   tourNodeKey,
   filmRoomShots,
   tourProgress,
@@ -219,5 +220,42 @@ describe("deriveTourNode", () => {
     expect(sections.find((section) => section.key === "setup")).toMatchObject({ done: 3, total: 3 });
     expect(sections.find((section) => section.key === "film")).toMatchObject({ done: 2 });
     expect(sections.find((section) => section.key === "analyze")).toMatchObject({ done: 0, total: 1 });
+  });
+
+  it("maps review voice answers to confirm, edit, or re-ask", () => {
+    expect(reviewVoiceAction("Yes, confirmed")).toBe("confirm");
+    expect(reviewVoiceAction("I agree with approved")).toBe("confirm");
+    expect(reviewVoiceAction("No, that's wrong")).toBe("edit");
+    expect(reviewVoiceAction("I disagree")).toBe("edit");
+    expect(reviewVoiceAction("Hmm, maybe")).toBeNull();
+    expect(reviewVoiceAction("")).toBeNull();
+  });
+
+  it("tells the evaluator to answer review items by voice", () => {
+    const record = withSetup(createInitialInspectionRecord("tour-session-11"));
+    record.proposals["demo-water-supply"] = {
+      elementId: "demo-water-supply",
+      modelSuggestion: "A",
+      confidence: 85,
+      observation: "Sink and faucet look intact.",
+      state: "draft-proposal",
+      evidence: [],
+      analysisIdentity: {
+        sessionId: "tour-session-11",
+        roomId: "kitchen",
+        schemaVersion: 5,
+        videoId: "video-1",
+        videoRevision: 1,
+        expectedSourceHash: "a".repeat(64),
+        analysisId: "analysis-1",
+        attempt: 1,
+        catalogVersion: "0.3.0-demo.3",
+      },
+    };
+    const script = tourScriptForNode(
+      { kind: "review-item", elementId: "demo-water-supply" },
+      { record, capturedRoomCount: 4, batchActive: false, reviewPosition: { index: 1, total: 3 } },
+    );
+    expect(script).toContain("Say yes to confirm");
   });
 });

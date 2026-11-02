@@ -3,7 +3,7 @@
 ## Current decisions — October 29, 2026
 
 1. Build the mobile-first Move-in Ready flow from the supplied product brief and three-screen reference: room video capture, draft review, and evaluator sign-off/export.
-2. Use the owner's confirmed LAHSA Form 1083 scope with 11 logical areas. Treat Fire Safety 11a unit detectors and 11b public/common-area detectors as independent decisions. Ask funding type first; route HUD-funded units to an HQS-required notice.
+2. Use the owner's confirmed LAHSA Form 1083 scope with 11 logical areas. Treat Fire Safety 11a unit detectors and 11b public/common-area detectors as independent decisions. Ask funding type first; route Housing Authority/voucher selections to an HQS-required notice and treat HUD-funded (CoC/ESG) as a Form 1083 path.
 3. Capture kitchen, bathroom, bedroom/living, and hallway video with room-specific prompts. Keep the mobile upload bound to 60 MiB/30 seconds. For compatible MOV, use Mediabunny packet-copy remuxing to produce bounded MP4 locally; do not transcode. Store and analyze only the normalized output, and keep the prior clip if normalization fails.
 4. Use Meta SAM 3.1 for one-concept-at-a-time video segmentation and Meta Muse Spark for mapping. If Meta Muse is unavailable and `BASETEN_API_KEY` is configured, use fixed-host Baseten Muse Spark Open as mapping fallback. Muse receives SAM candidate stills plus one source still near each second; the evaluator must review every result. Keep keys, provider IDs, and raw responses server-side. Missing candidate evidence downgrades a proposal to needs-human-check.
 5. Keep model proposals separate from evaluator decisions. Only the evaluator's complete decisions and sign-off derive an overall result. An evidence-backed D requires correction and dates.

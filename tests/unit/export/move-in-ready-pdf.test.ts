@@ -159,6 +159,10 @@ function withAnalysisProvenance(): MoveInReadyExportInput {
   water.evidence = [evidence];
   water.analysisIdentity = analysisIdentity;
   input.stills = [{ evidence, jpegBytes: syntheticJpeg() }];
+  // For this test, include the optional recorded destination and inspection
+  // occasion so the exported JSON carries them in its appended local record.
+  input.recordedDestination = "HMIS";
+  input.inspectionOccasion = { kind: "initial-occupancy", date: "2026-11-02" };
   return input;
 }
 
@@ -544,6 +548,8 @@ describe("Move-in Ready signed export PDFs", () => {
   it("preserves evaluator, analysis, and full source-frame identity in HMIS JSON", async () => {
     const input = withAnalysisProvenance();
     const json = await buildHmisReadyJson(input);
+  expect(json.form1083.recordedDestination).toBe("HMIS");
+  expect(json.inspectionOccasion).toEqual({ kind: "initial-occupancy", date: "2026-11-02" });
     const water = json.elements.find((element) => element.id === "demo-water-supply");
 
     expect(water).toMatchObject({
