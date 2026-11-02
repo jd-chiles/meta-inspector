@@ -59,10 +59,11 @@ headers, so the passcode gate is active.
    answers stay tap-only.
 
 Still owner-side: custom domain + managed TLS, subscription cost/quota
-alerts, and named operational owner. Deployed 2026-11-01: `mvp8`
-(revision `metainspect-app--0000010`, 100% traffic) from HEAD
-`4fe3218` plus the verified uncommitted sprint work (guided/batch
-fixes, cancel-lease e2e, 240 s deadline, PDF footers). Build note:
+alerts, and named operational owner. Deployed 2026-11-02: `mvp13`
+(revision `metainspect-app--0000015`, 100% traffic, Healthy) from
+`101a67f` (single-entrance tour, capture dashboard, live-proof
+removal). Prior: `mvp8` (revision `metainspect-app--0000010`) from
+HEAD `4fe3218` plus verified uncommitted sprint work. Build note:
 ffmpeg.org was unreachable from every network here (timeouts from the
 sandbox and from Azure), so the from-source FFmpeg stage could not
 fetch; `mvp8` reuses `/opt/ffmpeg` from `metainspect:prod-proof`, whose

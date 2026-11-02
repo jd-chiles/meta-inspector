@@ -11,28 +11,26 @@ This document records what can currently be previewed and what remains unverifie
 
 Never narrate fixture behavior as live inference or the live smoke as video quality evidence. The runner reads local environment files through Next.js's loader without printing values, and it fails closed without `META_API_KEY`. Its default input is `tests/fixtures/synthetic-h264-test-pattern.mp4`; an explicit `SMOKE_VIDEO` override must be a regular `.mp4` prepared from rights-cleared staged/mock-unit media with no tenant or personal data. Run `npm run build` first. The offline-only runner self-test is `node tests/live/smoke.mjs --self-test`.
 
-## Open staged-video evaluation gate
+## Staged-video evaluation gate — status 2026-11-02
 
-The owner supplied staged/mock kitchen and bathroom clips on 2026-10-31 and authorized live provider processing. The kitchen segment request returned HTTP 504 after about 211 seconds. The bathroom segment endpoint returned HTTP 200 after about 93 seconds, but the browser request was canceled before saving; Muse mapping was not run. Keep tracking and mapping-quality claims blocked until qualifying footage produces a reviewable result and is scored for:
-
-- faucet, fan, lock, and detector track identity;
-- mapping to the 11 modeled Form 1083 elements;
-- actual timestamped still coverage; and
-- misses in normal indoor lighting.
-
-Record misses before revising prompts. Do not substitute a generated still, hand-written fixture, or still-image API smoke for the clip. Details and the unmeasured scorecard are in [video-clip-gate.md](evaluation/video-clip-gate.md).
-
-The supplied set consists of two room clips totaling about 32.8 seconds, while
-the current gate asks for one clip of 30 seconds or less and observed footage
-does not establish lock/detector coverage. Resolve that mismatch explicitly;
-do not silently mark the gate passed.
+Both owner-supplied staged clips now complete segment+map on
+production and are scored under the owner-authorized two-room
+variance: tracking/mapping/timestamp/still-identity pass on observed
+cues, with two recorded cautions (one overstated observation detail,
+loose late-clip labels). The authored single-clip gate (one clip
+≤30 s showing faucet, fan, lock, and detector) stays open and
+unevaluated — supplied footage does not establish lock/detector
+coverage. Record misses before revising prompts. Do not substitute a
+generated still, hand-written fixture, or still-image API smoke for
+the clip. Details, variance scorecard, and the unmeasured authored
+scorecard are in [video-clip-gate.md](evaluation/video-clip-gate.md).
 
 ## Remaining preview/release evidence
 
-- Preview status on 2026-10-31: no app server or Tailscale daemon was running in this worktree, so the phone preview is unavailable. This is not a production deployment.
-- Rebuild and inspect the current phone-accessible preview after implementation changes; do not use the preview to trigger live analysis.
+- Production on 2026-11-02: `metainspect:mvp13` (revision `metainspect-app--0000015`, Healthy, 100% traffic) behind the pilot passcode gate. This is a limited pilot deployment, not a public launch.
+- Re-verify one live room end to end from a physical phone on LTE after every redeploy (film, analysis, report, sign-off, export download).
 - Current local check results and visual-review limits are recorded in `docs/REVIEW_AND_CI.md` and `design-qa.md`.
-- Compare equivalent populated Capture, Draft Review, and Sign-Off & Export states with the supplied mobile reference. The current browser review kept evaluator decisions and sign-off empty.
+- Compare equivalent populated Capture, Draft Review, and Sign-Off & Export states with the supplied mobile reference.
 - Confirm whether LAHSA/provider has a newer Form 1083 than the currently linked FY 2022–23 file before representing the modeled catalog as current.
-- The owner directed an implementation handoff to Muse Code on 2026-10-31. The handoff package is `docs/MUSE_CODE_HANDOFF.md`; no Muse Code dispatcher is available in this Codex session, so no start is claimed. Native SDD review/evidence remains separate and is reported only if the plugin records it.
-- Keep the video-clip gate open until qualifying footage produces a reviewable result and its scorecard is completed.
+- The owner delegated the implementation sprint to Muse Code on 2026-10-31 (`docs/MUSE_CODE_HANDOFF.md`). Native SDD review/evidence remains separate and is reported only if the plugin records it.
+- No timed practitioner workflow runs exist; do not claim measured time savings or coverage rates.

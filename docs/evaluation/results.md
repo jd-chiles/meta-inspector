@@ -1,25 +1,42 @@
 # Evaluation results (REQ-011)
 
-## Current execution snapshot — 2026-10-31
+## Current execution snapshot — 2026-11-02
 
-There are still zero completed measured workflow evaluations and no
-practitioner validation. The owner supplied staged/mock kitchen and bathroom
-clips and authorized provider processing. These were live processing attempts,
-not scored evaluation runs: the kitchen segment request returned HTTP 504 after
-about 210.9 seconds; the bathroom segment endpoint returned HTTP 200 after
-about 92.6 seconds, but the browser request was canceled before saving the
-result. Muse mapping did not run, and tracking, mapping, timestamp/still
-coverage, and indoor-light misses remain unmeasured. See
-`video-clip-gate.md` for the sanitized attempt record and open scorecard.
+Live model path (server route calls, owner-authorized staged clips): the
+kitchen (~23.1 s) and bathroom (~9.7 s) clips both complete segment+map
+end to end on production (`metainspect:mvp13`, revision
+`metainspect-app--0000015`): kitchen segment 200 in 105.5 s with 8
+candidates, map 200 in 15.1 s with 4 proposals (all A); bathroom
+segment 200 in 52.4 s with 6 candidates, map 200 in 14.0 s with 2
+proposals. Media hashes matched submitted bytes both rooms; no
+retries. A local `test:live` on the kitchen clip also exits 0
+(~192 s end to end, connectivity only, `videoQuality: not-assessed`).
 
-The clips were separate room videos of about 23.1 seconds and 9.7 seconds,
-respectively, totaling about 32.8 seconds. The current gate asks for one clip
-of 30 seconds or less with visible faucet, fan, lock, and detector evidence;
-the delivered footage and attempts do not establish that coverage. No raw
-video or credentials are stored in the repository.
+Model-evidence scoring (owner-authorized two-room variance, scored
+2026-10-31–11-01 from hash-verified served stills and source decodes):
+tracking, mapping, timestamp, still-identity, and human-review-boundary
+rows pass on observed cues (bathroom toilet/faucet, kitchen
+sink/refuse/wall/countertop). Recorded cautions, not failures: one
+kitchen observation overstates visible evidence ("water stream" not in
+cited stills), late-clip concept labels are semantically loose, vent
+fan/AC are outside the kitchen prompt scope, and stove/detector moments
+are absent from the footage. Full rows in `video-clip-gate.md`; no clip
+bytes, credentials, file IDs, or provider bodies are stored in the
+repository.
 
-The check results in `docs/REVIEW_AND_CI.md` are from an earlier source
-snapshot and have not been rerun on the current dirty tree.
+Still open: the authored single-clip gate (one clip ≤30 s showing
+faucet, fan, lock, and detector) is unchanged and unevaluated — the
+supplied two-room set does not establish lock/detector coverage. No
+timed practitioner workflow runs exist, so workflow measures (staff
+minutes, coverage, retakes, edits, manual-check counts) remain
+`unmeasured` and the workflow sample size is zero sessions. Provider
+acceptance of exports and HMIS compatibility remain unverified.
+
+Current local checks on the deployed tree (`101a67f`): docs validator
+exit 0; lint 0 errors (3 pre-existing warnings); typecheck clean; unit
+471 passed / 3 skipped (37 files); browser 41/41 with no flakes or
+skips; build green; CI success on the pushed commit. Fixture checks
+prove local behavior only, not live inference.
 
 ## Historical execution snapshot — 2026-10-29
 

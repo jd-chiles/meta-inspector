@@ -1,5 +1,33 @@
 # Codex review and CI
 
+## Current status update — 2026-11-02 (mvp13 sprint)
+
+Commit `101a67f` (single-entrance tour, capture dashboard, live-proof
+removal) is pushed to `main`; CI run `41470720205` success (4m30s).
+Executed on the deployed tree this session, worktree root:
+
+- `node scripts/verify-sdd.mjs`: pass — 15 requirements, 11 active
+  acyclic tasks, 7 named checks.
+- `npm run lint`: 0 errors, 3 pre-existing warnings.
+- `npm run typecheck`: clean.
+- `npm run test:unit`: 471 passed / 3 skipped (37 files).
+- Full Playwright suite: 41 passed, no flakes or skips (first run
+  showed 29/12 from a spec-helper defect — open guide panel covered
+  content actions; helper now dismisses the guide; fixed, no app
+  change).
+- `npm run build`: green. `metainspect:mvp13`
+  (sha256:028f6077…) deployed as `metainspect-app--0000015` at 100%,
+  Healthy; local smoke (307 gate, headers, FFmpeg 9.0.2, non-root)
+  and live $0 checks pass.
+- Prod live re-proof: kitchen + bathroom segment+map 200/200 with
+  hash-matched media, voice manifest 40 clips + sample clip 200; 2
+  segments + 2 maps, no retries. Owner confirms spend on the
+  provider dashboard.
+
+Results below this section are historical. Release stays Not ready:
+owner LTE phone run, recipient acceptance, custom domain, quota
+alerts, ops owner, and native SDD evidence remain open.
+
 ## Fresh independent reviews — 2026-11-01 (Muse Code, Slice 6)
 
 Read-only reviews of the current tree (commit `4fe3218` plus the

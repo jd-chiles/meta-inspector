@@ -243,6 +243,29 @@ provider ($0). The owner confirms on the provider dashboard against the
 $10 approval. No clip bytes, credentials, file IDs, tokens, or provider
 bodies are recorded here or in the repository.
 
+## Run record — 2026-11-02 mvp13 prod re-proof (Muse Code)
+
+Method: direct route calls against `metainspect-app--0000015`
+(image `metainspect:mvp13`, sha256:028f6077…): unlock via pilot
+passcode, then multipart stage=segment and identity/token-only
+stage=map with browser-identical `Origin`, both staged clips, no
+browser, no retries. User-authorized under the sprint plan.
+
+Results: kitchen segment 200 in 105.5 s (8 candidates, 24 samples,
+media hash matched), map 200 in 15.1 s (4 proposals, all A:
+demo-water-supply 0.85, demo-item-10 0.72, demo-item-05 0.70,
+demo-item-11 0.78). Bathroom segment 200 in 52.4 s (6 candidates, 10
+samples, hash matched), map 200 in 14.0 s (2 proposals:
+demo-water-supply A 0.75, demo-item-08 A 0.90). Voice: manifest 200
+(40 clips), sample clip 200 audio/mpeg; invalid speak body fails 400
+INVALID_REQUEST (validation, not origin rejection — the browser
+origin path is open). No 502s, no retries.
+
+Spend: two billed segments + two billed maps. The owner confirms on
+the provider dashboard against the $10 approval. No clip bytes,
+credentials, file IDs, tokens, or provider bodies are recorded here
+or in the repository.
+
 ## Room-set scorecard (owner variance)
 
 Scored from served still bytes (SHA-256-verified), segment/map payloads, and

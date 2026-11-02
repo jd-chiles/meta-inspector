@@ -1,6 +1,26 @@
 # Release record
 
-Status: Not ready (2026-11-02 mvp12 one-voice fix deployed; see latest entry)
+Status: Not ready (2026-11-02 mvp13 single-entrance + dashboard deployed; see latest entry)
+
+## mvp13 single-entrance + dashboard — 2026-11-02 (Muse Code)
+
+Status stays Not ready. Owner-approved redeploy of `101a67f`
+(single-entrance guided tour, capture dashboard, live-proof removal,
+spec-helper guide dismissal): built
+`metainspectprod.azurecr.io/metainspect:mvp13`
+(sha256:028f6077…), smoke-tested locally (307 gate, baseline headers,
+FFmpeg 9.0.2, non-root `app`), pushed after `az acr login`, updated
+`metainspect-app` — revision `metainspect-app--0000015` active at 100%
+traffic, Healthy. Verified live $0: root 307 to /unlock (21.6 s cold /
+~0.2 s warm), manifest 200. Build note: ffmpeg.org still unreachable
+from all networks here, so the image reuses the verified `/opt/ffmpeg`
+9.0.2 bytes from the local mvp12 image; Dockerfile workaround reverted,
+`git status` clean for it. Prod live re-proof on this revision is
+green (kitchen 200/200 in 105.5/15.1 s, bathroom 200/200 in 52.4/14.0 s,
+voice manifest 40 clips + sample clip 200; 2 segments + 2 maps, no
+retries — see `video-clip-gate.md`). Remaining: owner LTE phone run,
+recipient acceptance, custom domain, quota alerts, ops owner, native
+evidence. Not task acceptance or a release decision.
 
 ## mvp12 one-voice fix — 2026-11-02 (Muse Code)
 
