@@ -711,6 +711,8 @@ test.describe("Move-in Ready mobile flow", () => {
     await expect(roomPicker).toBeVisible();
     await expect(roomPicker).toHaveAttribute("aria-expanded", "false");
     await expect(page.getByRole("group", { name: "Room selection" })).toBeHidden();
+    // Live-proof capture was removed: drafts come from room footage only.
+    await expect(page.getByTestId("live-proof-card")).toHaveCount(0);
     await page.screenshot({ path: "artifacts/design-qa/capture-360.png" });
 
     await roomPicker.click();

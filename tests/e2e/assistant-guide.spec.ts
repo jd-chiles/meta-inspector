@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-import { expectNoViewportOverflow } from "./navigation";
+import { expectNoViewportOverflow, goToCapture } from "./navigation";
 
 test.use({
   storageState: { cookies: [], origins: [] },
@@ -57,7 +57,7 @@ test("home offers a fresh inspection when progress exists", async ({ page }) => 
   const home = page.getByTestId("inspection-home");
   await expect(home.getByRole("button", { name: "New inspection", exact: true })).toBeVisible();
 
-  await home.getByRole("button", { name: "Continue", exact: false }).first().click();
+  await goToCapture(page);
   const setupToggle = page.getByTestId("capture-setup-toggle");
   if (await setupToggle.getAttribute("aria-expanded") !== "true") await setupToggle.click();
   await page.getByLabel("Unit pseudonym").fill("Staged Fresh Start Unit");
@@ -81,7 +81,7 @@ test("saved inspections list, switch, and delete without losing the other", asyn
   await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
   const home = page.getByTestId("inspection-home");
 
-  await home.getByRole("button", { name: "Continue", exact: false }).first().click();
+  await goToCapture(page);
   const setupToggle = page.getByTestId("capture-setup-toggle");
   if (await setupToggle.getAttribute("aria-expanded") !== "true") await setupToggle.click();
   await page.getByLabel("Unit pseudonym").fill("Unit Alpha");

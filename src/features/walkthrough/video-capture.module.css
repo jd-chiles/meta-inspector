@@ -180,6 +180,33 @@
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 7%), 0 4px 14px rgb(16 25 35 / 22%);
 }
 
+/* Capture dashboard: the viewport + record actions pin to the top of the
+   main scroller while prompts, checks, and analysis scroll beneath. */
+.viewportDock {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: 0 0.5rem 0.75rem;
+  margin: 0 -0.5rem;
+  border-bottom: 1px solid var(--video-border);
+  border-radius: 1rem;
+  background: #fff;
+}
+
+.viewportCue {
+  position: absolute;
+  right: 0.6rem;
+  bottom: 0.6rem;
+  left: 0.6rem;
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.6rem;
+  background: rgb(10 18 30 / 78%);
+  color: #fff;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
 .video {
   display: block;
   width: 100%;

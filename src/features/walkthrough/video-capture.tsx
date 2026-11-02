@@ -89,6 +89,8 @@ export interface WalkthroughVideoCaptureProps {
   children?: ReactNode;
   /** Lets the AI guide start the same capture the Start button triggers. */
   controlRef?: { current: { startCapture: () => void } | null };
+  /** Current filming cue captioned on the viewport while recording. */
+  overlayCue?: string | null;
 }
 
 export const DEFAULT_ROOM_PROMPTS: Readonly<Record<string, readonly string[]>> = {
@@ -149,6 +151,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
     onDetailsExpandedChange,
     children,
     controlRef,
+    overlayCue = null,
   } = props;
   const effectiveMaxDurationSeconds = getEffectiveRecordingDurationSeconds(maxDurationSeconds);
 
@@ -808,6 +811,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
         aria-label="Upload an MP4 or MOV room video"
       />
 
+      <div className={styles.viewportDock} data-testid="capture-viewport-dock">
       <div className={styles.previewFrame}>
         {showingLiveCamera ? (
           <>
@@ -876,6 +880,9 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
             <span className={styles.recordingActionLabel}>{recordingPaused ? "Resume" : "Pause"} · Stop &amp; save</span>
           </div>
         )}
+        {overlayCue && (
+          <p className={styles.viewportCue} role="status">{overlayCue}</p>
+        )}
       </div>
 
       {!clip && !recording && storeStatus !== "loading" && (
@@ -906,6 +913,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
           </button>
         </div>
       )}
+      </div>
 
       <section className={styles.prompts} aria-labelledby={promptsId}>
         <div className={styles.promptHeading}>

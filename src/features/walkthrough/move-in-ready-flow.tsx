@@ -85,8 +85,6 @@ import {
   type StoredRoomClipIdentity,
 } from "./inspection-store";
 import WalkthroughVideoCapture from "./video-capture";
-import LiveCapture, { type LiveElementClipResult } from "./live-capture";
-import { LIVE_ELEMENT_SPECS, buildLiveProofDraft, filmingRoomForLiveElement } from "./live-elements";
 import { rankDeficiencies, reinspectionChecklist } from "./fix-list";
 import {
   findVerifiedEvidenceStill,
@@ -282,8 +280,6 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   const [selectedRoomId, setSelectedRoomId] = useState<MoveInReadyRoomId>("kitchen");
   const [voiceTurn, setVoiceTurn] = useState<{ roomId: MoveInReadyRoomId; index: number } | null>(null);
   const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null);
-  const [liveElementId, setLiveElementId] = useState<MoveInReadyElementId | null>(null);
-  const [liveDraftPreview, setLiveDraftPreview] = useState<{ elementId: MoveInReadyElementId; draft: ModelElementProposal } | null>(null);
   const [setupVoiceStep, setSetupVoiceStep] = useState<"unit" | "baths" | null>(null);
   const [setupVoiceTranscript, setSetupVoiceTranscript] = useState<string | null>(null);
   const [activeElementId, setActiveElementId] = useState<MoveInReadyElementId | null>(MOVE_IN_READY_ELEMENT_IDS[0]);
@@ -293,6 +289,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   const [reviewNoteDraft, setReviewNoteDraft] = useState("");
   const [recordingInProgress, setRecordingInProgress] = useState(false);
   const [recordingCueIndex, setRecordingCueIndex] = useState(-1);
+  const prevClipRef = useRef<StoredVideoClip | null>(null);
   const [clips, setClips] = useState<Partial<Record<MoveInReadyRoomId, StoredVideoClip>>>({});
   const [elementClips, setElementClips] = useState<Partial<Record<MoveInReadyElementId, StoredVideoClip>>>({});
   const [clipsReadySessionId, setClipsReadySessionId] = useState<string | null>(null);
@@ -382,37 +379,6 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     persist(next);
   }, [persist]);
 
-  const handleLiveClipSaved = useCallback((elementId: MoveInReadyElementId, result: LiveElementClipResult) => {
-    const store = videoStoreRef.current;
-    const sessionId = recordRef.current?.sessionId;
-    if (store && sessionId) {
-      void store.getElement(sessionId, elementId).then((clip) => {
-        if (clip) setElementClips((current) => ({ ...current, [elementId]: clip }));
-      }).catch(() => undefined);
-    }
-    updateRecord((current) => ({
-      ...current,
-      elementClipIdentities: { ...current.elementClipIdentities, [elementId]: result.identity },
-      liveProofs: {
-        ...current.liveProofs,
-        [elementId]: {
-          trackedFrames: result.trackedFrameCount,
-          totalFrames: result.totalFrameCount,
-          transcriptExcerpt: result.transcriptExcerpt,
-          recordedAt: result.identity.capturedAt,
-        },
-      },
-    }));
-  }, [updateRecord]);
-
-  const handleLiveNeedsCheck = useCallback((elementId: MoveInReadyElementId, reason: string) => {
-    updateRecord((current) => ({
-      ...current,
-      decisions: { ...current.decisions, [elementId]: { status: "needs-human-check", note: reason.slice(0, 300) } },
-      signoff: null,
-    }));
-  }, [updateRecord]);
-
   const grantBatchConsent = useCallback(() => {
     setBatchAttested(true);
     setBatchSendConsent(true);
@@ -428,30 +394,6 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       fundingType: "lahsa",
       pseudonym: current.pseudonym.trim() || `Demo Unit ${current.sessionId.replace(/[^a-z0-9]/gi, "").slice(-4).toUpperCase() || "A"}`,
     }));
-  }, [updateRecord]);
-
-  const saveLiveDraft = useCallback((elementId: MoveInReadyElementId): boolean => {
-    const current = recordRef.current;
-    if (!current || current.proposals[elementId]) return false;
-    const spec = LIVE_ELEMENT_SPECS.find((item) => item.elementId === elementId);
-    const identity = current.elementClipIdentities[elementId];
-    const proof = current.liveProofs[elementId];
-    if (!spec || !identity || !proof) return false;
-    const filmingRoomId = filmingRoomForLiveElement(spec, current.roomIds, current.selectedRoomId);
-    const draft = buildLiveProofDraft({
-      spec,
-      sessionId: current.sessionId,
-      roomLabel: roomLabel(filmingRoomId),
-      identity,
-      proof,
-      analysisId: makeId("analysis"),
-    });
-    if (!draft) return false;
-    updateRecord((latest) => ({
-      ...latest,
-      proposals: { ...latest.proposals, [elementId]: draft },
-    }));
-    return true;
   }, [updateRecord]);
 
   const markNeedsCheck = useCallback((elementId: MoveInReadyElementId, note: string) => {
@@ -597,7 +539,10 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     setClipsReadySessionId(null);
     setUnreadableClipRooms([]);
     const loadRoomIds = recordRef.current?.roomIds ?? [...LEGACY_DEFAULT_ROOM_IDS];
-    const loadElementIds = LIVE_ELEMENT_SPECS.map((spec) => spec.elementId);
+    // Live-proof capture is removed; previously saved element clips still
+    // load so old records reconcile and display their evidence.
+    const loadElementIds = Object.keys(recordRef.current?.elementClipIdentities ?? {})
+      .filter((id): id is MoveInReadyElementId => isMoveInReadyElementId(id));
     void Promise.all([
       ...loadRoomIds.map(async (roomId) => {
         try {
@@ -629,7 +574,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
           const { elementId, clip, videoHash, failed } = row;
           const existing = reconciled.elementClipIdentities[elementId];
           if (failed) {
-            setStorageWarning("A saved live proof clip could not be checked. Its evidence stays hidden until local storage can be read.");
+            setStorageWarning("A saved element clip could not be checked. Its evidence stays hidden until local storage can be read.");
             continue;
           }
           if (!clip || !videoHash || clip.sourceSha256 !== videoHash ||
@@ -1109,6 +1054,20 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       cancelSpeech();
     };
   }, [recordingInProgress, selectedRoomId, assistantOpen, voiceOn]);
+
+  // Dashboard: when a clip lands, bring the yes/no checks into view under
+  // the pinned viewport. Fires only on the null-to-clip transition.
+  useEffect(() => {
+    const clip = clips[selectedRoomId] ?? null;
+    const had = prevClipRef.current !== null;
+    prevClipRef.current = clip;
+    if (!clip || had || step !== "capture") return;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    document.getElementById("room-checks")?.scrollIntoView({
+      behavior: reduceMotion ? "auto" : "smooth",
+      block: "nearest",
+    });
+  }, [clips, selectedRoomId, step]);
 
   const handleClipChange = useCallback(async (clip: StoredVideoClip | null, roomIdValue: string) => {
     if (!isMoveInReadyRoomId(roomIdValue)) return;
@@ -2496,18 +2455,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                       data-testid="start-guided-tour"
                       onClick={() => changeStep("guided")}
                     >
-                      <Mic size={17} aria-hidden="true" /> Start guided inspection
-                    </button>
-                    <button
-                      className={`${styles.button} ${styles.wideButton}`}
-                      type="button"
-                      onClick={() => {
-                        if (guideModel && guideModel.nextAction.type !== "none") handleGuideAction(guideModel.nextAction);
-                        else if (!canCapture) { changeStep("capture"); setSetupExpanded(true); }
-                        else changeStep("review");
-                      }}
-                    >
-                      {hasInspectionProgress ? "Continue inspection" : "Continue"} <ArrowRight size={17} aria-hidden="true" />
+                      {hasInspectionProgress ? "Continue inspection" : "Start inspection"} <ArrowRight size={17} aria-hidden="true" />
                     </button>
                     <button className={styles.secondaryButton} type="button" onClick={() => void startNewInspection()}>
                       {hasInspectionProgress ? "Start new inspection" : "New inspection"}
@@ -2648,7 +2596,6 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   capturedRoomCount,
                   analysisMode,
                   online,
-                  videoStore: videoStoreRef.current,
                   voiceTranscript,
                   onVoiceTranscript: setVoiceTranscript,
                   batchActive,
@@ -2675,9 +2622,6 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   grantBatchConsent,
                   startBatchAnalysis,
                   cancelBatchAnalysis,
-                  saveLiveDraft,
-                  onLiveClipSaved: (elementId, result) => handleLiveClipSaved(elementId, result),
-                  onLiveNeedsCheck: (elementId, reason) => handleLiveNeedsCheck(elementId, reason),
                   reviewProposalDraft,
                   confirmProposalDraft,
                   markNeedsCheck,
@@ -2817,127 +2761,6 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                       )}
                     </div>
                   )}
-                  {canCapture && capturedRoomCount > 0 && (
-                    <div className={styles.card} data-testid="live-proof-card">
-                      <strong>Live proof clips</strong>
-                      <p className={styles.cardLead}>
-                        Film one 5-10 second tracked clip per provable item. The AI watches the {` `}
-                        faucet, fan, lock, and detector while you film, then attaches the clip to the checklist.
-                      </p>
-                      {LIVE_ELEMENT_SPECS.map((spec) => {
-                        const element = MOVE_IN_READY_ELEMENTS.find((item) => item.id === spec.elementId);
-                        const identity = record.elementClipIdentities[spec.elementId];
-                        const proof = record.liveProofs[spec.elementId];
-                        const proposal = record.proposals[spec.elementId];
-                        const decision = record.decisions[spec.elementId];
-                        const status = proposal
-                          ? `Draft ${proposal.state === "needs-human-check" ? "check" : `AI ${proposal.modelSuggestion}`}`
-                          : identity
-                            ? `Saved ${identity.durationSeconds}s`
-                            : decision?.status === "needs-human-check" ? "Check" : "Open";
-                        const open = liveElementId === spec.elementId;
-                        return (
-                          <div className={styles.buttonRow} key={spec.elementId} data-testid={`live-proof-row-${spec.elementId}`}>
-                            <span className={styles.statusText} role="status">
-                              {element?.label ?? spec.elementId} · {status}
-                              {proof ? ` · ${proof.trackedFrames}/${proof.totalFrames} frames` : ""}
-                              {proof?.transcriptExcerpt ? ` · Heard: ${proof.transcriptExcerpt}` : ""}
-                            </span>
-                            {identity && proof && !proposal && (
-                              <button
-                                className={styles.secondaryButton}
-                                type="button"
-                                data-testid={`live-draft-${spec.elementId}`}
-                                onClick={() => {
-                                  const filmingRoomId = filmingRoomForLiveElement(spec, record.roomIds, selectedRoomId);
-                                  const draft = buildLiveProofDraft({
-                                    spec,
-                                    sessionId,
-                                    roomLabel: rooms.find((room) => room.id === filmingRoomId)?.label ?? filmingRoomId,
-                                    identity,
-                                    proof,
-                                    analysisId: makeId("analysis"),
-                                  });
-                                  setLiveDraftPreview(draft ? { elementId: spec.elementId, draft } : null);
-                                }}
-                              >
-                                Preview draft
-                              </button>
-                            )}
-                            <button
-                              className={styles.secondaryButton}
-                              type="button"
-                              onClick={() => setLiveElementId(open ? null : spec.elementId)}
-                            >
-                              {open ? "Close camera" : identity ? "Refilm proof" : "Film proof"}
-                            </button>
-                          </div>
-                        );
-                      })}
-                      {liveDraftPreview && (
-                        <div className={styles.callout} role="status" data-testid="live-draft-preview">
-                          <p><strong>Draft note (unreviewed, not saved yet).</strong> {liveDraftPreview.draft.observation}</p>
-                          <p className={styles.helpText}>
-                            Confidence {liveDraftPreview.draft.confidence} · still at {Math.round((liveDraftPreview.draft.evidence[0]?.timestampMs ?? 0) / 1000)}s ·
-                            {liveDraftPreview.draft.state === "needs-human-check" ? " needs a human check" : " ready to confirm in Review"}
-                          </p>
-                          <div className={styles.buttonRow}>
-                            <button
-                              className={styles.button}
-                              type="button"
-                              data-testid="live-draft-save"
-                              onClick={() => {
-                                const preview = liveDraftPreview;
-                                setLiveDraftPreview(null);
-                                updateRecord((current) => ({
-                                  ...current,
-                                  proposals: { ...current.proposals, [preview.elementId]: preview.draft },
-                                }));
-                              }}
-                            >
-                              Save draft
-                            </button>
-                            <button
-                              className={styles.secondaryButton}
-                              type="button"
-                              onClick={() => setLiveDraftPreview(null)}
-                            >
-                              Discard
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                      {(() => {
-                        const spec = LIVE_ELEMENT_SPECS.find((item) => item.elementId === liveElementId);
-                        const store = videoStoreRef.current;
-                        if (!spec || !store) return null;
-                        const element = MOVE_IN_READY_ELEMENTS.find((item) => item.id === spec.elementId);
-                        const filmingRoomId = filmingRoomForLiveElement(spec, record.roomIds, selectedRoomId);
-                        const filmingRoomLabel = rooms.find((room) => room.id === filmingRoomId)?.label ?? filmingRoomId;
-                        return (
-                          <LiveCapture
-                            key={`${sessionId}:${spec.elementId}`}
-                            sessionId={sessionId}
-                            elementId={spec.elementId}
-                            elementLabel={element?.label ?? spec.elementId}
-                            concept={spec.concept}
-                            conceptLabel={spec.conceptLabel}
-                            prompt={spec.prompt}
-                            recoveryHint={spec.recoveryHint}
-                            roomId={filmingRoomId}
-                            roomLabel={filmingRoomLabel}
-                            schemaVersion={record.schemaVersion}
-                            catalogVersion={record.catalogVersion}
-                            clipStore={store}
-                            transcriptLines={voiceTranscript ? [voiceTranscript] : []}
-                            existingIdentity={record.elementClipIdentities[spec.elementId]}
-                            onSaved={(result) => handleLiveClipSaved(spec.elementId, result)}
-                            onNeedsHumanCheck={(reason) => handleLiveNeedsCheck(spec.elementId, reason)}
-                          />
-                        );
-                      })()}
-                    </div>
-                  )}
                   <WalkthroughVideoCapture
                     key={`${sessionId}:${selectedRoomId}`}
                     controlRef={captureControlRef}
@@ -2947,6 +2770,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                     capturedRoomCount={capturedRoomCount}
                     capturedRoomIds={capturedRoomIds}
                     onRecordingStateChange={setRecordingInProgress}
+                    overlayCue={recordingInProgress ? filmingScriptForRoom(selectedRoomId)[recordingCueIndex] ?? null : null}
                     completedPromptIds={record.completedPromptIdsByRoom[selectedRoomId] ?? []}
                     onPromptCompletionChange={(promptId, completed) => {
                       updateRecord((current) => ({
@@ -3029,7 +2853,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                     const turn = voiceTurn?.roomId === selectedRoomId ? voiceTurn : null;
                     const turnQuestion = turn ? questions[turn.index] : undefined;
                     return (
-                      <section className={styles.card} aria-label={`In-person checks for ${roomLabel(selectedRoomId)}`} data-testid="room-checks">
+                      <section id="room-checks" className={styles.card} aria-label={`In-person checks for ${roomLabel(selectedRoomId)}`} data-testid="room-checks">
                         <div className={styles.cardTitleRow}><div>
                           <h2>In-person checks · {roomLabel(selectedRoomId)}</h2>
                           <p className={styles.cardLead}>The camera can&apos;t prove these. Answer by voice or tap — answers attach to your decisions.</p>

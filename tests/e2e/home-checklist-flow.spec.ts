@@ -20,9 +20,11 @@ test("home leads through film into the requirement-by-requirement checklist", as
   await expect(home.getByRole("list", { name: "Inspection progress" }).getByRole("listitem")).toHaveCount(5);
   await expect(page.getByTestId("saved-inspections").getByRole("listitem")).toHaveCount(1);
   await expect(home.getByText("0 of 11 decided", { exact: false }).first()).toBeVisible();
+  // One entrance: the single Start button opens the guided tour.
+  await expect(home.getByTestId("start-guided-tour")).toHaveText(/Start inspection/);
+  await expect(home.getByRole("button", { name: "Continue", exact: true })).toHaveCount(0);
 
-  await home.getByRole("button", { name: "Continue", exact: false }).first().click();
-  await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
+  await goToCapture(page);
   const setupToggle = page.getByTestId("capture-setup-toggle");
   if (await setupToggle.getAttribute("aria-expanded") !== "true") await setupToggle.click();
   await page.getByLabel("Unit pseudonym").fill("Staged Home Flow Unit");

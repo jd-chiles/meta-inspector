@@ -27,8 +27,7 @@ import {
   type MoveInReadyUnitType,
 } from "../../domain/move-in-ready";
 import type { MoveInReadyInspection } from "./inspection-store";
-import type { StoredVideoClip, VideoClipStore } from "./video-store";
-import { LIVE_ELEMENT_SPECS, filmingRoomForLiveElement } from "./live-elements";
+import type { StoredVideoClip } from "./video-store";
 import { fixListTier, reinspectionChecklist } from "./fix-list";
 import { SETUP_VOICE_QUESTIONS, TOUR_REPROMPTS, VOICE_ROOM_CHECKS } from "./voice-checks";
 import { filmingScriptForRoom } from "./assistant-script";
@@ -37,7 +36,6 @@ import { parseBathCount, parseUnitType, parseYesNo } from "./voice-parse";
 import { speakPrompt } from "./voice-conversation";
 import VoicePrompt, { type VoicePromptPhase } from "./voice-prompt";
 import WalkthroughVideoCapture from "./video-capture";
-import LiveCapture, { type LiveElementClipResult } from "./live-capture";
 import {
   deriveTourNode,
   elementLabel,
@@ -60,7 +58,6 @@ export interface GuidedTourBindings {
   capturedRoomCount: number;
   analysisMode: TourAnalysisMode;
   online: boolean;
-  videoStore: VideoClipStore | null;
   voiceTranscript: string | null;
   onVoiceTranscript: (text: string | null) => void;
   batchActive: boolean;
@@ -78,9 +75,6 @@ export interface GuidedTourBindings {
   grantBatchConsent: () => void;
   startBatchAnalysis: () => void;
   cancelBatchAnalysis: () => void;
-  saveLiveDraft: (elementId: MoveInReadyElementId) => boolean;
-  onLiveClipSaved: (elementId: MoveInReadyElementId, result: LiveElementClipResult) => void;
-  onLiveNeedsCheck: (elementId: MoveInReadyElementId, reason: string) => void;
   reviewProposalDraft: (elementId: MoveInReadyElementId) => void;
   confirmProposalDraft: (elementId: MoveInReadyElementId) => void;
   markNeedsCheck: (elementId: MoveInReadyElementId, note: string) => void;
@@ -508,6 +502,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
               roomId={node.roomId}
               capturedRoomCount={bindings.capturedRoomCount}
               capturedRoomIds={bindings.capturedRoomIds}
+              overlayCue={tourRecording ? filmingScriptForRoom(node.roomId)[shotIndex] ?? null : null}
               onRoomChange={(roomId) => bindings.selectRoom(roomId)}
               onRecordingStateChange={(recording) => {
                 bindings.onRecordingStateChange(recording);
@@ -595,41 +590,6 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
             )}
           </div>
         )}
-
-        {node.kind === "live" && (() => {
-          const spec = LIVE_ELEMENT_SPECS.find((item) => item.elementId === node.elementId);
-          if (!spec || !bindings.videoStore) return null;
-          const filmingRoomId = filmingRoomForLiveElement(spec, bindings.record.roomIds, bindings.record.selectedRoomId);
-          return (
-            <div className={styles.filmStage}>
-              <LiveCapture
-                key={`${bindings.sessionId}:${spec.elementId}`}
-                sessionId={bindings.sessionId}
-                elementId={spec.elementId}
-                elementLabel={elementLabel(spec.elementId)}
-                concept={spec.concept}
-                conceptLabel={spec.conceptLabel}
-                prompt={spec.prompt}
-                recoveryHint={spec.recoveryHint}
-                roomId={filmingRoomId}
-                roomLabel={bindings.rooms.find((room) => room.id === filmingRoomId)?.label ?? filmingRoomId}
-                schemaVersion={bindings.record.schemaVersion}
-                catalogVersion={bindings.record.catalogVersion}
-                clipStore={bindings.videoStore}
-                transcriptLines={bindings.voiceTranscript ? [bindings.voiceTranscript] : []}
-                existingIdentity={bindings.record.elementClipIdentities[spec.elementId]}
-                onSaved={(result) => {
-                  bindings.onLiveClipSaved(spec.elementId, result);
-                  bindings.saveLiveDraft(spec.elementId);
-                }}
-                onNeedsHumanCheck={(reason) => bindings.onLiveNeedsCheck(spec.elementId, reason)}
-              />
-              <button className={flowStyles.secondaryButton} type="button" data-testid="tour-live-skip" onClick={() => skipElement(spec.elementId)}>
-                Skip this proof
-              </button>
-            </div>
-          );
-        })()}
 
         {node.kind === "review-item" && (() => {
           const proposal = bindings.record.proposals[node.elementId];

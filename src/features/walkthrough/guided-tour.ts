@@ -17,7 +17,6 @@ import {
 import type { MoveInReadyInspection } from "./inspection-store";
 import { ASSISTANT_FILMING_SCRIPTS } from "./assistant-script";
 import { FIX_LIST_TIERS } from "./fix-list";
-import { LIVE_ELEMENT_SPECS } from "./live-elements";
 import { VOICE_ROOM_CHECKS } from "./voice-checks";
 
 export type TourAnalysisMode = "live" | "fixture" | "unconfigured";
@@ -31,7 +30,6 @@ export type GuidedTourNode =
   | { kind: "film-room"; roomId: MoveInReadyRoomId }
   | { kind: "room-check"; roomId: MoveInReadyRoomId; index: number }
   | { kind: "analyze" }
-  | { kind: "live"; elementId: MoveInReadyElementId }
   | { kind: "review-item"; elementId: MoveInReadyElementId }
   | { kind: "finish" };
 
@@ -62,8 +60,6 @@ export function tourNodeKey(node: GuidedTourNode): string {
       return `film-room:${node.roomId}`;
     case "room-check":
       return `room-check:${node.roomId}:${node.index}`;
-    case "live":
-      return `live:${node.elementId}`;
     case "review-item":
       return `review-item:${node.elementId}`;
     default:
@@ -83,16 +79,6 @@ function firstUnansweredCheck(
     (question) => !answers.some((entry) => entry.question === question),
   );
   return index === -1 ? null : index;
-}
-
-function isLiveElementOpen(
-  record: MoveInReadyInspection,
-  elementId: MoveInReadyElementId,
-  skipped: ReadonlySet<MoveInReadyElementId>,
-): boolean {
-  if (skipped.has(elementId)) return false;
-  if (record.elementClipIdentities[elementId] ?? record.proposals[elementId]) return false;
-  return (record.decisions[elementId]?.status ?? "unreviewed") === "unreviewed";
 }
 
 export function deriveTourNode(input: GuidedTourInput): GuidedTourNode {
@@ -115,10 +101,6 @@ export function deriveTourNode(input: GuidedTourInput): GuidedTourNode {
   }
 
   if (!input.analysisSettled) return { kind: "analyze" };
-
-  const liveSpec = LIVE_ELEMENT_SPECS.find((spec) =>
-    isLiveElementOpen(record, spec.elementId, input.skippedElementIds));
-  if (liveSpec) return { kind: "live", elementId: liveSpec.elementId };
 
   if (!record.evaluatorName.trim()) return { kind: "ask-name" };
 
@@ -189,13 +171,6 @@ export function tourScriptForNode(node: GuidedTourNode, context: TourScriptConte
     }
     case "analyze":
       return "Every room is filmed. Sending your clips for A I analysis now. This takes a few minutes. Stay on this screen.";
-    case "live": {
-      const spec = LIVE_ELEMENT_SPECS.find((item) => item.elementId === node.elementId);
-      const label = elementLabel(node.elementId);
-      const position = LIVE_ELEMENT_SPECS.findIndex((item) => item.elementId === node.elementId) + 1;
-      if (!spec) return `Next proof, ${position} of ${LIVE_ELEMENT_SPECS.length}: ${label}.`;
-      return `Next proof, ${position} of ${LIVE_ELEMENT_SPECS.length}: ${label}. ${spec.prompt} Tap Start live proof, then Record.`;
-    }
     case "review-item": {
       const proposal = record.proposals[node.elementId];
       const label = elementLabel(node.elementId);
@@ -237,12 +212,6 @@ export function tourProgress(
     (record.evaluatorName.trim() ? 1 : 0) +
     (record.unitType === "" ? 0 : 1) +
     (record.fundingType === "lahsa" ? 1 : 0);
-  const liveDone = LIVE_ELEMENT_SPECS.filter((spec) =>
-    Boolean(
-      record.elementClipIdentities[spec.elementId] ??
-      record.proposals[spec.elementId] ??
-      (record.decisions[spec.elementId]?.status !== "unreviewed" ? true : undefined),
-    )).length;
   const reviewDone = MOVE_IN_READY_ELEMENTS.filter(
     (element) => (record.decisions[element.id]?.status ?? "unreviewed") !== "unreviewed",
   ).length;
@@ -250,7 +219,6 @@ export function tourProgress(
     { key: "setup", label: "Setup", done: Math.min(setupDone, 3), total: 3 },
     { key: "film", label: "Film", done: Math.min(capturedRoomCount, record.roomIds.length), total: Math.max(record.roomIds.length, 1) },
     { key: "analyze", label: "Analyze", done: analysisSettled ? 1 : 0, total: 1 },
-    { key: "proofs", label: "Proofs", done: liveDone, total: LIVE_ELEMENT_SPECS.length },
     { key: "review", label: "Review", done: reviewDone, total: MOVE_IN_READY_ELEMENTS.length },
   ];
 }

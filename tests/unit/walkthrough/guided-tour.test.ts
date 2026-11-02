@@ -104,33 +104,29 @@ describe("deriveTourNode", () => {
       capturedRoomIds: [...record.roomIds],
       analysisSettled: false,
     }))).toEqual({ kind: "analyze" });
+    // Live-proof stops are removed: review drafts come from room footage,
+    // and undecided elements without drafts finish to manual review.
     expect(deriveTourNode(baseInput({
       record: filmed,
       capturedRoomIds: [...record.roomIds],
       analysisSettled: true,
-    }))).toEqual({ kind: "live", elementId: "demo-water-supply" });
+    }))).toEqual({ kind: "finish" });
   });
 
   it("defers ask-name until review and skips it when already known", () => {
     const record = withSetup(createInitialInspectionRecord("tour-session-7"));
     const noRooms = { ...record, roomIds: [] as MoveInReadyInspection["roomIds"] };
-    const skippedAllLive = new Set([
-      "demo-water-supply",
-      "demo-interior-air",
-      "demo-item-07",
-      "demo-smoke-co",
-    ] as const);
-    expect(deriveTourNode(baseInput({ record: noRooms, skippedElementIds: new Set(skippedAllLive) })).kind)
+    expect(deriveTourNode(baseInput({ record: noRooms })).kind)
       .toBe("finish");
     const unnamed = { ...noRooms, evaluatorName: "" };
-    expect(deriveTourNode(baseInput({ record: unnamed, skippedElementIds: new Set(skippedAllLive) })))
+    expect(deriveTourNode(baseInput({ record: unnamed })))
       .toEqual({ kind: "ask-name" });
   });
 
   it("reviews proposals in risk order and finishes when decided", () => {
     const record = withSetup(createInitialInspectionRecord("tour-session-8"));
     const noRooms = { ...record, roomIds: [] as MoveInReadyInspection["roomIds"] };
-    const skippedOtherLive = new Set([
+    const skippedOthers = new Set([
       "demo-water-supply",
       "demo-interior-air",
       "demo-item-07",
@@ -158,9 +154,9 @@ describe("deriveTourNode", () => {
       ...noRooms,
       proposals: { "demo-smoke-co": proposal },
     };
-    expect(deriveTourNode(baseInput({ record: withProposal, skippedElementIds: new Set(skippedOtherLive) })))
+    expect(deriveTourNode(baseInput({ record: withProposal, skippedElementIds: new Set(skippedOthers) })))
       .toEqual({ kind: "review-item", elementId: "demo-smoke-co" });
-    expect(guidedReviewQueue(withProposal, new Set(skippedOtherLive))).toEqual(["demo-smoke-co"]);
+    expect(guidedReviewQueue(withProposal, new Set(skippedOthers))).toEqual(["demo-smoke-co"]);
     const smokeDecision: EvaluatorDecision = {
       status: "D",
       evaluatorName: "Rae Evaluator",
@@ -180,7 +176,7 @@ describe("deriveTourNode", () => {
       ...withProposal,
       decisions: { ...withProposal.decisions, "demo-smoke-co": smokeDecision },
     };
-    expect(deriveTourNode(baseInput({ record: decided, skippedElementIds: new Set(skippedOtherLive) })).kind)
+    expect(deriveTourNode(baseInput({ record: decided, skippedElementIds: new Set(skippedOthers) })).kind)
       .toBe("finish");
   });
 

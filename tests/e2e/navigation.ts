@@ -1,6 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 
-/** Film is reached from Home (Continue) or by contextual back on mobile. */
+/** Film is reached from Home (guide action) or by contextual back on mobile. */
 export async function goToCapture(page: Page): Promise<void> {
   const captureHeading = page.getByRole("heading", { level: 1, name: "Film the unit" });
   for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -8,7 +8,20 @@ export async function goToCapture(page: Page): Promise<void> {
 
     const home = page.getByTestId("inspection-home");
     if (await home.isVisible()) {
-      await home.getByRole("button", { name: "Continue", exact: false }).first().click();
+      // Home's single entrance opens the guided tour; specs reach the
+      // manual capture screen through the AI guide's next action instead.
+      await page.getByRole("navigation", { name: "Main navigation" })
+        .getByRole("button", { name: "Guide", exact: true }).click();
+      const guide = page.getByTestId("assistant-guide");
+      await expect(guide).toBeVisible();
+      const toggle = guide.getByTestId("assistant-guide-toggle");
+      if (await toggle.getAttribute("aria-expanded") !== "true") await toggle.click();
+      await guide.locator("button[class*='primaryButton']").first().click();
+      // The guide stays open after its action runs and its panel covers
+      // content actions on later screens. Manual capture never shows it,
+      // so dismiss it to restore the real flow state.
+      const closeGuide = page.getByRole("button", { name: "Close the AI inspection guide", exact: true });
+      if (await closeGuide.isVisible()) await closeGuide.click();
       continue;
     }
 
