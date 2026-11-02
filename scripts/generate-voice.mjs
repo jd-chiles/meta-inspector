@@ -78,7 +78,9 @@ async function main() {
     process.exit(1);
   }
   await mkdir(VOICE_DIR, { recursive: true });
-  let manifest = { version: 1, voiceId, model, clips: {} };
+  // The manifest pins a voice hash, never the raw id: it ships in public/.
+  const voiceHash = sha256Hex(Buffer.from(voiceId, "utf8"));
+  let manifest = { version: 1, voiceHash, model, clips: {} };
   try {
     const raw = await readFile(MANIFEST_PATH, "utf8");
     const parsed = JSON.parse(raw);
@@ -86,12 +88,12 @@ async function main() {
   } catch {
     // Missing or unreadable manifest: regenerate everything.
   }
-  if (manifest.voiceId !== voiceId || manifest.model !== model) {
+  if (manifest.voiceHash !== voiceHash || manifest.model !== model) {
     if (!force) {
-      console.error(`Manifest pins voice ${manifest.voiceId}/${manifest.model}; rerun with --force to regenerate for ${voiceId}/${model}.`);
+      console.error("Manifest pins a different voice or model; rerun with --force to regenerate.");
       process.exit(1);
     }
-    manifest = { version: 1, voiceId, model, clips: {} };
+    manifest = { version: 1, voiceHash, model, clips: {} };
   }
   const clips = {};
   let synthesized = 0;
@@ -119,7 +121,7 @@ async function main() {
     synthesized += 1;
     console.log(`synthesized ${file} (${audio.byteLength} bytes): ${text.slice(0, 60)}…`);
   }
-  await writeFile(MANIFEST_PATH, `${JSON.stringify({ version: 1, voiceId, model, clips }, null, 2)}\n`);
+  await writeFile(MANIFEST_PATH, `${JSON.stringify({ version: 1, voiceHash, model, clips }, null, 2)}\n`);
   console.log(`voice clips: ${synthesized} synthesized, ${reused} reused, ${VOICE_CLIP_TEXTS.length} total`);
 }
 
