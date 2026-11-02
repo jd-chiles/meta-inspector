@@ -1,6 +1,21 @@
 # Release record
 
-Status: Not ready (2026-11-01 mvp11 journey + voice clips deployed; see latest entry)
+Status: Not ready (2026-11-02 mvp12 one-voice fix deployed; see latest entry)
+
+## mvp12 one-voice fix — 2026-11-02 (Muse Code)
+
+Status stays Not ready. Owner-approved redeploy: all spoken guidance
+now uses the static-first Fish pipeline (assistant + filming cues no
+longer use the device voice), 40 clips total. Built
+`metainspectprod.azurecr.io/metainspect:mvp12`
+(sha256:20e6b9ed…), smoke-tested locally (manifest 40 clips, sample
+clip 200 audio/mpeg), pushed after `az acr login`, updated
+`metainspect-app` — revision `metainspect-app--0000014` active at 100%
+traffic, Healthy. Verified live $0: root and manifest answer 307 to
+/unlock with baseline headers. Remaining: owner LTE phone run (one
+voice everywhere is the acceptance check), recipient acceptance,
+custom domain, quota alerts, ops owner, native evidence. Not task
+acceptance or a release decision.
 
 ## mvp11 journey + voice clips — 2026-11-01 (Muse Code)
 
