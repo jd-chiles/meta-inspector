@@ -40,3 +40,10 @@ export const SETUP_VOICE_QUESTIONS = {
   unitTypeCapture: "What type of unit is this? Say studio, or how many bedrooms.",
   baths: "How many bathrooms?",
 } as const;
+
+/** Spoken reprompts when a voice answer cannot be parsed. Exact-text pinned like the setup questions. */
+export const TOUR_REPROMPTS = {
+  unitType: "I didn't catch that. Tap your unit type below.",
+  baths: "I didn't catch that. Tap the bathroom count below.",
+  yesNo: "I didn't catch that. Say yes or no, or tap an answer.",
+} as const;

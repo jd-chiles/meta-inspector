@@ -30,7 +30,7 @@ import type { MoveInReadyInspection } from "./inspection-store";
 import type { StoredVideoClip, VideoClipStore } from "./video-store";
 import { LIVE_ELEMENT_SPECS, filmingRoomForLiveElement } from "./live-elements";
 import { fixListTier, reinspectionChecklist } from "./fix-list";
-import { SETUP_VOICE_QUESTIONS, VOICE_ROOM_CHECKS } from "./voice-checks";
+import { SETUP_VOICE_QUESTIONS, TOUR_REPROMPTS, VOICE_ROOM_CHECKS } from "./voice-checks";
 import { filmingScriptForRoom } from "./assistant-script";
 import { parseRoomId } from "../../domain/move-in-ready";
 import { parseBathCount, parseUnitType, parseYesNo } from "./voice-parse";
@@ -298,7 +298,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
       bindings.setUnitType(parsed);
       return;
     }
-    if (text.trim()) sayNow("I didn't catch that. Tap your unit type below.");
+    if (text.trim()) sayNow(TOUR_REPROMPTS.unitType);
   }, [bindings, sayNow]);
 
   const handleBathsTranscript = useCallback((text: string) => {
@@ -309,7 +309,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
       setBathsConfirmed(true);
       return;
     }
-    if (text.trim()) sayNow("I didn't catch that. Tap the bathroom count below.");
+    if (text.trim()) sayNow(TOUR_REPROMPTS.baths);
   }, [bindings, sayNow]);
 
   const handleCheckTranscript = useCallback((roomId: MoveInReadyRoomId, question: string) => (text: string) => {
@@ -319,7 +319,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
       bindings.answerVoiceCheck(roomId, question, parsed);
       return;
     }
-    if (text.trim()) sayNow("I didn't catch that. Say yes or no, or tap an answer.");
+    if (text.trim()) sayNow(TOUR_REPROMPTS.yesNo);
   }, [bindings, sayNow]);
 
   return (

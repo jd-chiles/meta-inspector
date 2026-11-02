@@ -6,8 +6,8 @@ import {
   type EvaluatorDecisionSet,
 } from "../../../src/domain/move-in-ready";
 import { createInitialInspectionRecord } from "../../../src/features/walkthrough/inspection-store";
-import { ASSISTANT_FILMING_SCRIPTS } from "../../../src/features/walkthrough/assistant-script";
-import { SETUP_VOICE_QUESTIONS, VOICE_ROOM_CHECKS } from "../../../src/features/walkthrough/voice-checks";
+import { ASSISTANT_FILMING_SCRIPTS, deriveAssistantNode, type AssistantScriptInput } from "../../../src/features/walkthrough/assistant-script";
+import { SETUP_VOICE_QUESTIONS, TOUR_REPROMPTS, VOICE_ROOM_CHECKS } from "../../../src/features/walkthrough/voice-checks";
 import { tourScriptForNode } from "../../../src/features/walkthrough/guided-tour";
 import { VOICE_CLIP_TEXTS, voiceClipId } from "../../../scripts/voice-inventory.mjs";
 
@@ -33,6 +33,42 @@ describe("voice inventory contract", () => {
   it("covers every spoken setup question", () => {
     for (const question of Object.values(SETUP_VOICE_QUESTIONS)) {
       expect(CLIPS).toContain(question);
+    }
+  });
+
+  it("covers every spoken reprompt", () => {
+    for (const reprompt of Object.values(TOUR_REPROMPTS)) {
+      expect(CLIPS).toContain(reprompt);
+    }
+  });
+
+  it("covers the static assistant guide speeches", () => {
+    const base: AssistantScriptInput = {
+      fundingType: "lahsa",
+      canCapture: true,
+      pseudonym: "Demo",
+      evaluatorName: "Rae Evaluator",
+      roomIds: ["kitchen"],
+      filmedRoomIds: ["kitchen"],
+      analyzedRoomIds: ["kitchen"],
+      analyzedTotal: 1,
+      resolvedDecisions: 11,
+      nextUndecidedLabel: null,
+      nextUndecidedId: null,
+      signed: false,
+      batchActive: false,
+    };
+    const speaks = [
+      deriveAssistantNode({ ...base, fundingType: "hud" }).speak,
+      deriveAssistantNode({ ...base, canCapture: false }).speak,
+      deriveAssistantNode({ ...base, resolvedDecisions: 0, batchActive: true }).speak,
+      deriveAssistantNode({ ...base, resolvedDecisions: 0, analyzedTotal: 0 }).speak,
+      deriveAssistantNode(base).speak,
+      deriveAssistantNode({ ...base, signed: true }).speak,
+    ];
+    expect(new Set(speaks).size).toBe(6);
+    for (const speak of speaks) {
+      expect(CLIPS).toContain(speak);
     }
   });
 

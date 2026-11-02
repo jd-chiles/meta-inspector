@@ -1,8 +1,12 @@
 /**
- * Voice readout for the AI inspection guide. Speech output only: iOS Safari
- * exposes no speech-recognition API, so the user answers by tapping.
- * All functions are safe no-ops outside a browser or without TTS support.
+ * Voice readout for the AI inspection guide and filming cues. One voice
+ * everywhere: guide speech goes through the same static-first Fish pipeline
+ * as the tour (pre-generated clips, live synthesis, device fallback, then
+ * silent text). Speech output only: iOS Safari exposes no
+ * speech-recognition API, so the user answers by tapping. All functions are
+ * safe no-ops outside a browser or without voice support.
  */
+import { speakPrompt, type SpeakResult } from "./voice-conversation";
 
 const VOICE_ENABLED_KEY = "voice-guide-enabled-v1";
 
@@ -22,7 +26,24 @@ export function writeVoiceEnabled(enabled: boolean): void {
   }
 }
 
+type GuideSpeaker = (text: string, signal?: AbortSignal) => Promise<SpeakResult>;
+
+let speaker: GuideSpeaker = speakPrompt;
+let controller: AbortController | null = null;
+
+/** Test-only speaker injection (browser Audio is unavailable in unit tests). */
+export function __setGuideSpeakerForTests(next: GuideSpeaker | null): void {
+  speaker = next ?? speakPrompt;
+}
+
 export function cancelSpeech(): void {
+  try {
+    controller?.abort();
+  } catch {
+    // Aborting twice is fine.
+  }
+  controller = null;
+  // Also silence a device-voice fallback utterance, if one is in flight.
   try {
     window.speechSynthesis?.cancel();
   } catch {
@@ -32,18 +53,18 @@ export function cancelSpeech(): void {
 
 /** Speak one guide message, replacing anything currently playing. */
 export function speakText(message: string): void {
+  cancelSpeech();
   try {
-    const synthesis = window.speechSynthesis;
-    if (!synthesis || typeof SpeechSynthesisUtterance === "undefined") return;
-    synthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(message);
-    utterance.rate = 1.05;
-    const voices = synthesis.getVoices();
-    const english = voices.find((voice) => voice.lang.toLowerCase().startsWith("en") && voice.localService)
-      ?? voices.find((voice) => voice.lang.toLowerCase().startsWith("en"));
-    if (english) utterance.voice = english;
-    synthesis.speak(utterance);
+    if (typeof window === "undefined") return;
+    const next = new AbortController();
+    controller = next;
+    const signal = next.signal;
+    void speaker(message, signal)
+      .catch(() => undefined)
+      .finally(() => {
+        if (controller?.signal === signal) controller = null;
+      });
   } catch {
-    // Autoplay blocks and missing voices stay silent; the text remains.
+    // Autoplay blocks stay silent; the text remains.
   }
 }

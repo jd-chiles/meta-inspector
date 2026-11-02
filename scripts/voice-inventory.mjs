@@ -38,6 +38,25 @@ const ROOM_CHECKS = [
   "Is there a working smoke detector along this path?",
 ];
 
+const ASSISTANT_STATIC = [
+  // deriveAssistantNode speak texts that never vary (hud/setup/analyzing/
+  // analyze/signoff/done). film-* and review-* nodes embed counts and
+  // labels, so they stay live with the server cache.
+  "This unit needs the H Q S workflow. I can't run a Form 1083 here.",
+  "Hi! I'm your inspection guide. I'll walk you through the whole thing. First, let's set up the unit.",
+  "I'm analyzing your clips now. Hang tight.",
+  "All filmed. Confirm your clips are staged mock footage, and I'll analyze everything now.",
+  "All done. Let's sign off and export.",
+  "Inspection complete. Nice work.",
+];
+
+const REPROMPTS = [
+  // TOUR_REPROMPTS: spoken when a voice answer cannot be parsed.
+  "I didn't catch that. Tap your unit type below.",
+  "I didn't catch that. Tap the bathroom count below.",
+  "I didn't catch that. Say yes or no, or tap an answer.",
+];
+
 const FILMING_CUES = [
   // ASSISTANT_FILMING_SCRIPTS, raw spoken form per room type.
   "Recording. First, run the kitchen faucet and show the water flow and drainage.",
@@ -58,7 +77,7 @@ const FILMING_CUES = [
 ];
 
 /** Every static spoken string, deduplicated, in stable generation order. */
-export const VOICE_CLIP_TEXTS = [...new Set([...TOUR_STATIC, ...SETUP_QUESTIONS, ...ROOM_CHECKS, ...FILMING_CUES])];
+export const VOICE_CLIP_TEXTS = [...new Set([...TOUR_STATIC, ...SETUP_QUESTIONS, ...ROOM_CHECKS, ...FILMING_CUES, ...ASSISTANT_STATIC, ...REPROMPTS])];
 
 /** Normalize exactly like the client lookup: trim only, never reword. */
 export function normalizeVoiceText(text) {

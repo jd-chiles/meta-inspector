@@ -1,5 +1,9 @@
 # Change log
 
+## One-voice fix — November 2, 2026 (Muse Code)
+
+Owner reported the app fell back to the stock device voice. Diagnosis: two voice systems — the tour spoke Fish while assistant guidance and main-capture filming cues spoke device speechSynthesis directly. Fish credentials/quota verified healthy (single 2-char probe, 200 audio/mpeg); static manifest closed 31/31 against the inventory, so the fix was unification, not repair. Guide speech now goes through the static-first Fish pipeline with speaker injection for tests; added 6 static assistant speeches + 3 reprompts to the inventory (9 synthesized, 31 reused, 40 total, manifest pins a voice hash). Verified: lint/typecheck clean, unit 474 passed / 3 skipped, browser 42/42, build green. No REQ change; no task acceptance or native evidence.
+
 ## Guided-journey simplification — November 1, 2026 (Muse Code)
 
 Owner field-tested on a phone: journey choppy, AI popup covered half the screen, voice lagged badly. Owner picked film+confirm+sign gates, film-first-ask-after timing, and pre-generated voice. No REQ wording changed: decisions/acknowledgment/sign-off gates stand; friction was removed from capture, not from verdicts.
