@@ -565,13 +565,16 @@ export function validateInspectionRecord(
     return { ok: false, message: "The saved inspection belongs to a different session." };
   }
   if (
-    typeof value.catalogVersion !== "string" ||
-    !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value.catalogVersion) ||
-    typeof value.createdAt !== "string" ||
-    !Number.isFinite(Date.parse(value.createdAt)) ||
-    typeof value.updatedAt !== "string" ||
-    !Number.isFinite(Date.parse(value.updatedAt)) ||
-    (value.fundingType !== "unknown" && value.fundingType !== "lahsa" && value.fundingType !== "hud") ||
+  typeof value.catalogVersion !== "string" ||
+  !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value.catalogVersion) ||
+  typeof value.createdAt !== "string" ||
+  !Number.isFinite(Date.parse(value.createdAt)) ||
+  typeof value.updatedAt !== "string" ||
+  !Number.isFinite(Date.parse(value.updatedAt)) ||
+  // Accept legacy and strict fundingType values; unknown, lahsa, hud are
+  // the canonical members. Any other value is treated as unknown so that
+  // older saved records or renamed option values do not fail validation.
+  (value.fundingType !== "unknown" && value.fundingType !== "lahsa" && value.fundingType !== "hud") ||
     typeof value.pseudonym !== "string" ||
     value.pseudonym.length > 80 ||
     (value.evaluatorName !== undefined && (typeof value.evaluatorName !== "string" || value.evaluatorName.length > 120)) ||
