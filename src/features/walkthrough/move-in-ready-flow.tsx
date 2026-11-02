@@ -2660,11 +2660,25 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                     </div>
                     <div className={styles.field}>
                       <label htmlFor="capture-funding">Funding type</label>
-                      <select id="capture-funding" className={styles.formSelect} value={record.fundingType} onChange={(event) => setProfileField("fundingType", event.currentTarget.value as FundingType)}>
+                      <select id="capture-funding" className={styles.formSelect} value={record.fundingType} onChange={(event) => {
+                        const v = event.currentTarget.value;
+                        // Accept only the known FundingType union so the compiler and
+                        // runtime cannot be silently coerced by unexpected option
+                        // values. Map HUD-funded CoC/ESG into the LAHSA/FORM 1083
+                        // route here: the form requires Form 1083 for HUD-funded
+                        // CoC/ESG units while Housing Authority vouchers go to HQS.
+                        if (v === "lahsa" || v === "hud" || v === "unknown") {
+                          setProfileField("fundingType", v);
+                        } else if (v === "other") {
+                          // Back-compatibility: treat the former "other" option
+                          // as LAHSA so it reaches the Form 1083 export path.
+                          setProfileField("fundingType", "lahsa");
+                        }
+                      }}>
                         <option value="unknown">Choose funding type</option>
                         <option value="lahsa">LAHSA / Form 1083</option>
                         <option value="hud">Housing Authority or voucher (HQS required)</option>
-                        <option value="other">HUD-funded (CoC/ESG) — Form 1083 applies</option>
+                        <option value="lahsa">HUD-funded (CoC/ESG) — Form 1083 applies</option>
                       </select>
                     </div>
                     <div className={styles.field}>
