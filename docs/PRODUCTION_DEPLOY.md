@@ -6,6 +6,17 @@ resource group `metainspect-prod` (westus2), environment `metainspect-env`,
 app `metainspect-app`, registry `metainspectprod`. Interim: the tailscale
 funnel preview (ephemeral, dies with this box — not production).
 
+Live dev branch: app `metainspect-dev` in the same group/environment,
+deployed 2026-11-02 from `origin/dev` (`2d08099`, image
+`metainspect:mvp14`, revision `metainspect-dev--0000002`, Healthy).
+Same 1 vCPU / 2 Gi / min 0 / max 2 shape, same secrets (own copies),
+own `APP_PUBLIC_ORIGIN` (single-value sender check cannot share
+prod's). Registry pull via system-assigned identity + AcrPull (ACR
+admin stays off). Passcode-gated, live analysis mode. Prod
+(`metainspect-app`, mvp13) untouched. Redeploy: build + push a new
+tag, `az containerapp update -g metainspect-prod -n metainspect-dev
+--image …`, re-verify 307 + origin probes.
+
 ## Image
 
 ```bash
