@@ -13,6 +13,7 @@ import {
   deriveTourNode,
   guidedReviewQueue,
   tourNodeKey,
+  filmRoomShots,
   tourProgress,
   tourScriptForNode,
   type GuidedTourInput,
@@ -195,19 +196,25 @@ describe("deriveTourNode", () => {
     expect(tourScriptForNode({ kind: "finish" }, context).length).toBeGreaterThan(0);
   });
 
-  it("briefs every shot on the room's filming list, not just the room name", () => {
+  it("keeps the film-room intro short: shots live on screen, not in speech", () => {
     const record = withSetup(createInitialInspectionRecord("tour-session-11"));
     const context = { record, capturedRoomCount: 0, batchActive: false, reviewPosition: null };
     const kitchen = tourScriptForNode({ kind: "film-room", roomId: "kitchen" }, context);
     expect(kitchen).toMatch(/room 1 of \d+/);
-    for (const shot of ["faucet", "sink", "lock", "detector"]) {
-      expect(kitchen.toLowerCase()).toContain(shot);
-    }
+    expect(kitchen.length).toBeLessThan(200);
     const bathroom = tourScriptForNode({ kind: "film-room", roomId: "bathroom" }, context);
-    for (const shot of ["faucet", "toilet", "fan", "detector"]) {
-      expect(bathroom.toLowerCase()).toContain(shot);
+    expect(bathroom.length).toBeLessThan(200);
+  });
+
+  it("lists every shot on the room's filming list for the visible checklist", () => {
+    const kitchenShots = filmRoomShots("kitchen").join(" ").toLowerCase();
+    for (const shot of ["faucet", "sink", "lock", "detector"]) {
+      expect(kitchenShots).toContain(shot);
     }
-    expect(bathroom.length).toBeLessThanOrEqual(500);
+    const bathroomShots = filmRoomShots("bathroom").join(" ").toLowerCase();
+    for (const shot of ["faucet", "toilet", "fan", "detector"]) {
+      expect(bathroomShots).toContain(shot);
+    }
   });
 
   it("tracks section progress from inspection data", () => {

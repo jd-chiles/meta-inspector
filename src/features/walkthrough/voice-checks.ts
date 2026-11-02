@@ -27,3 +27,16 @@ export const VOICE_ROOM_CHECKS: Record<MoveInReadyRoomType, readonly [string, ..
     "Is there a working smoke detector along this path?",
   ],
 };
+
+/**
+ * Spoken setup questions. Exported (not inline JSX) because pre-generated
+ * voice clips match by exact text: the inventory contract test pins these
+ * strings, so rewording one without regenerating audio silently revives
+ * live-speech lag instead of breaking the build.
+ */
+export const SETUP_VOICE_QUESTIONS = {
+  evaluatorName: "Your name goes on each decision. What is your name?",
+  unitTypeTour: "What type of unit is it?",
+  unitTypeCapture: "What type of unit is this? Say studio, or how many bedrooms.",
+  baths: "How many bathrooms?",
+} as const;

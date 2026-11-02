@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { handleSpeakRequest, handleTranscribeRequest } from "../../../../src/server/voice/handlers";
+import { __resetSpeakCacheForTests, handleSpeakRequest, handleTranscribeRequest } from "../../../../src/server/voice/handlers";
 import { WALKTHROUGH_CLIENT_HEADER, WALKTHROUGH_CLIENT_ID } from "../../../../src/domain/walkthrough-client";
 
 const ORIGIN = "https://walkthrough.example";
@@ -32,6 +32,28 @@ describe("voice handlers", () => {
     expect((init.headers as Record<string, string>).model).toBe("s2.1-pro-free");
     expect(String((init.headers as Record<string, string>).authorization)).toContain("server-only-fish-key");
     expect(JSON.parse(String(init.body))).toMatchObject({ text: "Film the kitchen.", reference_id: "voice-123", format: "mp3" });
+  });
+
+  it("serves repeated speech from cache without new provider calls", async () => {
+    __resetSpeakCacheForTests();
+    const audio = new Uint8Array([0x49, 0x44, 0x33, 0x09]);
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(audio, { status: 200 }));
+    const speak = () => handleSpeakRequest(
+      new Request(`${ORIGIN}/api/voice/speak`, {
+        method: "POST",
+        headers: { ...APP_HEADERS, "content-type": "application/json" },
+        body: JSON.stringify({ text: "Room 2 of 5 has a custom note." }),
+      }),
+      { env: ENV, fetch: fetchImpl as unknown as typeof fetch },
+    );
+    const first = await speak();
+    const second = await speak();
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(second.headers.get("cache-control")).toContain("immutable");
+    expect(new Uint8Array(await second.arrayBuffer())).toEqual(audio);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    __resetSpeakCacheForTests();
   });
 
   it("rejects overlong speech text and missing senders without provider calls", async () => {
@@ -88,6 +110,51 @@ describe("voice handlers", () => {
     const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://api.fish.audio/v1/asr");
     expect((init.headers as Record<string, string>).model).toBe("transcribe-1-pro");
+  });
+
+  it("trusts the public origin behind managed ingress with an internal request URL", async () => {
+    const audio = new Uint8Array([0x49, 0x44, 0x33, 0x04]);
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(audio, { status: 200 }));
+    const response = await handleSpeakRequest(
+      new Request("http://10.0.0.5:3000/api/voice/speak", {
+        method: "POST",
+        headers: { ...APP_HEADERS, "content-type": "application/json", origin: ORIGIN },
+        body: JSON.stringify({ text: "hi" }),
+      }),
+      { env: { ...ENV, APP_PUBLIC_ORIGIN: ORIGIN }, fetch: fetchImpl as unknown as typeof fetch },
+    );
+    expect(response.status).toBe(200);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a mismatched origin even when the marker header is present", async () => {
+    const fetchImpl = vi.fn();
+    const response = await handleSpeakRequest(
+      new Request(`${ORIGIN}/api/voice/speak`, {
+        method: "POST",
+        headers: { ...APP_HEADERS, "content-type": "application/json", origin: "https://attacker.example" },
+        body: JSON.stringify({ text: "hi" }),
+      }),
+      { env: { ...ENV, APP_PUBLIC_ORIGIN: ORIGIN }, fetch: fetchImpl as unknown as typeof fetch },
+    );
+    expect(response.status).toBe(400);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("fails loudly on a malformed public origin instead of degrading silently", async () => {
+    const fetchImpl = vi.fn();
+    const response = await handleSpeakRequest(
+      new Request("http://10.0.0.5:3000/api/voice/speak", {
+        method: "POST",
+        headers: { ...APP_HEADERS, "content-type": "application/json", origin: ORIGIN },
+        body: JSON.stringify({ text: "hi" }),
+      }),
+      { env: { ...ENV, APP_PUBLIC_ORIGIN: "not an origin" }, fetch: fetchImpl as unknown as typeof fetch },
+    );
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body).toMatchObject({ ok: false, error: { code: "SETUP_REQUIRED" } });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("rejects non-audio mic clips without provider calls", async () => {

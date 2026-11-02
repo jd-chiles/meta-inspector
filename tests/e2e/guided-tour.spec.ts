@@ -48,6 +48,8 @@ test("tour setup takes unit type, baths, and one consent tap, then opens the cam
 
   await expect(tour).toHaveAttribute("data-node", "film-room:kitchen");
   await expect(page.getByTestId("tour-instruction")).toContainText("Kitchen");
+  await expect(page.getByTestId("tour-shot-list")).toBeVisible();
+  await expect(page.getByTestId("tour-shot-list")).toContainText("faucet");
   await expect(page.getByTestId("walkthrough-video-capture")).toBeVisible();
   await expectNoViewportOverflow(page, "tour film room");
 });

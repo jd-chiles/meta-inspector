@@ -1,5 +1,15 @@
 # Change log
 
+## Guided-journey simplification — November 1, 2026 (Muse Code)
+
+Owner field-tested on a phone: journey choppy, AI popup covered half the screen, voice lagged badly. Owner picked film+confirm+sign gates, film-first-ask-after timing, and pre-generated voice. No REQ wording changed: decisions/acknowledgment/sign-off gates stand; friction was removed from capture, not from verdicts.
+
+- AI Guide opens on phones as a collapsed one-line banner (step title always visible, expands on tap, <=46vh when open); while recording it captions the current filming cue so muted users keep guidance. Voice/mute/close stay reachable collapsed.
+- Film-first-ask-after made visible: tour film-room nodes show the shot list as a checklist with the spoken cue highlighted and speak only a short intro; questions already followed clips in tour and capture order. Setup questions moved to shared consts so voice clips match by exact text.
+- One-tap Confirm beside each current AI draft (detail, mobile sticky bar, tour card): the tap is the in-person acknowledgment and plan review, then auto-advances. D without a complete suggested plan, without still evidence, or with an empty observation opens the detail form instead; fire safety confirms 11a+11b together, splits stay manual. Draft alone still never checks or saves (browser guard test still green).
+- Voice static-first: 31 fixed-script clips pre-generated per voice/model into content-addressed public/voice files (scripts/generate-voice.mjs; inventory contract-tested against sources); client plays exact-text clips instantly, dynamic prompts synthesize live with a bounded 16 MiB immutable server cache, then device voice, then silent text. Generation run (~31 Fish calls) still needs owner approval; until then the live+cache path applies.
+- New tests: decision-draft unit table (7), voice inventory contract (5), static lookup (3), server speech cache (1), film-room short-intro updates, collapsed-banner + shot-list + one-tap-confirm browser coverage. Verified this session: docs exit 0; lint 0 errors (3 pre-existing warnings); typecheck exit 0; unit 469 passed / 3 skipped (37 files); browser 42/42; build green. No task acceptance, native SDD evidence, or release decision. tasks.json/active-tasks.json untouched (native tooling owns them).
+
 ## UI overhaul + walkthrough guide — October 31, 2026 (Muse Code)
 
 Visual overhaul of the Move-in Ready app within the pinned layout geometry (no box, spacing, or type-size changes; color/depth/typography only): dark camera-viewfinder empty state, refined cards/buttons/rows/nav, pulsing REC dot with reduced-motion guard, antialiased type. Added an always-available walkthrough guide: floating entry pill plus a 5-step checklist sheet (setup → film → review → sign-off → export) derived deterministically from saved progress, with jump actions; HUD route excluded. New tests: guide-model unit table (5), guide FAB/sheet browser spec (2). Verified: lint/typecheck clean, unit green, browser 19 passed / 2 skipped (fixture-only). No behavior, copy, testid, or layout-box changes to existing flows.

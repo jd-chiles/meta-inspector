@@ -79,3 +79,63 @@ export async function verifyAuthCookie(
   const expected = await signAuthCookie(passcode);
   return safeEqual(bytes(value), bytes(expected));
 }
+
+/**
+ * Client IP for throttling: the rightmost X-Forwarded-For entry, added by
+ * the ingress closest to us. The leftmost entry is client-controlled and
+ * must never select the throttle bucket.
+ */
+export function clientIpFromHeaders(headers: { get(name: string): string | null }): string {
+  const forwarded = headers.get("x-forwarded-for") ?? "";
+  const entries = forwarded
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  return entries.length > 0 ? entries[entries.length - 1]! : "unknown";
+}
+
+export interface UnlockThrottle {
+  throttled(ip: string): boolean;
+  size(): number;
+}
+
+/**
+ * Bounded in-memory attempt throttle. Entries expire by window; when the
+ * map is full, expired entries are swept first and oldest-inserted
+ * entries are evicted second, so memory can never grow without bound.
+ */
+export function createUnlockThrottle(options?: {
+  maxAttempts?: number;
+  windowMs?: number;
+  maxEntries?: number;
+}): UnlockThrottle {
+  const maxAttempts = Math.max(1, options?.maxAttempts ?? 10);
+  const windowMs = Math.max(1, options?.windowMs ?? 10 * 60 * 1000);
+  const maxEntries = Math.max(1, options?.maxEntries ?? 1000);
+  const attemptsByIp = new Map<string, { count: number; resetAt: number }>();
+  return {
+    throttled(ip: string): boolean {
+      const now = Date.now();
+      const record = attemptsByIp.get(ip);
+      if (!record || now >= record.resetAt) {
+        if (!record && attemptsByIp.size >= maxEntries) {
+          for (const [key, entry] of attemptsByIp) {
+            if (entry.resetAt <= now) attemptsByIp.delete(key);
+          }
+          while (attemptsByIp.size >= maxEntries) {
+            const oldest = attemptsByIp.keys().next();
+            if (oldest.done) break;
+            attemptsByIp.delete(oldest.value);
+          }
+        }
+        attemptsByIp.set(ip, { count: 1, resetAt: now + windowMs });
+        return false;
+      }
+      record.count += 1;
+      return record.count > maxAttempts;
+    },
+    size(): number {
+      return attemptsByIp.size;
+    },
+  };
+}

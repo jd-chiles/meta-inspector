@@ -1419,6 +1419,47 @@ test.describe("Move-in Ready mobile flow", () => {
       }
     });
 
+    test("one tap confirms an AI draft as the evaluator decision", async ({ page }) => {
+      test.setTimeout(120_000);
+      const videoBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern.mp4"));
+      await installSharedElementAnalysisMock(page);
+
+      try {
+        await prepareMockLiveVideo(page, videoBytes);
+        await page.getByRole("button", { name: "Profile", exact: true }).click();
+        await page.getByLabel("Evaluator name").fill("Mock Evaluator");
+        await goToCapture(page);
+        await selectRoom(page, "kitchen");
+        await expandAnalysisDetails(page);
+        await page.getByRole("checkbox", { name: /I attest this is staged\/mock-unit footage/ }).check();
+        await page.getByRole("checkbox", { name: /I understand this selected mock-unit video/ }).check();
+        await page.getByRole("button", { name: "Analyze this room", exact: true }).click();
+        await expect(page.getByTestId("analysis-disclosure")).toHaveJSProperty("open", false);
+        await expandAnalysisDetails(page);
+        await expect(page.getByRole("button", { name: "Analyze this room again", exact: true })).toBeVisible({ timeout: 30_000 });
+
+        await page.getByRole("button", { name: "Review", exact: true }).click();
+        const overview = page.getByRole("region", { name: "All 11 inspection elements" });
+        const waterSupplyRow = overview.locator("#element-overview-list").getByRole("button").filter({ hasText: "Water supply" });
+        await waterSupplyRow.click();
+        const waterSupply = page.getByTestId("review-element-demo-water-supply");
+        await expect(waterSupply).toContainText("Mock kitchen water supply proposal.");
+        await page.getByTestId("confirm-draft-bar-demo-water-supply").click();
+
+        // Confirm saves and advances to the next undecided requirement.
+        await expect(page.getByTestId("review-element-demo-item-05")).toBeVisible();
+        expect(await readSavedWaterSupplyDecision(page)).toMatchObject({
+          status: "A",
+          analysisRoom: "kitchen",
+          evidenceRoom: "kitchen",
+        });
+        await page.getByRole("button", { name: "Back to checklist", exact: true }).click();
+        await expect(waterSupplyRow).toContainText("Approved");
+      } finally {
+        if (!page.isClosed()) await page.unroute("**/api/video/segment*");
+      }
+    });
+
     test("a late response cannot attach stills to a clip replaced in local storage", async ({ page }) => {
       test.setTimeout(90_000);
       const videoBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern.mp4"));

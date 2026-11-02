@@ -144,24 +144,26 @@ function suggestionWord(proposal: ModelElementProposal): string {
 }
 
 /**
- * Conversational filming brief: room position plus every shot on that
- * room's filming list, so the agent talks the evaluator through the full
- * checklist instead of just naming the room. Stays under the 500-char
- * voice prompt cap.
+ * Visible shot checklist for a film-room node: the full filming list as
+ * short text cues. Shown on screen so the evaluator can film without
+ * waiting for a spoken lecture first.
  */
-export function filmRoomScript(roomId: MoveInReadyRoomId, position: number, total: number): string {
-  const label = roomLabel(roomId);
-  const intro = `Let's film the ${label}, room ${position} of ${total}.`;
-  const outro = "I will tell you when it is saved.";
+export function filmRoomShots(roomId: MoveInReadyRoomId): readonly string[] {
   const parsed = parseRoomId(roomId);
   const steps = ASSISTANT_FILMING_SCRIPTS[parsed?.type ?? "hallway"]
     .map((cue) => cue.replace(/^Recording\.\s*/i, "").replace(/\.\s*$/, "").trim())
     .filter((step) => step.length > 0);
-  if (steps.length === 0) return `${intro} Hold your phone steady and film one slow take. ${outro}`;
-  const last = steps[steps.length - 1]!;
-  const listed = steps.length === 1 ? last : `${steps.slice(0, -1).join("; ")}; and finally ${last.charAt(0).toLowerCase() + last.slice(1)}`;
-  const first = `${listed.charAt(0).toLowerCase() + listed.slice(1)}`;
-  return `${intro} Start recording, then ${first}. ${outro}`;
+  return steps.length === 0 ? ["Hold your phone steady and film one slow take"] : steps;
+}
+
+/**
+ * Short spoken intro for a film-room node: room position plus a pointer
+ * to the on-screen shot list. The shots themselves are visible text, so
+ * filming starts immediately instead of after a long narration.
+ */
+export function filmRoomScript(roomId: MoveInReadyRoomId, position: number, total: number): string {
+  const label = roomLabel(roomId);
+  return `Let's film the ${label}, room ${position} of ${total}. Start recording — your shot list is on screen. I will tell you when it is saved.`;
 }
 
 /**
@@ -203,7 +205,7 @@ export function tourScriptForNode(node: GuidedTourNode, context: TourScriptConte
       const excerpt = proposal.observation.length > 220
         ? `${proposal.observation.slice(0, 217).trimEnd()}…`
         : proposal.observation;
-      return `${prefix}${label}. The A I suggests ${suggestionWord(proposal)}, confidence ${proposal.confidence} percent. ${excerpt} Tap Review draft, or Needs human check.`;
+      return `${prefix}${label}. The A I suggests ${suggestionWord(proposal)}, confidence ${proposal.confidence} percent. ${excerpt} Tap Confirm, edit in Review draft, or Needs human check.`;
     }
     case "finish": {
       const decided = MOVE_IN_READY_ELEMENTS.filter(

@@ -1,31 +1,17 @@
-import { AUTH_COOKIE_NAME, isAuthGateEnabled, signAuthCookie, verifyPasscode } from "../../../../server/auth";
+import { AUTH_COOKIE_NAME, clientIpFromHeaders, createUnlockThrottle, isAuthGateEnabled, signAuthCookie, verifyPasscode } from "../../../../server/auth";
 
 export const runtime = "nodejs";
 
 // Tiny in-memory throttle: online guessing gets 10 tries per 10 minutes per IP.
-const attemptsByIp = new Map<string, { count: number; resetAt: number }>();
-const MAX_ATTEMPTS = 10;
-const WINDOW_MS = 10 * 60 * 1000;
-
-function throttled(ip: string): boolean {
-  const now = Date.now();
-  const record = attemptsByIp.get(ip);
-  if (!record || now >= record.resetAt) {
-    attemptsByIp.set(ip, { count: 1, resetAt: now + WINDOW_MS });
-    return false;
-  }
-  record.count += 1;
-  return record.count > MAX_ATTEMPTS;
-}
+const throttle = createUnlockThrottle();
 
 export async function POST(request: Request): Promise<Response> {
   if (!isAuthGateEnabled()) {
     return Response.json({ ok: false, error: { code: "SETUP_REQUIRED", message: "Access control is not configured." } }, { status: 503 });
   }
   const passcode = process.env.INSPECTION_PASSCODE ?? "";
-  const forwarded = request.headers.get("x-forwarded-for");
-  const ip = forwarded?.split(",")[0]?.trim() || "unknown";
-  if (throttled(ip)) {
+  const ip = clientIpFromHeaders(request.headers);
+  if (throttle.throttled(ip)) {
     return Response.json({ ok: false, error: { code: "RATE_LIMITED", message: "Too many attempts. Try again later." } }, { status: 429 });
   }
   let input = "";

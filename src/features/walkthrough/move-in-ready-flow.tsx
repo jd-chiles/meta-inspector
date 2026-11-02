@@ -56,8 +56,6 @@ import {
   type EvaluatorDecisionSet,
   type EvaluatorSignoff,
   type EvidenceReference,
-  type FireSafetyAssessment,
-  type FireSafetyClauseOutcome,
   type FundingType,
   type ModelElementProposal,
   type ModelDeficiencySuggestion,
@@ -117,6 +115,18 @@ import {
 } from "./video-store";
 import { extractVideoStills, formatTimestamp, sha256Blob, type VideoStill } from "./video-utils";
 import { createPendingCancelTracker } from "./pending-cancel";
+import { isAnalysisCurrent } from "./analysis-identity";
+import {
+  buildConfirmDraft,
+  completeFireSafetyAssessmentFromDraft,
+  createDecisionDraft,
+  fireSafetyAssessmentFromDraft,
+  fireSafetyChoiceFromDraft,
+  prefillDraftFromProposal,
+  type DecisionChoice,
+  type DecisionDraft,
+  type FireSafetyDraftOutcome,
+} from "./decision-draft";
 import { deriveGuideModel, type GuideAction } from "./walkthrough-guide";
 import AssistantGuide from "./assistant-guide";
 import {
@@ -127,7 +137,7 @@ import {
 import { cancelSpeech, readVoiceEnabled, speakText, writeVoiceEnabled } from "./voice-guide";
 import VoicePrompt from "./voice-prompt";
 import GuidedTourView from "./guided-tour-view";
-import { VOICE_ROOM_CHECKS } from "./voice-checks";
+import { SETUP_VOICE_QUESTIONS, VOICE_ROOM_CHECKS } from "./voice-checks";
 import { parseBathCount, parseUnitType, parseYesNo } from "./voice-parse";
 import styles from "./move-in-ready-flow.module.css";
 
@@ -135,8 +145,6 @@ export type AnalysisMode = "live" | "fixture" | "unconfigured";
 type Step = "home" | "capture" | "review" | "signoff" | "profile" | "guided";
 type ProfileSection = "unit" | "evaluator" | "agency";
 type AnalysisStatus = "idle" | "segmenting" | "mapping" | "complete" | "error";
-type DecisionChoice = "unreviewed" | "needs-human-check" | "A" | "D";
-type FireSafetyDraftOutcome = "" | FireSafetyClauseOutcome;
 
 export interface MoveInReadyFlowProps {
   analysisMode: AnalysisMode;
@@ -220,21 +228,6 @@ interface EvidenceView {
   src: string;
 }
 
-interface DecisionDraft {
-  choice: DecisionChoice;
-  rationale: string;
-  manualCheckAcknowledged: boolean;
-  issueDescription: string;
-  correction: string;
-  completionDate: string;
-  reinspectionDate: string;
-  fireSafetyUnitDetectors: FireSafetyDraftOutcome;
-  fireSafetyPublicAreaDetectors: FireSafetyDraftOutcome;
-  planSuggestionReviewed: boolean;
-  evidenceStillIds: string[];
-  note: string;
-}
-
 interface ParsedSegmentResponse extends SegmentResponse {
   stage: "segmented";
 }
@@ -299,6 +292,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   const [reviewNoteOpen, setReviewNoteOpen] = useState(false);
   const [reviewNoteDraft, setReviewNoteDraft] = useState("");
   const [recordingInProgress, setRecordingInProgress] = useState(false);
+  const [recordingCueIndex, setRecordingCueIndex] = useState(-1);
   const [clips, setClips] = useState<Partial<Record<MoveInReadyRoomId, StoredVideoClip>>>({});
   const [elementClips, setElementClips] = useState<Partial<Record<MoveInReadyElementId, StoredVideoClip>>>({});
   const [clipsReadySessionId, setClipsReadySessionId] = useState<string | null>(null);
@@ -480,13 +474,27 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
 
   function analysisIsCurrent(generation: number, controller: AbortController, expectedSessionId: string, roomId: MoveInReadyRoomId, videoId: string, videoRevision: number, videoHash: string, schemaVersion: number, catalogVersion: string): boolean {
     const current = recordRef.current;
-    const identity = current?.clipIdentities[roomId];
-    return !controller.signal.aborted && generation === analysisGenerationRef.current && Boolean(
-      current && identity && current.sessionId === expectedSessionId && current.selectedRoomId === roomId &&
-      current.schemaVersion === schemaVersion && current.catalogVersion === catalogVersion &&
-      identity.schemaVersion === schemaVersion && identity.catalogVersion === catalogVersion &&
-      identity.videoId === videoId && identity.videoRevision === videoRevision && identity.videoHash === videoHash,
-    );
+    return isAnalysisCurrent({
+      aborted: controller.signal.aborted,
+      generation,
+      currentGeneration: analysisGenerationRef.current,
+      record: current ? {
+        sessionId: current.sessionId,
+        selectedRoomId: current.selectedRoomId,
+        schemaVersion: current.schemaVersion,
+        catalogVersion: current.catalogVersion,
+      } : null,
+      identity: current?.clipIdentities[roomId] ?? null,
+      expected: {
+        sessionId: expectedSessionId,
+        roomId,
+        videoId,
+        videoRevision,
+        videoHash,
+        schemaVersion,
+        catalogVersion,
+      },
+    });
   }
 
   // Release a server-held mapping lease when the tab closes mid-analysis.
@@ -1084,14 +1092,20 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     return () => cancelSpeech();
   }, [assistantNode, assistantOpen, voiceOn]);
 
-  // Narrate the filming script on timed cues while a take is recording.
+  // Step through the filming script on timed cues while a take is
+  // recording. The cue index always advances (muted users read the current
+  // cue in the guide banner); speech additionally narrates when on.
   useEffect(() => {
-    if (!recordingInProgress || !assistantOpen || !voiceOn) return;
+    if (!recordingInProgress) return;
     const cues = filmingScriptForRoom(selectedRoomId);
     const timers = cues.map((cue, index) =>
-      window.setTimeout(() => speakText(cue), 800 + index * 7000));
+      window.setTimeout(() => {
+        setRecordingCueIndex(index);
+        if (assistantOpen && voiceOn) speakText(cue);
+      }, 800 + index * 7000));
     return () => {
       timers.forEach((timer) => window.clearTimeout(timer));
+      setRecordingCueIndex(-1);
       cancelSpeech();
     };
   }, [recordingInProgress, selectedRoomId, assistantOpen, voiceOn]);
@@ -1901,7 +1915,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     }));
   }
 
-  function saveDecision(elementId: MoveInReadyElementId): boolean {
+  function saveDecision(elementId: MoveInReadyElementId, draftOverride?: DecisionDraft): boolean {
     const current = recordRef.current;
     if (!current) return false;
     if (current.fundingType !== "lahsa") {
@@ -1910,7 +1924,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
         : "Choose LAHSA / Form 1083 funding in Profile before recording a decision.");
       return false;
     }
-    const draft = drafts[elementId] ?? createDecisionDraft(current.decisions[elementId]);
+    const draft = draftOverride ?? drafts[elementId] ?? createDecisionDraft(current.decisions[elementId]);
     const isFireSafety = elementId === "demo-smoke-co";
     const fireAssessment = isFireSafety ? fireSafetyAssessmentFromDraft(draft) : undefined;
     const completeFireAssessment = isFireSafety ? completeFireSafetyAssessmentFromDraft(draft) : undefined;
@@ -2053,6 +2067,63 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     setReviewError("");
     changeStep("review");
     openReviewElement(elementId);
+  }
+
+  /**
+   * One-tap confirm for an AI draft. Guards mirror reviewProposalDraft; the
+   * tap itself is the in-person acknowledgment and plan review, so callers
+   * must show the suggestion (and the D plan) next to the button. Blocked
+   * drafts open the detail form with guidance instead of saving, and a
+   * successful confirm advances to the next undecided requirement.
+   */
+  function confirmProposalDraft(elementId: MoveInReadyElementId): void {
+    const current = recordRef.current;
+    if (!current) return;
+    if (current.fundingType !== "lahsa") {
+      setReviewError("Choose LAHSA / Form 1083 funding in Profile before recording a decision.");
+      return;
+    }
+    if (!current.evaluatorName.trim()) {
+      changeStep("review");
+      openReviewElement(elementId);
+      setReviewError("Add the evaluator’s name in Profile before recording a decision.");
+      return;
+    }
+    if ((current.decisions[elementId]?.status ?? "unreviewed") !== "unreviewed") {
+      changeStep("review");
+      openReviewElement(elementId);
+      return;
+    }
+    const proposal = current.proposals[elementId];
+    if (!proposal) {
+      changeStep("review");
+      openReviewElement(elementId);
+      setReviewError("No AI draft for this requirement. Assess it in the detail form.");
+      return;
+    }
+    if (!proposalIsCurrent(proposal, current)) {
+      changeStep("review");
+      openReviewElement(elementId);
+      setReviewError("That room clip changed since analysis. Analyze it again, then review the new draft.");
+      return;
+    }
+    const built = buildConfirmDraft(elementId, proposal, voiceCheckNoteForElement(elementId, current));
+    if (!built.ok) {
+      updateDecisionDraft(elementId, (draft) => prefillDraftFromProposal(draft, proposal));
+      changeStep("review");
+      openReviewElement(elementId);
+      setReviewError(built.reason);
+      return;
+    }
+    setDrafts((previous) => ({ ...previous, [elementId]: built.draft }));
+    if (!saveDecision(elementId, built.draft)) {
+      changeStep("review");
+      openReviewElement(elementId);
+      return;
+    }
+    const next = MOVE_IN_READY_ELEMENT_IDS.find((id) =>
+      id !== elementId && (current.decisions[id]?.status ?? "unreviewed") === "unreviewed");
+    if (next) openReviewElement(next);
   }
 
   function saveSignoff(): void {
@@ -2608,6 +2679,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   onLiveClipSaved: (elementId, result) => handleLiveClipSaved(elementId, result),
                   onLiveNeedsCheck: (elementId, reason) => handleLiveNeedsCheck(elementId, reason),
                   reviewProposalDraft,
+                  confirmProposalDraft,
                   markNeedsCheck,
                   changeStep,
                 }}
@@ -3303,6 +3375,17 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                             </div>}
                           </>}
                           <div className={styles.buttonRow}>
+                            {decision.status === "unreviewed" && proposal && record && proposalIsCurrent(proposal, record) && (
+                              <button
+                                type="button"
+                                className={`${styles.button} ${styles.reviewInlineSaveButton}`}
+                                data-testid={`confirm-draft-${element.id}`}
+                                aria-label={`Confirm: I checked this in person and agree with the AI draft: ${proposal.modelSuggestion === "A" ? "Approved" : "Deficient"}`}
+                                onClick={() => confirmProposalDraft(element.id)}
+                              >
+                                Confirm AI draft: {proposal.modelSuggestion === "A" ? "Approved" : "Deficient"}
+                              </button>
+                            )}
                             <button type="button" className={`${styles.button} ${styles.reviewInlineSaveButton}`} onClick={() => saveDecision(element.id)}>Save evaluator decision</button>
                             {decision.status !== "unreviewed" && <button type="button" className={styles.textButton} onClick={() => { updateRecord((current) => ({ ...current, decisions: { ...current.decisions, [element.id]: { status: "unreviewed" } }, signoff: null })); setDrafts((current) => ({ ...current, [element.id]: createDecisionDraft({ status: "unreviewed" }) })); }}>Clear decision</button>}
                           </div>
@@ -3504,7 +3587,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   ) : (
                     <VoicePrompt
                       key={setupVoiceStep}
-                      question={setupVoiceStep === "unit" ? "What type of unit is this? Say studio, or how many bedrooms." : "How many bathrooms?"}
+                      question={setupVoiceStep === "unit" ? SETUP_VOICE_QUESTIONS.unitTypeCapture : SETUP_VOICE_QUESTIONS.baths}
                       autoSpeak
                       transcript={setupVoiceTranscript}
                       onTranscript={(text) => {
@@ -3656,6 +3739,23 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
             <button className={styles.secondaryButton} type="button" disabled={activeReviewIndex < 0 || activeReviewIndex === MOVE_IN_READY_ELEMENTS.length - 1} onClick={() => { const next = MOVE_IN_READY_ELEMENT_IDS[activeReviewIndex + 1]; if (next) openReviewElement(next); }}>Next</button>
           </div>
           {reviewError && <p className={`${styles.inlineError} ${styles.reviewStickyError}`} role="alert">{reviewError}</p>}
+          {activeElementId && record && (() => {
+            const elementId = activeElementId;
+            const proposal = record.proposals[elementId];
+            const decided = (record.decisions[elementId]?.status ?? "unreviewed") !== "unreviewed";
+            if (!proposal || decided || !proposalIsCurrent(proposal, record)) return null;
+            return (
+              <button
+                className={`${styles.button} ${styles.wideButton}`}
+                type="button"
+                data-testid={`confirm-draft-bar-${elementId}`}
+                aria-label={`Confirm: I checked this in person and agree with the AI draft: ${proposal.modelSuggestion === "A" ? "Approved" : "Deficient"}`}
+                onClick={() => confirmProposalDraft(elementId)}
+              >
+                Confirm AI draft: {proposal.modelSuggestion === "A" ? "Approved" : "Deficient"}
+              </button>
+            );
+          })()}
           <button className={`${styles.button} ${styles.wideButton}`} type="button" disabled={!activeElementId} onClick={() => { if (activeElementId) void saveDecision(activeElementId); }}>
             Save evaluator decision <ArrowRight size={17} aria-hidden="true" />
           </button>
@@ -3667,6 +3767,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
         node={assistantNode}
         voiceOn={voiceOn}
         recording={recordingInProgress}
+        recordingCue={recordingInProgress ? filmingScriptForRoom(selectedRoomId)[recordingCueIndex] ?? null : null}
         onAction={handleAssistantAction}
         onVoiceToggle={() => {
           const next = !voiceOn;
@@ -4099,70 +4200,6 @@ function sameAnalysisProvenance(left: VideoAnalysisIdentity, right: VideoAnalysi
     left.analysisId === right.analysisId &&
     left.attempt === right.attempt &&
     left.catalogVersion === right.catalogVersion;
-}
-
-function fireSafetyAssessmentFromDraft(draft: DecisionDraft): FireSafetyAssessment {
-  return {
-    unitDetectors: draft.fireSafetyUnitDetectors || "needs-human-check",
-    publicAreaDetectors: draft.fireSafetyPublicAreaDetectors || "needs-human-check",
-  };
-}
-
-function fireSafetyChoiceFromDraft(draft: DecisionDraft): DecisionChoice {
-  const assessment = fireSafetyAssessmentFromDraft(draft);
-  if (assessment.unitDetectors !== "A" && assessment.unitDetectors !== "D") return "needs-human-check";
-  if (assessment.publicAreaDetectors !== "A" && assessment.publicAreaDetectors !== "D") return "needs-human-check";
-  return assessment.unitDetectors === "D" || assessment.publicAreaDetectors === "D" ? "D" : "A";
-}
-
-function completeFireSafetyAssessmentFromDraft(
-  draft: DecisionDraft,
-): { unitDetectors: "A" | "D"; publicAreaDetectors: "A" | "D" } | null {
-  const unitDetectors = draft.fireSafetyUnitDetectors;
-  const publicAreaDetectors = draft.fireSafetyPublicAreaDetectors;
-  if ((unitDetectors !== "A" && unitDetectors !== "D") ||
-      (publicAreaDetectors !== "A" && publicAreaDetectors !== "D")) return null;
-  return { unitDetectors, publicAreaDetectors };
-}
-
-function createDecisionDraft(decision: EvaluatorDecision): DecisionDraft {
-  const fireSafetyAssessment = "fireSafetyAssessment" in decision ? decision.fireSafetyAssessment : undefined;
-  if (decision.status === "A" || decision.status === "D") return {
-    choice: decision.status,
-    rationale: decision.rationale,
-    manualCheckAcknowledged: Boolean(decision.inPersonCheckAcknowledgment),
-    issueDescription: decision.status === "D" ? decision.deficiency.issueDescription : "",
-    correction: decision.status === "D" ? decision.deficiency.correction : "",
-    completionDate: decision.status === "D" ? decision.deficiency.completionDate : "",
-    reinspectionDate: decision.status === "D" ? decision.deficiency.reinspectionDate : "",
-    fireSafetyUnitDetectors: fireSafetyAssessment?.unitDetectors ?? "",
-    fireSafetyPublicAreaDetectors: fireSafetyAssessment?.publicAreaDetectors ?? "",
-    planSuggestionReviewed: decision.status === "D",
-    evidenceStillIds: decision.evidence.map((reference) => reference.stillId),
-    note: "",
-  };
-  if (decision.status === "needs-human-check") return { choice: decision.status, rationale: "", manualCheckAcknowledged: false, issueDescription: "", correction: "", completionDate: "", reinspectionDate: "", fireSafetyUnitDetectors: fireSafetyAssessment?.unitDetectors ?? "", fireSafetyPublicAreaDetectors: fireSafetyAssessment?.publicAreaDetectors ?? "", planSuggestionReviewed: false, evidenceStillIds: [], note: decision.note };
-  return { choice: "unreviewed", rationale: "", manualCheckAcknowledged: false, issueDescription: "", correction: "", completionDate: "", reinspectionDate: "", fireSafetyUnitDetectors: "", fireSafetyPublicAreaDetectors: "", planSuggestionReviewed: false, evidenceStillIds: [], note: "" };
-}
-
-/**
- * Copy an unreviewed AI draft into editable draft fields. Never touches the
- * in-person acknowledgment or the plan-review confirmation: the evaluator
- * still performs both explicitly before any save.
- */
-function prefillDraftFromProposal(draft: DecisionDraft, proposal: ModelElementProposal): DecisionDraft {
-  return {
-    ...draft,
-    choice: proposal.modelSuggestion,
-    rationale: draft.rationale.trim() ? draft.rationale : proposal.observation,
-    evidenceStillIds: proposal.evidence.length > 0 ? proposal.evidence.map((reference) => reference.stillId) : draft.evidenceStillIds,
-    ...(proposal.modelSuggestion === "D" && proposal.deficiencySuggestion ? {
-      issueDescription: draft.issueDescription.trim() ? draft.issueDescription : proposal.deficiencySuggestion.deficientArea,
-      correction: draft.correction.trim() ? draft.correction : proposal.deficiencySuggestion.correction,
-      completionDate: draft.completionDate || proposal.deficiencySuggestion.completionDate,
-      reinspectionDate: draft.reinspectionDate || proposal.deficiencySuggestion.reinspectionDate,
-    } : {}),
-  };
 }
 
 /**

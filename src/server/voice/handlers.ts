@@ -4,8 +4,11 @@
  * Follows the video API's sender rule: a matching Origin/Referer, or the
  * same-app marker header when the proxy strips both (Azure ingress does).
  */
+import { createHash } from "node:crypto";
+
 import { WALKTHROUGH_CLIENT_HEADER, WALKTHROUGH_CLIENT_ID } from "../../domain/walkthrough-client";
 import {
+  FishCallError,
   MAX_SPEAK_TEXT_LENGTH,
   MAX_TRANSCRIBE_BYTES,
   isFishCallError,
@@ -26,7 +29,7 @@ function normalizeHost(hostname: string): string {
   return host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
 }
 
-function senderIsSameApp(request: Request): boolean {
+function senderIsSameApp(request: Request, configuredPublicOrigin?: string): boolean {
   const origin = request.headers.get("origin") ?? request.headers.get("referer");
   if (origin === null || origin.trim().length === 0) {
     return request.headers.get(WALKTHROUGH_CLIENT_HEADER) === WALKTHROUGH_CLIENT_ID;
@@ -35,11 +38,30 @@ function senderIsSameApp(request: Request): boolean {
     const originUrl = new URL(origin);
     const targetUrl = new URL(request.url);
     if (originUrl.origin === targetUrl.origin) return true;
+    // Managed ingress (Azure Container Apps) serves an internal request
+    // URL behind the public origin: trust the configured public origin
+    // too, exactly like the video API. A malformed value fails loudly so
+    // voice can never silently degrade to the device fallback again.
+    const publicOrigin = configuredPublicOrigin?.trim().replace(/\/$/, "");
+    if (publicOrigin) {
+      let configured: URL;
+      try {
+        configured = new URL(publicOrigin);
+      } catch {
+        throw new FishCallError("SETUP_REQUIRED", 503, "The public app origin must be an HTTP(S) origin without a path.", false);
+      }
+      if ((configured.protocol !== "https:" && configured.protocol !== "http:") ||
+          configured.origin !== publicOrigin) {
+        throw new FishCallError("SETUP_REQUIRED", 503, "The public app origin must be an HTTP(S) origin without a path.", false);
+      }
+      if (originUrl.origin === configured.origin) return true;
+    }
     return originUrl.protocol === targetUrl.protocol &&
       originUrl.port === targetUrl.port &&
       LOOPBACK_HOSTS.has(normalizeHost(originUrl.hostname)) &&
       LOOPBACK_HOSTS.has(normalizeHost(targetUrl.hostname));
-  } catch {
+  } catch (error) {
+    if (isFishCallError(error)) throw error;
     return false;
   }
 }
@@ -59,9 +81,64 @@ function fishErrorResponse(error: unknown): Response {
   return errorResponse("PROVIDER_FAILURE", "Voice processing did not complete.", 502);
 }
 
+/**
+ * Speech cache for dynamic prompts (film-room position, live proofs,
+ * review-item excerpts): same text + voice + model always synthesizes the
+ * same bytes, so repeats serve instantly without a provider call. Static
+ * script clips never reach this path — the client plays pre-generated
+ * files first. Bounded LRU-ish FIFO, failures never cached.
+ */
+const SPEAK_CACHE_MAX_BYTES = 16 * 1024 * 1024;
+
+interface CachedSpeech {
+  audio: Uint8Array;
+  contentType: string;
+}
+
+const speakCache = new Map<string, CachedSpeech>();
+let speakCacheBytes = 0;
+
+/** Test-only reset for the speech cache. */
+export function __resetSpeakCacheForTests(): void {
+  speakCache.clear();
+  speakCacheBytes = 0;
+}
+
+function speakCacheKey(text: string, voiceId: string, ttsModel: string): string {
+  return createHash("sha256").update(`${voiceId}\n${ttsModel}\n${text}`, "utf8").digest("hex");
+}
+
+function speakCacheGet(key: string): CachedSpeech | null {
+  const hit = speakCache.get(key);
+  if (!hit) return null;
+  speakCache.delete(key);
+  speakCache.set(key, hit);
+  return hit;
+}
+
+function speakCacheSet(key: string, entry: CachedSpeech): void {
+  const existing = speakCache.get(key);
+  if (existing) speakCacheBytes -= existing.audio.byteLength;
+  speakCache.delete(key);
+  speakCache.set(key, entry);
+  speakCacheBytes += entry.audio.byteLength;
+  while (speakCacheBytes > SPEAK_CACHE_MAX_BYTES && speakCache.size > 1) {
+    const oldest = speakCache.keys().next();
+    if (oldest.done) break;
+    const removed = speakCache.get(oldest.value);
+    if (!removed) break;
+    speakCache.delete(oldest.value);
+    speakCacheBytes -= removed.audio.byteLength;
+  }
+}
+
 export async function handleSpeakRequest(request: Request, deps: VoiceDeps = {}): Promise<Response> {
-  if (!senderIsSameApp(request)) {
-    return errorResponse("INVALID_REQUEST", "Send voice requests from this app.", 400);
+  try {
+    if (!senderIsSameApp(request, (deps.env ?? process.env).APP_PUBLIC_ORIGIN)) {
+      return errorResponse("INVALID_REQUEST", "Send voice requests from this app.", 400);
+    }
+  } catch (error) {
+    return fishErrorResponse(error);
   }
   let text: unknown = "";
   try {
@@ -75,10 +152,19 @@ export async function handleSpeakRequest(request: Request, deps: VoiceDeps = {})
   }
   try {
     const config = resolveFishConfig(deps.env ?? process.env);
+    const key = speakCacheKey(text, config.voiceId, config.ttsModel);
+    const cached = speakCacheGet(key);
+    if (cached) {
+      return new Response(cached.audio, {
+        status: 200,
+        headers: { "content-type": cached.contentType, "cache-control": "public, max-age=31536000, immutable" },
+      });
+    }
     const { audio, contentType } = await speakText(text, config, deps.fetch ?? fetch);
+    speakCacheSet(key, { audio, contentType });
     return new Response(audio, {
       status: 200,
-      headers: { "content-type": contentType, "cache-control": "no-store" },
+      headers: { "content-type": contentType, "cache-control": "public, max-age=31536000, immutable" },
     });
   } catch (error) {
     return fishErrorResponse(error);
@@ -99,8 +185,12 @@ function sniffAudio(bytes: Uint8Array): boolean {
 }
 
 export async function handleTranscribeRequest(request: Request, deps: VoiceDeps = {}): Promise<Response> {
-  if (!senderIsSameApp(request)) {
-    return errorResponse("INVALID_REQUEST", "Send voice requests from this app.", 400);
+  try {
+    if (!senderIsSameApp(request, (deps.env ?? process.env).APP_PUBLIC_ORIGIN)) {
+      return errorResponse("INVALID_REQUEST", "Send voice requests from this app.", 400);
+    }
+  } catch (error) {
+    return fishErrorResponse(error);
   }
   let form: FormData;
   try {

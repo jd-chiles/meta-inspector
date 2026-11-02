@@ -29,6 +29,12 @@ const nextConfig: NextConfig = {
         source: "/sw.js",
         headers: [{ key: "Cache-Control", value: "no-cache, no-store, must-revalidate" }],
       },
+      {
+        // Pre-generated voice clips are content-addressed: the filename is
+        // the text hash, so bytes for a URL never change (REQ-voice).
+        source: "/voice/:path*",
+        headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+      },
     ];
   },
 };

@@ -30,7 +30,7 @@ import type { MoveInReadyInspection } from "./inspection-store";
 import type { StoredVideoClip, VideoClipStore } from "./video-store";
 import { LIVE_ELEMENT_SPECS, filmingRoomForLiveElement } from "./live-elements";
 import { fixListTier, reinspectionChecklist } from "./fix-list";
-import { VOICE_ROOM_CHECKS } from "./voice-checks";
+import { SETUP_VOICE_QUESTIONS, VOICE_ROOM_CHECKS } from "./voice-checks";
 import { filmingScriptForRoom } from "./assistant-script";
 import { parseRoomId } from "../../domain/move-in-ready";
 import { parseBathCount, parseUnitType, parseYesNo } from "./voice-parse";
@@ -41,6 +41,7 @@ import LiveCapture, { type LiveElementClipResult } from "./live-capture";
 import {
   deriveTourNode,
   elementLabel,
+  filmRoomShots,
   guidedReviewQueue,
   tourNodeKey,
   tourProgress,
@@ -81,6 +82,7 @@ export interface GuidedTourBindings {
   onLiveClipSaved: (elementId: MoveInReadyElementId, result: LiveElementClipResult) => void;
   onLiveNeedsCheck: (elementId: MoveInReadyElementId, reason: string) => void;
   reviewProposalDraft: (elementId: MoveInReadyElementId) => void;
+  confirmProposalDraft: (elementId: MoveInReadyElementId) => void;
   markNeedsCheck: (elementId: MoveInReadyElementId, note: string) => void;
   changeStep: (step: "home" | "capture" | "review" | "signoff" | "profile") => void;
 }
@@ -118,6 +120,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
   const [skipped, setSkipped] = useState<ReadonlySet<MoveInReadyElementId>>(new Set());
   const [speakOn, setSpeakOn] = useState(true);
   const [tourRecording, setTourRecording] = useState(false);
+  const [shotIndex, setShotIndex] = useState(-1);
   const [tourSpeaking, setTourSpeaking] = useState(false);
   const [voicePhase, setVoicePhase] = useState<VoicePromptPhase | null>(null);
   const [speechNonce, setSpeechNonce] = useState(0);
@@ -260,14 +263,16 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
 
   // Talk through the shot list while a take is recording: one cue at a
   // time so the evaluator covers every shot conversationally. Stops the
-  // moment recording stops or the node advances (clip saved).
+  // moment recording stops or the node advances (clip saved). The visible
+  // checklist highlights the cue being spoken.
   useEffect(() => {
     if (node.kind !== "film-room" || !tourRecording || !speakOn) return;
     const cues = filmingScriptForRoom(node.roomId);
     const timers = cues.map((cue, index) =>
-      window.setTimeout(() => sayNow(cue), 1500 + index * 8000));
+      window.setTimeout(() => { setShotIndex(index); sayNow(cue); }, 1500 + index * 8000));
     return () => {
       timers.forEach((timer) => window.clearTimeout(timer));
+      setShotIndex(-1);
       stopSpeech();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -381,7 +386,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
           <div className={flowStyles.card}>
             <p className={flowStyles.draftLabel}>One thing before confirmations</p>
             <VoicePrompt
-              question="Your name goes on each decision. What is your name?"
+              question={SETUP_VOICE_QUESTIONS.evaluatorName}
               autoSpeak={speakOn}
               transcript={bindings.voiceTranscript}
               onTranscript={(text) => {
@@ -416,7 +421,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
         {node.kind === "ask-unit" && (
           <div className={flowStyles.card}>
             <VoicePrompt
-              question="What type of unit is it?"
+              question={SETUP_VOICE_QUESTIONS.unitTypeTour}
               autoSpeak={speakOn}
               transcript={bindings.voiceTranscript}
               onTranscript={handleUnitTranscript}
@@ -436,7 +441,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
         {node.kind === "ask-baths" && (
           <div className={flowStyles.card}>
             <VoicePrompt
-              question="How many bathrooms?"
+              question={SETUP_VOICE_QUESTIONS.baths}
               autoSpeak={speakOn}
               transcript={bindings.voiceTranscript}
               onTranscript={handleBathsTranscript}
@@ -482,6 +487,20 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
 
         {node.kind === "film-room" && (
           <div className={styles.filmStage}>
+            <div className={flowStyles.card} data-testid="tour-shot-list">
+              <p className={flowStyles.draftLabel}>{roomLabel(node.roomId)} · shot list</p>
+              <ol className={styles.shotList}>
+                {filmRoomShots(node.roomId).map((shot, index) => (
+                  <li
+                    key={`${node.roomId}:${index}`}
+                    className={index === shotIndex ? styles.shotActive : undefined}
+                    aria-current={index === shotIndex ? "step" : undefined}
+                  >
+                    {shot}
+                  </li>
+                ))}
+              </ol>
+            </div>
             <WalkthroughVideoCapture
               key={`${bindings.sessionId}:${node.roomId}`}
               sessionId={bindings.sessionId}
@@ -633,10 +652,19 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
                 <button
                   className={flowStyles.button}
                   type="button"
+                  data-testid="tour-confirm-draft"
+                  aria-label={`Confirm: I checked this in person and agree: ${approved ? "Approved" : "Deficient"}`}
+                  onClick={() => bindings.confirmProposalDraft(node.elementId)}
+                >
+                  Confirm: {approved ? "Approved" : "Deficient"} <ArrowRight size={17} aria-hidden="true" />
+                </button>
+                <button
+                  className={flowStyles.secondaryButton}
+                  type="button"
                   data-testid="tour-review-draft"
                   onClick={() => bindings.reviewProposalDraft(node.elementId)}
                 >
-                  Review {proposal.modelSuggestion} draft <ArrowRight size={17} aria-hidden="true" />
+                  Review {proposal.modelSuggestion} draft
                 </button>
                 <button
                   className={flowStyles.secondaryButton}

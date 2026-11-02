@@ -185,6 +185,21 @@
   gap: 0.5rem;
 }
 
+.shotList {
+  margin: 0.35rem 0 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: #2c3c4f;
+}
+
+.shotActive {
+  font-weight: 800;
+  color: #123f73;
+}
+
 @media (min-width: 720px) {
   .reviewActions {
     grid-template-columns: 1fr 1fr 1fr;

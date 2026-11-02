@@ -5,6 +5,7 @@
  * in the UI; this module never blocks on voice availability.
  */
 import { WALKTHROUGH_CLIENT_HEADER, WALKTHROUGH_CLIENT_ID } from "../../domain/walkthrough-client";
+import { staticVoiceUrl } from "./voice-manifest";
 
 export type VoiceEngine = "fish" | "device" | "none";
 
@@ -40,8 +41,42 @@ function speakWithDeviceVoice(text: string): Promise<void> {
   });
 }
 
+function playAudioUrl(url: string, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const audio = new Audio(url);
+    const onAbort = () => {
+      audio.pause();
+      reject(new DOMException("aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    audio.onended = () => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    };
+    audio.onerror = () => {
+      signal?.removeEventListener("abort", onAbort);
+      reject(new Error("voice playback failed"));
+    };
+    void audio.play().catch(reject);
+  });
+}
+
 /** Speak one prompt; resolves with the engine that spoke. Aborted on signal. */
 export async function speakPrompt(text: string, signal?: AbortSignal): Promise<SpeakResult> {
+  if (signal?.aborted) return { engine: "none" };
+  // Static-first: pre-generated clips for the fixed script play instantly
+  // with zero provider latency. They are the same Fish voice, so a static
+  // hit reports "fish"; anything missing falls through to live speech.
+  try {
+    const clip = await staticVoiceUrl(text);
+    if (clip && !signal?.aborted) {
+      await playAudioUrl(clip, signal);
+      return { engine: "fish" };
+    }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    // A missing or unplayable clip falls through to live speech below.
+  }
   if (signal?.aborted) return { engine: "none" };
   try {
     const response = await fetch("/api/voice/speak", {
@@ -58,23 +93,7 @@ export async function speakPrompt(text: string, signal?: AbortSignal): Promise<S
     if (blob.size === 0) throw new Error("voice speak empty");
     const url = URL.createObjectURL(blob);
     try {
-      await new Promise<void>((resolve, reject) => {
-        const audio = new Audio(url);
-        const onAbort = () => {
-          audio.pause();
-          reject(new DOMException("aborted", "AbortError"));
-        };
-        signal?.addEventListener("abort", onAbort, { once: true });
-        audio.onended = () => {
-          signal?.removeEventListener("abort", onAbort);
-          resolve();
-        };
-        audio.onerror = () => {
-          signal?.removeEventListener("abort", onAbort);
-          reject(new Error("voice playback failed"));
-        };
-        void audio.play().catch(reject);
-      });
+      await playAudioUrl(url, signal);
       return { engine: "fish" };
     } finally {
       URL.revokeObjectURL(url);

@@ -22,6 +22,13 @@ test("AI guide opens from the nav tab and walks setup then filming", async ({ pa
   await expect(guide).toBeVisible();
   await expectNoViewportOverflow(page, "assistant guide open");
   await expect(guide.getByText("Let's set up this inspection", { exact: true })).toBeVisible();
+  // On a phone the guide must open as a compact banner, not a half-screen card.
+  const toggle = guide.getByTestId("assistant-guide-toggle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  const collapsedBox = await guide.boundingBox();
+  expect(collapsedBox?.height ?? 9999).toBeLessThan(844 * 0.3);
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
   await guide.getByRole("button", { name: "Set up the unit", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
   await expect(page.getByTestId("capture-setup-toggle")).toHaveAttribute("aria-expanded", "true");

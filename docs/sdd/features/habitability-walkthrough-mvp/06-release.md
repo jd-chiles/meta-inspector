@@ -1,6 +1,72 @@
 # Release record
 
-Status: Not ready (2026-11-01 mvp8 deployed + verified; see latest entry)
+Status: Not ready (2026-11-01 mvp10 voice fix deployed; see latest entry)
+
+## mvp10 voice origin fix — 2026-11-01 (Muse Code)
+
+Status stays Not ready. Owner reported the live app never uses the
+Fish voice. Diagnosis: Fish credentials are valid (direct 2-char TTS
+probe returned 200 audio/mpeg), but the voice sender check had no
+APP_PUBLIC_ORIGIN awareness — behind ACA ingress every real browser
+call 400'd and the client silently fell back to the device voice.
+Fixed to video parity (trust request origin or configured public
+origin; marker only when both headers absent; malformed config fails
+loud 503), plus 3 unit tests (failed 2-before, 8/8 after).
+Owner-approved redeploy: `metainspect:mvp10`
+(sha256:61c64f26…), revision `metainspect-app--0000012` at 100%,
+Healthy. In-container proof: public Origin reaches Fish config
+(503 no-key, correct), foreign Origin still 400. Checks: unit 452
+passed / 3 skipped, e2e 41, typecheck/lint/docs exit 0. Remaining:
+owner phone run, recipient acceptance, domain, alerts, ops owner,
+native evidence. Not task acceptance or a release decision.
+
+## mvp9 redeploy — 2026-11-01 (Muse Code)
+
+Status stays Not ready. Owner-approved redeploy of the current tree
+(review-findings fixes + OBS-1 wording alignment; pre-build gates
+green): built `metainspectprod.azurecr.io/metainspect:mvp9`
+(sha256:75b6a3bc…, FFmpeg 9.0.2 compiled from source — upstream
+recovered), smoke-tested locally on an ephemeral port (boots, 307
+gate, baseline headers, ffmpeg present; note: stale local previews
+still occupy 3100/3200, left untouched), pushed, and updated
+`metainspect-app` — revision `metainspect-app--0000011` active at
+100% traffic, Healthy. Fish secrets (`fish-api-key` from local env,
+voice id as owner-supplied) upserted before the update; they take
+effect on this revision. Verified live $0: root answers 307 with
+baseline headers and unauthenticated video calls hit the passcode
+gate, confirming middleware coverage on the new revision. Origin and
+video-path behavior is unchanged since mvp8's verified probe; full
+proof awaits the owner's LTE phone run. Remaining: physical-phone
+end-to-end on this revision, recipient acceptance, custom domain,
+quota alerts, ops owner, native evidence. Not task acceptance or a
+release decision.
+
+## Review findings SEC-1/SEC-2/OBS-2 resolved — 2026-11-01 (Muse Code)
+
+Status stays Not ready. Resumed on the committed tree (`188f7ff`,
+clean) and closed the actionable Slice 6 review findings. Not task
+acceptance, native evidence, or a release decision.
+
+- SEC-1: unlock throttle now keys on the rightmost X-Forwarded-For
+  entry instead of the spoofable leftmost.
+- SEC-2: throttle map is capped (1000 entries) with expiry sweep plus
+  oldest-first eviction. Both covered by new unit tests (XFF parsing,
+  10-per-window, sweep/eviction).
+- OBS-2: the in-flight currency guard is extracted to a pure,
+  unit-tested module; new tests pin rejection of pure schema-only and
+  catalog-only version bumps mid-flight, plus abort/supersede/retarget.
+  A black-box e2e was judged infeasible without test hooks (versions
+  live in React state, migration runs at load); unit level covers it.
+- OBS-1 (prompt-completion wording drift) left untouched: recorded as
+  needing an explicit owner decision (SDD wording alignment vs code
+  change).
+
+Checks on this tree: docs/lint/typecheck exit 0; unit 449 passed /
+3 skipped; e2e 41 passed (includes build); test:live not run. The
+mvp8 Azure deployment predates these fixes — redeploy to pick them up.
+Remaining external gates unchanged: physical-phone LTE proof,
+recipient acceptance, custom domain, quota alerts, ops owner, native
+evidence.
 
 ## mvp8 redeploy — 2026-11-01 (Muse Code)
 

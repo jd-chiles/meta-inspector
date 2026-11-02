@@ -33,7 +33,14 @@
 
 .headerCopy { min-width: 0; flex: 1; }
 .headerCopy strong { display: block; font-size: 0.85rem; }
-.headerCopy small { color: #637183; font-size: 0.7rem; }
+.headerCopy small {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #637183;
+  font-size: 0.7rem;
+}
 
 .headerActions { display: flex; gap: 2px; }
 
@@ -53,7 +60,6 @@
 
 .body { display: grid; gap: 8px; padding: 11px 12px 12px; }
 
-.title { margin: 0; font-size: 0.95rem; font-weight: 800; letter-spacing: -0.01em; }
 .message { margin: 0; color: #2c3c4f; font-size: 0.85rem; line-height: 1.45; }
 
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -80,6 +86,10 @@
   font-size: 0.85rem;
   font-weight: 750;
   cursor: pointer;
+}
+
+@media (max-width: 719px) {
+  .panel { max-height: 46vh; overflow-y: auto; }
 }
 
 @media (min-width: 960px) {
