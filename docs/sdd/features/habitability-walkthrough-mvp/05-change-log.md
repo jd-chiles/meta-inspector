@@ -14,9 +14,10 @@ Navigations are now cache-first with background refresh (shell v5):
 repeat visits paint instantly even on a cold container, since
 progress restores from IndexedDB; only plain 200s are cached by final
 URL so passcode redirects can never strand anyone. Dev and prod apps
-set to minReplicas 1 (warm; reversible, ~$1–2/day each). Verified:
-[GATES PENDING — full suite running]. No REQ change; no task
-acceptance or native evidence.
+set to minReplicas 1 (warm; reversible, ~$1–2/day each). Verified on
+the origin/dev merge: docs/lint/typecheck/unit green, build green,
+44/44 e2e green. No REQ change; no task acceptance or native
+evidence.
 
 ## Voice-led review + boot splash — November 2, 2026 (Muse Code)
 
