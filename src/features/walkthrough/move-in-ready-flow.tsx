@@ -45,6 +45,7 @@ import {
   deriveFinalInspectionResult,
   isMoveInReadyElementId,
   isMoveInReadyRoomId,
+  normalizeFundingType,
   parseRoomId,
   roomContributesToElement,
   roomLabel,
@@ -56,7 +57,6 @@ import {
   type EvaluatorDecisionSet,
   type EvaluatorSignoff,
   type EvidenceReference,
-  type FundingType,
   type ModelElementProposal,
   type ModelDeficiencySuggestion,
   type MoveInReadyElementId,
@@ -838,6 +838,10 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     }
     return deriveAssistantNode({
       fundingType: currentRecord?.fundingType === "hud" ? "hud" : currentRecord?.fundingType === "lahsa" ? "lahsa" : "unknown",
+      flowStarted: capturedRoomIds.length > 0 ||
+        Object.keys(currentRecord?.proposals ?? {}).length > 0 ||
+        reviewCounts.resolved > 0 ||
+        Boolean(completedResult && currentRecord?.signoff),
       canCapture: isCaptureSetupComplete(currentRecord),
       pseudonym: currentRecord?.pseudonym ?? "",
       evaluatorName: currentRecord?.evaluatorName ?? "",
@@ -3426,7 +3430,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   </div>
                   <div className={styles.profileFields}>
                     <div className={styles.field}><label htmlFor="profile-pseudonym">Unit pseudonym</label><input id="profile-pseudonym" className={styles.formInput} value={record.pseudonym} maxLength={80} placeholder="Demo Unit 04" onChange={(event) => setProfileField("pseudonym", event.currentTarget.value)} /></div>
-                    <div className={styles.field}><label htmlFor="profile-funding">Funding type</label><select id="profile-funding" className={styles.formSelect} value={record.fundingType} onChange={(event) => setProfileField("fundingType", event.currentTarget.value)}><option value="unknown">Choose funding type</option><option value="lahsa">LAHSA / Form 1083</option><option value="hud">Housing Authority or voucher (HQS required)</option><option value="other">HUD-funded (CoC/ESG) — Form 1083 applies</option></select></div>
+                    <div className={styles.field}><label htmlFor="profile-funding">Funding type</label><select id="profile-funding" className={styles.formSelect} value={record.fundingType} onChange={(event) => setProfileField("fundingType", normalizeFundingType(event.currentTarget.value))}><option value="unknown">Choose funding type</option><option value="lahsa">LAHSA / Form 1083</option><option value="hud">Housing Authority or voucher (HQS required)</option><option value="other">HUD-funded (CoC/ESG) — Form 1083 applies</option></select></div>
                     <div className={styles.field}><label htmlFor="profile-unit-type">Unit type</label><select id="profile-unit-type" className={styles.formSelect} value={record.unitType} onChange={(event) => { const next = event.currentTarget.value as MoveInReadyUnitType | ""; if (next !== "") setUnitDescription(next, record.bathCount, record.roomIds.includes("hallway")); }}><option value="">Choose unit type</option><option value="studio">Studio</option><option value="1-bedroom">1 bedroom</option><option value="2-bedroom">2 bedroom</option><option value="3-bedroom">3 bedroom</option><option value="4-bedroom">4 bedroom</option></select></div>
                     <div className={styles.field}><label htmlFor="profile-baths">Bathrooms</label><select id="profile-baths" className={styles.formSelect} value={String(record.bathCount)} disabled={record.unitType === ""} onChange={(event) => { if (record.unitType !== "") setUnitDescription(record.unitType, Number(event.currentTarget.value), record.roomIds.includes("hallway")); }}><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></div>
                   </div>

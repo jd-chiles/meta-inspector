@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { test, expect } from "@playwright/test";
 
-import { goToCapture } from "./navigation";
+import { goToCapture, setupProfile } from "./navigation";
 
 test.use({
   storageState: { cookies: [], origins: [] },
@@ -23,12 +23,8 @@ test("desktop Capture uses five-tab navigation and places prompts beside the vid
   }
   await expect(navigation).toHaveCSS("position", "sticky");
 
+  await setupProfile(page, { pseudonym: "Staged Desktop Layout Unit", funding: "lahsa", unitType: "studio" });
   await goToCapture(page);
-  const captureSetup = page.getByRole("button", { name: /Inspection setup/ });
-  if (await captureSetup.getAttribute("aria-expanded") !== "true") await captureSetup.click();
-  await page.getByLabel("Unit pseudonym").fill("Staged Desktop Layout Unit");
-  await page.getByLabel("Funding type").selectOption("lahsa");
-  await page.getByLabel("Unit type").selectOption("studio");
 
   const capture = page.getByTestId("walkthrough-video-capture");
   await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();

@@ -1,5 +1,23 @@
 # Change log
 
+## Single entrance enforced + instant repeat loads — November 2, 2026 (Muse Code)
+
+Owner found the AI Guide popup offered its own way into the flow
+("Set up the unit", "Film the …") alongside Home's Start button. The
+guide script now takes a flowStarted flag (real evidence: clips,
+drafts, decisions, or sign-off — setup-form-only does not count) and
+shows a no-action prestart node before the flow starts, pointing at
+Start inspection. Tour film nodes link to the full capture screen so
+manual capture stays reachable inside the flow; specs drive the same
+single entrance (Start → tour setup → film node → capture link).
+Navigations are now cache-first with background refresh (shell v5):
+repeat visits paint instantly even on a cold container, since
+progress restores from IndexedDB; only plain 200s are cached by final
+URL so passcode redirects can never strand anyone. Dev and prod apps
+set to minReplicas 1 (warm; reversible, ~$1–2/day each). Verified:
+[GATES PENDING — full suite running]. No REQ change; no task
+acceptance or native evidence.
+
 ## Voice-led review + boot splash — November 2, 2026 (Muse Code)
 
 Owner asked for (1) a loading screen for the ~30 s cold-start wait and

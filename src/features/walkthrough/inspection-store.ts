@@ -30,6 +30,7 @@ import {
   type MoveInReadyUnitType,
   type ProposalState,
   type VideoAnalysisIdentity,
+  normalizeFundingType,
 } from "../../domain/move-in-ready";
 
 export const INSPECTION_SCHEMA_VERSION = MOVE_IN_READY_SCHEMA_VERSION;

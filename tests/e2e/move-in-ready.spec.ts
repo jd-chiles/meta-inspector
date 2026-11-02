@@ -690,7 +690,8 @@ test.describe("Move-in Ready mobile flow", () => {
     await openApp(page);
     await mkdir(path.join(process.cwd(), "artifacts/design-qa"), { recursive: true });
     await expect(page.getByRole("heading", { level: 1, name: "Inspection home" })).toBeVisible();
-    await goToCapture(page);
+    await page.getByRole("button", { name: "New inspection", exact: true }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
     const setupToggle = page.getByTestId("capture-setup-toggle");
     await expect(setupToggle).toHaveAttribute("aria-expanded", "true");
     const firstRunCapture = page.getByTestId("walkthrough-video-capture");
@@ -953,7 +954,8 @@ test.describe("Move-in Ready mobile flow", () => {
     await expect(page.getByLabel("Unit pseudonym")).toHaveValue("");
     await expect(page.getByLabel("Funding type")).toHaveValue("unknown");
     await page.getByRole("button", { name: "Back to home", exact: true }).click();
-    await goToCapture(page);
+    await page.getByRole("button", { name: "New inspection", exact: true }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
     await expect(page.getByText("Set up this unit to begin recording.", { exact: true })).toBeVisible();
   });
 
@@ -1651,7 +1653,8 @@ test.describe("Move-in Ready mobile flow", () => {
         await page.getByRole("button", { name: "Profile", exact: true }).click();
         await expect(page.getByLabel("Unit pseudonym")).toHaveValue("");
         await page.getByRole("button", { name: "Back to home", exact: true }).click();
-        await goToCapture(page);
+        await page.getByRole("button", { name: "New inspection", exact: true }).click();
+        await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
         await expect(page.getByText("Set up this unit to begin recording.", { exact: true })).toBeVisible();
         const deleted = await readStoredWalkthroughState(page, deletedSessionId!);
         expect(deleted).toMatchObject({ clipCount: 0, stillCount: 0, record: null });

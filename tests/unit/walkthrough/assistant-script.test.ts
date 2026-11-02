@@ -7,6 +7,7 @@ import {
 
 const base: AssistantScriptInput = {
   fundingType: "unknown",
+  flowStarted: true,
   canCapture: false,
   pseudonym: "",
   evaluatorName: "",
@@ -22,7 +23,14 @@ const base: AssistantScriptInput = {
 };
 
 describe("deriveAssistantNode", () => {
-  it("starts with unit setup", () => {
+  it("offers no entry actions before the flow starts", () => {
+    const node = deriveAssistantNode({ ...base, flowStarted: false });
+    expect(node.key).toBe("prestart");
+    expect(node.actions).toEqual([]);
+    expect(node.message).toContain("Start inspection");
+  });
+
+  it("starts with unit setup once the flow has evidence", () => {
     const node = deriveAssistantNode(base);
     expect(node.key).toBe("setup");
     expect(node.actions).toMatchObject([{ id: "setup" }]);

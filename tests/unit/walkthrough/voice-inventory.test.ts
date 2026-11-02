@@ -45,6 +45,7 @@ describe("voice inventory contract", () => {
   it("covers the static assistant guide speeches", () => {
     const base: AssistantScriptInput = {
       fundingType: "lahsa",
+      flowStarted: true,
       canCapture: true,
       pseudonym: "Demo",
       evaluatorName: "Rae Evaluator",

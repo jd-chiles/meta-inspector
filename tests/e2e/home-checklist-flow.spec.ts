@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-import { expectNoViewportOverflow, goToCapture, openProfilePanel } from "./navigation";
+import { expectNoViewportOverflow, goToCapture, openProfilePanel, setupProfile } from "./navigation";
 
 test.use({
   storageState: { cookies: [], origins: [] },
@@ -26,12 +26,8 @@ test("home leads through film into the requirement-by-requirement checklist", as
   // Voice-first launch: a fresh home leads with the voice agent entry.
   await expect(home.getByTestId("home-voice-entry")).toContainText("answer by voice");
 
+  await setupProfile(page, { pseudonym: "Staged Home Flow Unit", funding: "lahsa", unitType: "studio" });
   await goToCapture(page);
-  const setupToggle = page.getByTestId("capture-setup-toggle");
-  if (await setupToggle.getAttribute("aria-expanded") !== "true") await setupToggle.click();
-  await page.getByLabel("Unit pseudonym").fill("Staged Home Flow Unit");
-  await page.getByLabel("Funding type").selectOption("lahsa");
-  await page.getByLabel("Unit type").selectOption("studio");
   await expect(page.getByTestId("walkthrough-video-capture")).toBeVisible();
   await expect(page.getByTestId("capture-next-bar")).toContainText("0 of 4 rooms filmed");
 

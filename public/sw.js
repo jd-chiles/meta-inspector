@@ -19,7 +19,7 @@
 
 /* global self, caches, fetch, Response, URL */
 
-var SHELL_CACHE = "habitability-walkthrough-shell-v4";
+var SHELL_CACHE = "habitability-walkthrough-shell-v5";
 var APP_CACHE_PREFIX = "habitability-walkthrough-";
 
 /** Core shell: required for an honest offline launch. */
@@ -148,25 +148,38 @@ self.addEventListener("fetch", function (event) {
   // API traffic is never cached and never served from cache.
   if (isApiRequest(url)) return;
 
-  // Navigations: network first so the worker sees fresh progress, falling
-  // back to the cached app shell (which restores IndexedDB progress), and
-  // finally to an honest offline notice.
+  // Navigations: serve the cached shell instantly and refresh it in the
+  // background. Progress restores from IndexedDB client-side, so waiting on
+  // the network buys nothing — and on a cold container it costs the user a
+  // 20–30 s blank tab. Only plain 200s are cached, keyed by final URL, so a
+  // passcode redirect can never strand an authenticated user on stale HTML.
   if (isNavigationRequest(request)) {
     event.respondWith(
-      fetch(request).then(
-        function (response) {
+      caches.match(request).then(function (cached) {
+        var network = fetch(request).then(function (response) {
+          if (response && response.status === 200 && response.type === "basic") {
+            var copy = response.clone();
+            var key = response.url || request.url;
+            caches.open(SHELL_CACHE).then(function (cache) {
+              return cache.put(key, copy);
+            }).then(function () {}, function () {});
+          }
           return response;
-        },
-        function () {
-          return caches.match("/", { ignoreSearch: false }).then(function (cached) {
-            if (cached) return cached;
+        });
+        event.waitUntil(network.then(function () {}, function () {}));
+        if (cached) return cached;
+        return network.then(
+          function (response) {
+            return response;
+          },
+          function () {
             return new Response(offlineFallbackHtml(), {
               status: 503,
               headers: { "Content-Type": "text/html; charset=utf-8" },
             });
-          });
-        },
-      ),
+          },
+        );
+      }),
     );
     return;
   }

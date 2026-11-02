@@ -1,6 +1,15 @@
 import { expect, type Page } from "@playwright/test";
 
-/** Film is reached from Home (guide action) or by contextual back on mobile. */
+/** Unit setup through Profile (always editable). Reaching capture via the tour auto-completes setup, so specs that need specific values set them here first. */
+export async function setupProfile(page: Page, setup: { pseudonym: string; funding: string; unitType: string }): Promise<void> {
+  await page.getByRole("button", { name: "Profile", exact: true }).click();
+  await openProfilePanel(page, "Unit & Funding");
+  await page.getByLabel("Unit pseudonym").fill(setup.pseudonym);
+  await page.getByLabel("Funding type").selectOption(setup.funding);
+  await page.getByLabel("Unit type").selectOption(setup.unitType);
+}
+
+/** Film is reached through the single entrance: Home starts the guided tour, whose film nodes link to the full capture screen. */
 export async function goToCapture(page: Page): Promise<void> {
   const captureHeading = page.getByRole("heading", { level: 1, name: "Film the unit" });
   for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -8,21 +17,30 @@ export async function goToCapture(page: Page): Promise<void> {
 
     const home = page.getByTestId("inspection-home");
     if (await home.isVisible()) {
-      // Home's single entrance opens the guided tour; specs reach the
-      // manual capture screen through the AI guide's next action instead.
-      await page.getByRole("navigation", { name: "Main navigation" })
-        .getByRole("button", { name: "Guide", exact: true }).click();
-      const guide = page.getByTestId("assistant-guide");
-      await expect(guide).toBeVisible();
-      const toggle = guide.getByTestId("assistant-guide-toggle");
-      if (await toggle.getAttribute("aria-expanded") !== "true") await toggle.click();
-      await guide.locator("button[class*='primaryButton']").first().click();
-      // The guide stays open after its action runs and its panel covers
-      // content actions on later screens. Manual capture never shows it,
-      // so dismiss it to restore the real flow state.
-      const closeGuide = page.getByRole("button", { name: "Close the AI inspection guide", exact: true });
-      if (await closeGuide.isVisible()) await closeGuide.click();
-      continue;
+      // Single entrance: the Start button opens the tour; drive it to a
+      // film node and take its full-capture link.
+      await home.getByTestId("start-guided-tour").click();
+    }
+    const tour = page.getByTestId("guided-tour");
+    if (await tour.isVisible()) {
+      for (let drive = 0; drive < 12; drive += 1) {
+        if (await captureHeading.isVisible()) return;
+        const node = (await tour.getAttribute("data-node")) ?? "";
+        if (node.startsWith("film-room:")) {
+          await tour.getByTestId("tour-open-capture").click();
+          continue;
+        }
+        const start = tour.getByTestId("tour-start");
+        if (await start.isVisible()) { await start.click(); continue; }
+        const options = tour.getByTestId("tour-options").getByRole("button");
+        if (await options.first().isVisible()) { await options.first().click(); continue; }
+        const consent = tour.getByTestId("tour-consent-confirm");
+        if (await consent.isVisible()) { await consent.click(); continue; }
+        const yes = tour.getByTestId("tour-check-yes");
+        if (await yes.isVisible()) { await yes.click(); continue; }
+        break;
+      }
+      if (await captureHeading.isVisible()) return;
     }
 
     const backButtons = [

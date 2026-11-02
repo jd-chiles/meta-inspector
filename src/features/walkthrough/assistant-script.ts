@@ -39,6 +39,8 @@ export interface AssistantNode {
 
 export interface AssistantScriptInput {
   fundingType: "lahsa" | "hud" | "unknown";
+  /** True once the flow has real evidence (clips, drafts, decisions, sign-off). Setup-form-only does not count: before the flow starts, the guide offers no entry actions — Home's Start button is the single entrance. */
+  flowStarted: boolean;
   canCapture: boolean;
   pseudonym: string;
   evaluatorName: string;
@@ -94,6 +96,15 @@ export function deriveAssistantNode(input: AssistantScriptInput): AssistantNode 
       message: "This is a HUD-funded unit, so it needs the HQS inspection workflow. I can't run a Form 1083 here.",
       speak: "This unit needs the H Q S workflow. I can't run a Form 1083 here.",
       actions: [{ id: "dismiss", label: "Got it", primary: true }],
+    };
+  }
+  if (!input.flowStarted) {
+    return {
+      key: "prestart",
+      title: "Start your inspection",
+      message: "Tap Start inspection on Home to begin — I'll guide you step by step from there.",
+      speak: "Tap Start inspection on Home to begin. I'll guide you from there.",
+      actions: [],
     };
   }
   if (!input.canCapture) {

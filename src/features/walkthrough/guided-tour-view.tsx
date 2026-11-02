@@ -544,6 +544,14 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
               }}
               onClipChange={(clip, roomId) => bindings.onClipChange(clip, roomId)}
             />
+            <button
+              className={flowStyles.secondaryButton}
+              type="button"
+              data-testid="tour-open-capture"
+              onClick={() => bindings.changeStep("capture")}
+            >
+              Open full capture screen
+            </button>
           </div>
         )}
 

@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { expect, test, type Page } from "@playwright/test";
 
-import { expectNoViewportOverflow, goToCapture } from "./navigation";
+import { expectNoViewportOverflow, goToCapture, setupProfile } from "./navigation";
 
 // Capture dashboard: the camera viewport + record actions stay pinned at
 // the top while the rest of the capture step scrolls beneath, and saving a
@@ -18,12 +18,8 @@ async function openReadyCapture(page: Page): Promise<void> {
   await page.goto("/");
   await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
   await expect(page.getByTestId("analysis-mode")).toHaveText("Sample only");
+  await setupProfile(page, { pseudonym: "Staged Demo Unit 04", funding: "lahsa", unitType: "studio" });
   await goToCapture(page);
-  const setupToggle = page.getByTestId("capture-setup-toggle");
-  if (await setupToggle.getAttribute("aria-expanded") !== "true") await setupToggle.click();
-  await page.getByLabel("Unit pseudonym").fill("Staged Demo Unit 04");
-  await page.getByLabel("Funding type").selectOption("lahsa");
-  await page.getByLabel("Unit type").selectOption("studio");
   await expect(page.getByTestId("walkthrough-video-capture")).toBeVisible();
 }
 

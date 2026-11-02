@@ -1,6 +1,9 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
 import { test, expect } from "@playwright/test";
 
-import { expectNoViewportOverflow, goToCapture } from "./navigation";
+import { expectNoViewportOverflow, goToCapture, setupProfile } from "./navigation";
 
 test.use({
   storageState: { cookies: [], origins: [] },
@@ -8,7 +11,7 @@ test.use({
   isMobile: true,
 });
 
-test("AI guide opens from the nav tab and walks setup then filming", async ({ page }) => {
+test("AI guide opens from the nav tab with no second entrance before the flow starts", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
   await expect(page.getByTestId("analysis-mode")).toHaveText("Sample only");
@@ -21,7 +24,9 @@ test("AI guide opens from the nav tab and walks setup then filming", async ({ pa
   const guide = page.getByTestId("assistant-guide");
   await expect(guide).toBeVisible();
   await expectNoViewportOverflow(page, "assistant guide open");
-  await expect(guide.getByText("Let's set up this inspection", { exact: true })).toBeVisible();
+  // Single entrance: before the flow starts the guide points at Start and
+  // offers no setup/film actions of its own.
+  await expect(guide.getByText("Start your inspection", { exact: true })).toBeVisible();
   // On a phone the guide must open as a compact banner, not a half-screen card.
   const toggle = guide.getByTestId("assistant-guide-toggle");
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -29,16 +34,9 @@ test("AI guide opens from the nav tab and walks setup then filming", async ({ pa
   expect(collapsedBox?.height ?? 9999).toBeLessThan(844 * 0.3);
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
-  await guide.getByRole("button", { name: "Set up the unit", exact: true }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
-  await expect(page.getByTestId("capture-setup-toggle")).toHaveAttribute("aria-expanded", "true");
-
-  await page.getByLabel("Unit pseudonym").fill("Staged Assistant Unit");
-  await page.getByLabel("Funding type").selectOption("lahsa");
-  await page.getByLabel("Unit type").selectOption("studio");
-  await expect(guide.getByText("Step 1 of 4: film the Kitchen", { exact: true })).toBeVisible();
-  await guide.getByRole("button", { name: "Film the Kitchen", exact: true }).click();
-  await expect(page.getByText("0 of 4 clips saved", { exact: true }).first()).toBeVisible();
+  await expect(guide.getByText("Tap Start inspection on Home to begin", { exact: false })).toBeVisible();
+  await expect(guide.locator("button[class*='primaryButton']")).toHaveCount(0);
+  await expect(guide.getByRole("button", { name: "Set up the unit", exact: true })).toHaveCount(0);
 
   const voiceToggle = guide.getByRole("button", { name: /voice guide/ });
   await expect(voiceToggle).toHaveAttribute("aria-pressed", "true");
@@ -51,18 +49,52 @@ test("AI guide opens from the nav tab and walks setup then filming", async ({ pa
   await expect(guideTab).toBeVisible();
 });
 
+test("AI guide offers the next room once the flow has evidence", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
+  // Enter through the single entrance and film one room via the tour link.
+  await page.getByTestId("start-guided-tour").click();
+  const tour = page.getByTestId("guided-tour");
+  await expect(tour).toBeVisible();
+  await tour.getByTestId("tour-start").click();
+  await tour.getByTestId("tour-options").getByRole("button", { name: "Studio", exact: true }).click();
+  await tour.getByTestId("tour-options").getByRole("button", { name: "1", exact: true }).click();
+  await page.getByTestId("tour-consent-confirm").click();
+  await expect(tour).toHaveAttribute("data-node", "film-room:kitchen");
+  await tour.getByTestId("tour-open-capture").click();
+  await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
+
+  // Setup alone is not flow evidence: still no guide entry actions.
+  const navigation = page.getByRole("navigation", { name: "Main navigation" });
+  await navigation.getByRole("button", { name: "Guide", exact: true }).click();
+  const guide = page.getByTestId("assistant-guide");
+  await expect(guide).toBeVisible();
+  await expect(guide.locator("button[class*='primaryButton']")).toHaveCount(0);
+  await guide.getByRole("button", { name: "Close the AI inspection guide", exact: true }).click();
+
+  // One saved clip starts the flow: the guide now offers the next room.
+  const videoBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern.mp4"));
+  await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
+    name: "synthetic-guide-kitchen.mp4",
+    mimeType: "video/mp4",
+    buffer: videoBytes,
+  });
+  await expect(page.getByText("1 of 4 clips saved", { exact: true }).first()).toBeVisible();
+  await navigation.getByRole("button", { name: "Guide", exact: true }).click();
+  await expect(guide.getByText("Step 2 of 4: film the Bathroom", { exact: true })).toBeVisible();
+  await guide.getByTestId("assistant-guide-toggle").click();
+  await guide.getByRole("button", { name: "Film the Bathroom", exact: true }).click();
+  await expect(page.getByTestId("walkthrough-video-capture")).toBeVisible();
+});
+
 test("home offers a fresh inspection when progress exists", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
   const home = page.getByTestId("inspection-home");
   await expect(home.getByRole("button", { name: "New inspection", exact: true })).toBeVisible();
 
+  await setupProfile(page, { pseudonym: "Staged Fresh Start Unit", funding: "lahsa", unitType: "studio" });
   await goToCapture(page);
-  const setupToggle = page.getByTestId("capture-setup-toggle");
-  if (await setupToggle.getAttribute("aria-expanded") !== "true") await setupToggle.click();
-  await page.getByLabel("Unit pseudonym").fill("Staged Fresh Start Unit");
-  await page.getByLabel("Funding type").selectOption("lahsa");
-  await page.getByLabel("Unit type").selectOption("studio");
 
   await page.getByRole("navigation", { name: "Main navigation" })
     .getByRole("button", { name: "Home", exact: true }).click();
@@ -81,12 +113,8 @@ test("saved inspections list, switch, and delete without losing the other", asyn
   await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
   const home = page.getByTestId("inspection-home");
 
+  await setupProfile(page, { pseudonym: "Unit Alpha", funding: "lahsa", unitType: "studio" });
   await goToCapture(page);
-  const setupToggle = page.getByTestId("capture-setup-toggle");
-  if (await setupToggle.getAttribute("aria-expanded") !== "true") await setupToggle.click();
-  await page.getByLabel("Unit pseudonym").fill("Unit Alpha");
-  await page.getByLabel("Funding type").selectOption("lahsa");
-  await page.getByLabel("Unit type").selectOption("studio");
   await page.getByRole("navigation", { name: "Main navigation" })
     .getByRole("button", { name: "Home", exact: true }).click();
 
