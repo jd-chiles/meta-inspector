@@ -1,5 +1,11 @@
 # Change log
 
+## Live building pre-screen, free sources (REQ-R1 live path) — November 3, 2026 (Muse Code)
+
+- REQ-R1 live: `POST /api/prescreen` (`src/server/prescreen/`) runs one Census geocode, then five keyless sources in parallel — LADBS open cases (Socrata `u82d-eh7z`), LAHD violations (Socrata `cr8f-uc4j`), FEMA NFHL flood Layer 28, HUD deteriorated-paint index by tract, OpenFEMA disaster declarations. Each source degrades independently (ok/empty/unavailable/skipped); the demo literal still answers from the labeled example. Queries are sent only to the allowlisted endpoints, never persisted, never logged, and the route has no tracing (addresses stay out of Langfuse).
+- Verified live before wiring: Census coords+tract, LADBS/LAHD SoQL address queries, NFHL flood zone, DPI tract join, OpenFEMA state filter — all returned real records 2026-11-03. Owner/APN + SAM exclusions and EPA facility proximity stay deferred (parcel zone coverage and ECHO params unverified).
+- Verification: 12 server unit tests (parser, per-source degradation, fixture determinism, handler validation) + pre-screen e2e in fixture mode. Full gates below.
+
 ## Langfuse v4-safe tracing (join mode) — November 3, 2026 (Muse Code)
 
 The shared-trace design re-sent client.trace with the same id from the

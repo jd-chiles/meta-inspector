@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEMO_PRESREEN_ADDRESS,
+  PRESCREEN_FIXTURE_BANNER,
   PRESCREEN_ILLUSTRATIVE_BANNER,
-  PRESCREEN_NOT_CONNECTED,
   prescreenDecisionForAddress,
 } from "../../../src/features/walkthrough/building-prescreen";
 
@@ -20,10 +20,10 @@ describe("building pre-screen routing", () => {
     expect(PRESCREEN_ILLUSTRATIVE_BANNER).toBe("Illustrative example — live records not connected.");
   });
 
-  it("never presents fixture data for any other address", () => {
+  it("routes every other address to the live pipeline, never to the example", () => {
     for (const address of ["123 Demo St", "123 Demo Street", "456 Real Ave", "123 Demo St (example) Apt 2"]) {
-      expect(prescreenDecisionForAddress(address)).toEqual({ kind: "not-connected" });
+      expect(prescreenDecisionForAddress(address)).toEqual({ kind: "live" });
     }
-    expect(PRESCREEN_NOT_CONNECTED).toBe("Live check not connected for this address.");
+    expect(PRESCREEN_FIXTURE_BANNER).toBe("Sample pre-screen — not live public records.");
   });
 });
