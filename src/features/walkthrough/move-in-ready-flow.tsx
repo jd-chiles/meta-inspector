@@ -154,7 +154,9 @@ import {
   type FireSafetyDraftOutcome,
 } from "./decision-draft";
 import { deriveGuideModel } from "./walkthrough-guide";
-import { filmingScriptForRoom } from "./assistant-script";
+import { deriveAssistantNode, filmingScriptForRoom, type AssistantAction as GuideVoiceAction } from "./assistant-script";
+import GuideVoiceBar from "./guide-voice-bar";
+import { cancelSpeech, readVoiceEnabled, speakText, writeVoiceEnabled } from "./voice-guide";
 import VoicePrompt from "./voice-prompt";
 import GuidedTourView from "./guided-tour-view";
 import { SETUP_VOICE_QUESTIONS, checksForRoom } from "./voice-checks";
@@ -401,6 +403,8 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
   const [analysisError, setAnalysisError] = useState("");
   const [analysisNotice, setAnalysisNotice] = useState("");
   const [batchAttested, setBatchAttested] = useState(false);
+  const [voiceOn, setVoiceOn] = useState(() => readVoiceEnabled());
+  const spokenGuideKeyRef = useRef<string | null>(null);
   const [batchSendConsent, setBatchSendConsent] = useState(false);
   const batchAttestedRef = useRef(batchAttested);
   batchAttestedRef.current = batchAttested;
@@ -989,6 +993,31 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     totalElements: MOVE_IN_READY_ELEMENTS.length,
     signed: Boolean(completedResult && currentRecord?.signoff),
   }), [currentRecord, canCapture, roomClips, reviewCounts.resolved, completedResult]);
+  const assistantNode = useMemo(() => {
+    const analyzedRoomIds = new Set<MoveInReadyRoomId>();
+    for (const proposal of Object.values(currentRecord?.proposals ?? {})) {
+      if (proposal) analyzedRoomIds.add(proposal.analysisIdentity.roomId);
+    }
+    return deriveAssistantNode({
+      fundingType: currentRecord?.fundingType === "hud" ? "hud" : currentRecord?.fundingType === "lahsa" ? "lahsa" : "unknown",
+      flowStarted: capturedRoomIds.length > 0 ||
+        Object.keys(currentRecord?.proposals ?? {}).length > 0 ||
+        reviewCounts.resolved > 0 ||
+        Boolean(completedResult && currentRecord?.signoff),
+      canCapture: isCaptureSetupComplete(currentRecord),
+      pseudonym: currentRecord?.pseudonym ?? "",
+      evaluatorName: currentRecord?.evaluatorName ?? "",
+      roomIds: currentRecord?.roomIds ?? [...LEGACY_DEFAULT_ROOM_IDS],
+      filmedRoomIds: capturedRoomIds,
+      analyzedRoomIds: [...analyzedRoomIds],
+      analyzedTotal: analyzedRoomIds.size,
+      resolvedDecisions: reviewCounts.resolved,
+      nextUndecidedLabel: nextUndecidedElement?.label ?? null,
+      nextUndecidedId: nextUndecidedElement?.id ?? null,
+      signed: Boolean(completedResult && currentRecord?.signoff),
+      batchActive,
+    });
+  }, [currentRecord, capturedRoomIds, reviewCounts.resolved, nextUndecidedElement, completedResult, batchActive]);
   const profileSectionReady = {
     unit: Boolean(currentRecord?.pseudonym.trim() && currentRecord.fundingType !== "unknown" && currentRecord.unitType !== ""),
     evaluator: Boolean(currentRecord?.evaluatorName.trim() && currentRecord.evaluatorAgencyName.trim()),
@@ -1253,21 +1282,39 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     startBatchAnalysis();
   });
 
+  // Speak each new guidance node aloud. Silent on the tour step: the
+  // tour narrates its own nodes, so the bar yields to keep one voice.
+  useEffect(() => {
+    if (step === "guided") {
+      spokenGuideKeyRef.current = null;
+      cancelSpeech();
+      return;
+    }
+    if (!voiceOn) return;
+    if (spokenGuideKeyRef.current === assistantNode.key) return;
+    spokenGuideKeyRef.current = assistantNode.key;
+    speakText(assistantNode.speak);
+    return () => cancelSpeech();
+  }, [assistantNode, step, voiceOn]);
+
   // Step through the filming script on timed cues while a take is
-  // recording. The cue index always advances and the current cue captions
-  // on the viewport; spoken narration lives in the guided tour.
+  // recording. The cue index always advances (muted users read the current
+  // cue in the bar and viewport caption); speech additionally narrates when
+  // on. Silent on the tour step, where the tour narrates the take.
   useEffect(() => {
     if (!recordingInProgress) return;
     const cues = filmingScriptForRoom(selectedRoomId);
-    const timers = cues.map((_, index) =>
+    const timers = cues.map((cue, index) =>
       window.setTimeout(() => {
         setRecordingCueIndex(index);
+        if (voiceOn && stepRef.current !== "guided") speakText(cue);
       }, 800 + index * 7000));
     return () => {
       timers.forEach((timer) => window.clearTimeout(timer));
       setRecordingCueIndex(-1);
+      cancelSpeech();
     };
-  }, [recordingInProgress, selectedRoomId]);
+  }, [recordingInProgress, selectedRoomId, voiceOn]);
 
   // Dashboard: when a clip lands, bring the yes/no checks into view under
   // the pinned viewport. Fires only on the null-to-clip transition.
@@ -1511,6 +1558,28 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     batchAutoStartedRef.current = true;
     batchQueueRef.current = createRoomBatchQueue(rooms);
     beginBatchRun(rooms.length, true);
+  }
+
+  function handleGuideVoiceAction(action: GuideVoiceAction): void {
+    if (action.id === "setup") {
+      openProfileForRequiredDetails();
+    } else if (action.id === "film-room" && action.roomId) {
+      changeStep("capture");
+      selectRoom(action.roomId);
+      window.setTimeout(() => captureControlRef.current?.startCapture(), 400);
+    } else if (action.id === "analyze-all") {
+      changeStep("capture");
+      setBatchAttested(true);
+      setBatchSendConsent(true);
+      window.setTimeout(() => startBatchAnalysis(), 60);
+    } else if (action.id === "open-requirement" && action.elementId) {
+      changeStep("review");
+      openReviewElement(action.elementId);
+    } else if (action.id === "signoff") {
+      changeStep("signoff");
+    } else if (action.id === "dismiss") {
+      changeStep("home");
+    }
   }
 
   function cancelBatchAnalysis(): void {
@@ -3071,7 +3140,7 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
   }
 
   return (
-    <div className={styles.app} data-step={step} data-review-detail={mobileReviewDetailOpen ? "true" : "false"} data-testid="move-in-ready-app">
+    <div className={styles.app} data-step={step} data-guide-bar={step !== "guided" ? "true" : "false"} data-review-detail={mobileReviewDetailOpen ? "true" : "false"} data-testid="move-in-ready-app">
       <p className={styles.demoBanner} data-testid="synthetic-data-banner" role="note">
         Demo build · staged mock-unit data only — no real client data. Stills come only from filmed clips.
       </p>
@@ -3526,6 +3595,56 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
                     onClipChange={(clip, roomId) => handleClipChange(clip, roomId)}
                     detailsExpanded={clipDetailsExpanded}
                     onDetailsExpandedChange={setClipDetailsExpanded}
+                    trailing={clips[selectedRoomId] && canCapture && (() => {
+                      const parsed = parseRoomId(selectedRoomId);
+                      if (!parsed) return null;
+                      const questions = checksForRoom(record, selectedRoomId);
+                      const answers = record.voiceChecks[selectedRoomId] ?? [];
+                      const turn = voiceTurn?.roomId === selectedRoomId ? voiceTurn : null;
+                      const turnQuestion = turn ? questions[turn.index] : undefined;
+                      return (
+                        <section id="room-checks" className={styles.card} aria-label={`In-person checks for ${roomLabel(selectedRoomId)}`} data-testid="room-checks">
+                          <div className={styles.cardTitleRow}><div>
+                            <h2>In-person checks · {roomLabel(selectedRoomId)}</h2>
+                            <p className={styles.cardLead}>The camera can&apos;t prove these. Answer by voice or tap — answers attach to your decisions.</p>
+                          </div></div>
+                          <ul className={styles.voiceCheckList}>
+                            {questions.map((question, index) => {
+                              const entry = answers.find((item) => item.question === question);
+                              return (
+                                <li key={question}>
+                                  <span>{question}</span>
+                                  {entry ? <strong>{entry.answer}</strong> : (
+                                    <button className={styles.linkButton} type="button" onClick={() => { setVoiceTranscript(null); setVoiceTurn({ roomId: selectedRoomId, index }); }}>
+                                      Answer
+                                    </button>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                          {turn && turnQuestion && (
+                            <VoicePrompt
+                              key={`${selectedRoomId}:${turn.index}`}
+                              question={turnQuestion}
+                              autoSpeak
+                              transcript={voiceTranscript}
+                              onTranscript={(text) => {
+                                setVoiceTranscript(text);
+                                const parsedAnswer = parseYesNo(text);
+                                if (parsedAnswer) answerVoiceCheck(selectedRoomId, turnQuestion, parsedAnswer);
+                              }}
+                            >
+                              <div className={styles.voiceTapRow}>
+                                <button className={styles.secondaryButton} type="button" onClick={() => answerVoiceCheck(selectedRoomId, turnQuestion, "yes")}>Yes</button>
+                                <button className={styles.secondaryButton} type="button" onClick={() => answerVoiceCheck(selectedRoomId, turnQuestion, "no")}>No</button>
+                                <button className={styles.secondaryButton} type="button" onClick={() => answerVoiceCheck(selectedRoomId, turnQuestion, "skipped")}>Skip</button>
+                              </div>
+                            </VoicePrompt>
+                          )}
+                        </section>
+                      );
+                    })()}
                   >
                     <details className={`${styles.card} ${styles.analysisDisclosure}`} open={analysisExpanded} onToggle={(event) => setAnalysisExpanded(event.currentTarget.open)} data-testid="analysis-disclosure">
                       <summary className={styles.analysisSummary}>
@@ -3580,56 +3699,6 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
                       </div>
                     </details>
                   </WalkthroughVideoCapture>
-                  {clips[selectedRoomId] && canCapture && (() => {
-                    const parsed = parseRoomId(selectedRoomId);
-                    if (!parsed) return null;
-                    const questions = checksForRoom(record, selectedRoomId);
-                    const answers = record.voiceChecks[selectedRoomId] ?? [];
-                    const turn = voiceTurn?.roomId === selectedRoomId ? voiceTurn : null;
-                    const turnQuestion = turn ? questions[turn.index] : undefined;
-                    return (
-                      <section id="room-checks" className={styles.card} aria-label={`In-person checks for ${roomLabel(selectedRoomId)}`} data-testid="room-checks">
-                        <div className={styles.cardTitleRow}><div>
-                          <h2>In-person checks · {roomLabel(selectedRoomId)}</h2>
-                          <p className={styles.cardLead}>The camera can&apos;t prove these. Answer by voice or tap — answers attach to your decisions.</p>
-                        </div></div>
-                        <ul className={styles.voiceCheckList}>
-                          {questions.map((question, index) => {
-                            const entry = answers.find((item) => item.question === question);
-                            return (
-                              <li key={question}>
-                                <span>{question}</span>
-                                {entry ? <strong>{entry.answer}</strong> : (
-                                  <button className={styles.linkButton} type="button" onClick={() => { setVoiceTranscript(null); setVoiceTurn({ roomId: selectedRoomId, index }); }}>
-                                    Answer
-                                  </button>
-                                )}
-                              </li>
-                            );
-                          })}
-                        </ul>
-                        {turn && turnQuestion && (
-                          <VoicePrompt
-                            key={`${selectedRoomId}:${turn.index}`}
-                            question={turnQuestion}
-                            autoSpeak
-                            transcript={voiceTranscript}
-                            onTranscript={(text) => {
-                              setVoiceTranscript(text);
-                              const parsedAnswer = parseYesNo(text);
-                              if (parsedAnswer) answerVoiceCheck(selectedRoomId, turnQuestion, parsedAnswer);
-                            }}
-                          >
-                            <div className={styles.voiceTapRow}>
-                              <button className={styles.secondaryButton} type="button" onClick={() => answerVoiceCheck(selectedRoomId, turnQuestion, "yes")}>Yes</button>
-                              <button className={styles.secondaryButton} type="button" onClick={() => answerVoiceCheck(selectedRoomId, turnQuestion, "no")}>No</button>
-                              <button className={styles.secondaryButton} type="button" onClick={() => answerVoiceCheck(selectedRoomId, turnQuestion, "skipped")}>Skip</button>
-                            </div>
-                          </VoicePrompt>
-                        )}
-                      </section>
-                    );
-                  })()}
 
                 </>
               )}
@@ -4398,6 +4467,24 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
       </main>
 
       <div className={styles.appFooter}>
+        {step !== "guided" && (
+          <GuideVoiceBar
+            node={assistantNode}
+            voiceOn={voiceOn}
+            recording={recordingInProgress}
+            recordingCue={recordingInProgress ? filmingScriptForRoom(selectedRoomId)[recordingCueIndex] ?? null : null}
+            tourLanguage={record?.tourLanguage === "es" ? "es" : "en"}
+            onAction={handleGuideVoiceAction}
+            onVoiceToggle={() => {
+              const next = !voiceOn;
+              setVoiceOn(next);
+              writeVoiceEnabled(next);
+              if (!next) cancelSpeech();
+              else speakText(assistantNode.speak);
+            }}
+            onReplay={() => speakText(recordingInProgress ? filmingScriptForRoom(selectedRoomId)[0] ?? assistantNode.speak : assistantNode.speak)}
+          />
+        )}
         <nav className={styles.bottomNav} aria-label="Main navigation">
           <NavButton icon={<Home size={19} aria-hidden="true" />} label="Home" active={step === "home"} onClick={() => changeStep("home")} disabled={recordingInProgress} />
           <NavButton icon={<ClipboardCheck size={19} aria-hidden="true" />} label="Review" active={step === "review"} onClick={() => changeStep("review")} disabled={recordingInProgress} />

@@ -1,23 +1,22 @@
-.panel {
+.bar {
   position: fixed;
   z-index: 60;
-  right: 12px;
+  right: 0;
   bottom: calc(80px + env(safe-area-inset-bottom));
-  left: 12px;
-  max-width: 520px;
-  margin-left: auto;
-  border: 1px solid #c9d8ec;
-  border-radius: 14px;
+  left: 0;
+  border-top: 1px solid #c9d8ec;
+  border-bottom: 1px solid #c9d8ec;
   background: #fbfdff;
-  box-shadow: 0 12px 36px rgb(18 63 115 / 22%);
+  box-shadow: 0 -8px 24px rgb(18 63 115 / 14%);
 }
+
+.inner { max-width: 1000px; margin: 0 auto; }
 
 .header {
   display: flex;
   align-items: center;
   gap: 9px;
-  border-bottom: 1px solid #e1e9f3;
-  padding: 9px 10px 9px 12px;
+  padding: 9px 12px;
 }
 
 .avatar {
@@ -58,7 +57,7 @@
 
 .iconButton:hover { background: #e8f0fa; }
 
-.body { display: grid; gap: 8px; padding: 11px 12px 12px; }
+.body { display: grid; gap: 8px; border-top: 1px solid #e1e9f3; padding: 11px 12px 12px; }
 
 .message { margin: 0; color: #2c3c4f; font-size: 0.85rem; line-height: 1.45; }
 
@@ -89,13 +88,16 @@
 }
 
 @media (max-width: 719px) {
-  .panel { max-height: 46vh; overflow-y: auto; }
+  /* In-flow footer stack: the viewport-locked grid docks [bar][review
+     actions?][nav] with zero overlap. Nothing floats over tap targets. */
+  .bar { position: static; border-bottom: 0; box-shadow: none; }
+  .body { max-height: 38vh; overflow-y: auto; }
 }
 
 @media (min-width: 960px) {
-  .panel { right: 28px; bottom: 28px; left: auto; width: 380px; }
+  .bar { right: 28px; bottom: 28px; left: auto; width: 380px; border: 1px solid #c9d8ec; border-radius: 14px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .panel { box-shadow: 0 2px 8px rgb(18 63 115 / 18%); }
+  .bar { box-shadow: 0 -2px 8px rgb(18 63 115 / 18%); }
 }

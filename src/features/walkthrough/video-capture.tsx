@@ -89,6 +89,14 @@ export interface WalkthroughVideoCaptureProps {
   detailsExpanded?: boolean;
   onDetailsExpandedChange?: (expanded: boolean) => void;
   children?: ReactNode;
+  /**
+   * Content rendered at the end of the capture section, after the saved-clip
+   * disclosure. The sticky viewport dock can only pin while its parent
+   * section spans the pinned position, so room-level content that must stay
+   * beneath the pinned dock (in-person checks) belongs here, not as a
+   * sibling after the section.
+   */
+  trailing?: ReactNode;
   /** Lets the AI guide start the same capture the Start button triggers. */
   controlRef?: { current: { startCapture: () => void } | null };
   /** Current filming cue captioned on the viewport while recording. */
@@ -153,6 +161,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
     detailsExpanded,
     onDetailsExpandedChange,
     children,
+    trailing,
     controlRef,
     overlayCue = null,
   } = props;
@@ -988,6 +997,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
           {children}
         </div>
       </details>}
+      {trailing}
     </section>
   );
 
