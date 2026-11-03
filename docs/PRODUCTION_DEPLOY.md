@@ -7,22 +7,32 @@ app `metainspect-app`, registry `metainspectprod`. Interim: the tailscale
 funnel preview (ephemeral, dies with this box — not production).
 
 Live dev branch: app `metainspect-dev` in the same group/environment,
-deployed 2026-11-02 from `origin/dev` (`330d92c`, image
-`metainspect:mvp16`, revision `metainspect-dev--0000006`, Healthy).
-Set to scale-to-zero (minReplicas 0) 2026-11-02 to cut idle cost
-without Azure credits; cold start is covered by the boot splash.
-Review friction removal (save = in-person acknowledgment, spoken
-answers prefill draft-less detail), room skip on every filming card,
-bathroom faucet/toilet/fan scope, analysis timeouts + elapsed
-progress + wake-lock, share-sheet exports. Same 1 vCPU / 2 Gi shape,
-same secrets (own copies), own `APP_PUBLIC_ORIGIN` (single-value
-sender check cannot share prod's). minReplicas 0 since 2026-11-02
-(scale-to-zero; cold start covered by the boot splash).
-Registry pull via system-assigned identity + AcrPull (ACR admin stays
-off). Passcode-gated, live analysis mode. Prod (`metainspect-app`,
-mvp13) untouched. Redeploy: build + push a new tag,
-`az containerapp update -g metainspect-prod -n metainspect-dev
---image …`, re-verify 307 + origin probes.
+deployed 2026-11-03 from `origin/dev` (`500c521`, image
+`metainspect:mvp17`, revision `metainspect-dev--0000008`, Healthy).
+Sprints S0–S4 + Langfuse join-mode fix: 6-wide SAM with 2-room
+parallel analysis, 30 s analysis cap, Muse Voice Transcribe ASR,
+participant co-signature, visual-alarms flag, LAHSA-schema JSON +
+case note + bilingual landlord fix list, re-inspection mode, offline
+queue, GPS attestation, pre-screen card, Spanish tour, detector test
+shot, Langfuse tracing (dev secrets wired). minReplicas 0
+(scale-to-zero; cold start covered by the boot splash). Same
+1 vCPU / 2 Gi shape, own `APP_PUBLIC_ORIGIN`. Registry pull via
+system-assigned identity + AcrPull (ACR admin stays off).
+Passcode-gated, live analysis mode.
+
+Production: app `metainspect-app`, deployed 2026-11-03 from
+`origin/dev` (`500c521`, image `metainspect:mvp17`, revision
+`metainspect-app--0000018`, Healthy, minReplicas 1 warm). Same
+feature set as dev above; no Langfuse secrets on prod so tracing
+stays dormant there. Passcode-gated, live analysis mode.
+Rollback: `az containerapp update -g metainspect-prod -n
+metainspect-app --image metainspectprod.azurecr.io/metainspect:mvp16`
+(prior healthy revision `metainspect-app--0000017`).
+
+Redeploy: build + push a new tag, `az containerapp update` with the
+app name, re-verify 307 + origin probes. Note: `.dockerignore` must
+keep excluding `.muse`/`.agents` — agent worktrees carry full
+node_modules and will fill the build disk otherwise.
 
 ## Image
 
