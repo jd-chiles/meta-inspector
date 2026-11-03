@@ -453,9 +453,22 @@
 }
 
 .error {
+  flex-wrap: wrap;
   background: #fff0f0;
   color: #852c2c;
   box-shadow: inset 0 0 0 1px #f0c4c0;
+}
+
+.errorText {
+  margin: 0;
+  flex: 1 1 100%;
+}
+
+.errorActions {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .success {

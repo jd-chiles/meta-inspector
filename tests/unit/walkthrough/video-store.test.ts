@@ -352,6 +352,32 @@ describe("temporary in-memory room video store", () => {
   });
 });
 
+describe("persistent clip save failures", () => {
+  beforeEach(() => {
+    vi.stubGlobal("indexedDB", {});
+    openDBMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("names the underlying storage cause so a failed first save stays diagnosable", async () => {
+    const underlying = Object.assign(new Error("The database connection is closing."), { name: "InvalidStateError" });
+    openDBMock.mockResolvedValue({ put: vi.fn(async () => { throw underlying; }) });
+    const store = createVideoClipStore();
+
+    await expect(store.put(clip())).rejects.toMatchObject({
+      code: "IO",
+      message: expect.stringContaining("InvalidStateError: The database connection is closing."),
+    });
+    await expect(store.put(clip())).rejects.toMatchObject({
+      message: expect.stringContaining("retry or download a copy before leaving this page"),
+    });
+    store.close();
+  });
+});
+
 function clip(overrides: Partial<Parameters<typeof createStoredVideoClip>[0]> = {}) {
   const video = overrides.video ?? new Blob([new Uint8Array([0, 0, 0, 4])], { type: "video/mp4" });
   return createStoredVideoClip({

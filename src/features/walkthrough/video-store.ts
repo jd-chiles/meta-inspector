@@ -815,9 +815,17 @@ function normalizeStorageError(error: unknown): VideoStoreError {
       true,
     );
   }
+  // Surface the underlying cause: without it every storage failure is an
+  // undiagnosable dead end (notably first-save failures on phones).
+  // DOMException names/messages are generic engine text, never user data.
+  const causeName = typeof candidate?.name === "string" && candidate.name ? candidate.name : "Error";
+  const rawMessage = (error as { message?: unknown } | null)?.message;
+  const causeDetail = typeof rawMessage === "string" && rawMessage.trim()
+    ? rawMessage.trim().slice(0, 160)
+    : "no detail";
   return new VideoStoreError(
     "IO",
-    "The browser could not save this clip locally. The earlier clip is kept; retry or download a copy before leaving this page.",
+    `The browser could not save this clip locally (${causeName}: ${causeDetail}). The earlier clip is kept; retry or download a copy before leaving this page.`,
     true,
   );
 }

@@ -210,6 +210,13 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [localError, setLocalError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // The file behind a failed save attempt is retained in memory so the
+  // error banner's retry/download actions work on the actual clip instead
+  // of being dead advice. Cleared on success and on every new attempt.
+  const [failedAttempt, setFailedAttempt] = useState<{
+    file: File;
+    prompts: MoveInReadyPromptId[];
+  } | null>(null);
   const [cameraIssue, setCameraIssue] = useState<string | null>(null);
   const [pendingPromptIds, setPendingPromptIds] = useState<MoveInReadyPromptId[]>([]);
   const [showAllPrompts, setShowAllPrompts] = useState(false);
@@ -283,6 +290,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
     setStoreStatus("loading");
     setLocalError(null);
     setNotice(null);
+    setFailedAttempt(null);
     const savedScope = scopeKey;
 
     void store.get(sessionId, roomId).then((saved) => {
@@ -338,6 +346,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
     setBusy(true);
     setLocalError(null);
     setNotice(null);
+    setFailedAttempt(null);
     const currentRoom = rooms.find((candidate) => makeVideoClipId(sessionId, candidate.id) === sourceScope);
     if (!currentRoom || sourceScope !== scopeKeyRef.current) {
       setBusy(false);
@@ -406,6 +415,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
       pendingPromptIdsRef.current = [];
       setPendingPromptIds([]);
       setLocalError(safeErrorMessage(error, "Could not prepare this room clip. Any earlier clip is kept."));
+      setFailedAttempt({ file, prompts: [...promptsCapturedDuringRecording] });
     } finally {
       if (filePreparationAbortRef.current === controller) filePreparationAbortRef.current = null;
       if (isCurrentOperation(operation, sourceScope)) setBusy(false);
@@ -414,6 +424,18 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
 
   function isCurrentOperation(operation: number, sourceScope: string): boolean {
     return operation === operationRef.current && sourceScope === scopeKeyRef.current;
+  }
+
+  function downloadFailedAttempt(): void {
+    if (!failedAttempt) return;
+    const url = URL.createObjectURL(failedAttempt.file);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = failedAttempt.file.name;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 5000);
   }
 
   async function startCameraRecording(): Promise<void> {
@@ -958,7 +980,33 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
 
       {busy && <p className={styles.status} role="status">Checking the video and saving source frames on this device…</p>}
       {cameraIssue && <p className={styles.warning} role="status">{cameraIssue}</p>}
-      {localError && <p className={styles.error} role="alert">{localError}</p>}
+      {localError && (
+        <div className={styles.error} role="alert">
+          <p className={styles.errorText}>{localError}</p>
+          {failedAttempt && !busy && (
+            <div className={styles.errorActions}>
+              <button
+                type="button"
+                className={styles.secondaryButton}
+                data-testid="capture-retry-save"
+                onClick={() => {
+                  void processSelectedFile(failedAttempt.file, scopeKeyRef.current, failedAttempt.prompts);
+                }}
+              >
+                Retry save
+              </button>
+              <button
+                type="button"
+                className={styles.secondaryButton}
+                data-testid="capture-download-attempt"
+                onClick={downloadFailedAttempt}
+              >
+                Download this clip
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       {notice && !localError && <p className={styles.success} role="status"><Check size={17} aria-hidden="true" /> {notice}</p>}
       {storeStatus === "error" && !localError && (
         <p className={styles.error} role="alert">Local video storage is unavailable in this browser. Enable site storage or use another browser.</p>
