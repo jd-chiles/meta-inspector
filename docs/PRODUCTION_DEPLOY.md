@@ -8,7 +8,9 @@ funnel preview (ephemeral, dies with this box — not production).
 
 Live dev branch: app `metainspect-dev` in the same group/environment,
 deployed 2026-11-02 from `origin/dev` (`330d92c`, image
-`metainspect:mvp16`, revision `metainspect-dev--0000005`, Healthy).
+`metainspect:mvp16`, revision `metainspect-dev--0000006`, Healthy).
+Set to scale-to-zero (minReplicas 0) 2026-11-02 to cut idle cost
+without Azure credits; cold start is covered by the boot splash.
 Review friction removal (save = in-person acknowledgment, spoken
 answers prefill draft-less detail), room skip on every filming card,
 bathroom faucet/toilet/fan scope, analysis timeouts + elapsed
