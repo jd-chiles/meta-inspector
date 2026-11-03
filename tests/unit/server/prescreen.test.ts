@@ -68,6 +68,30 @@ const DISASTERS_OK = {
   }],
 };
 
+const HUD_OK = {
+  features: [{
+    attributes: {
+      PROPERTY_NAME_TEXT: "Angelus Plaza",
+      STD_ADDR: "245 S Hill St",
+      STD_CITY: "Los Angeles",
+      STD_ST: "CA",
+      STD_ZIP5: "90012",
+      TOTAL_ASSISTED_UNIT_COUNT: 757,
+      TOTAL_UNIT_COUNT: 761,
+      REAC_LAST_INSPECTION_SCORE: "92",
+      TROUBLED_CODE: "N",
+      OPIIS_RISK_CATEGORY: "Low",
+      PROGRAM_TYPE1: "Sec 8 NC",
+      HAS_ACTIVE_ASSISTANCE_IND: "Y",
+    },
+  }],
+};
+const TRI_OK = [{ facility_name: "WESTERN BRASS WORKS", tri_facility_id: "90012WSTRN1440N" }];
+const SAM_OK = {
+  totalRecords: 1,
+  exclusionRecords: [{ name: "SMITH CONSTRUCTION", exclusionType: "Ineligible (Proceedings Completed)", effectiveDate: "2024-01-15" }],
+};
+
 function fullLiveFetch(): FetchLike {
   return liveFetch({
     "geocoding.geo.census.gov": GEOCODE_OK,
@@ -76,6 +100,9 @@ function fullLiveFetch(): FetchLike {
     "u82d-eh7z": LADBS_OK,
     "cr8f-uc4j": LAHD_OK,
     "www.fema.gov/api/open": DISASTERS_OK,
+    "MULTIFAMILY_PROPERTIES_ASSISTED": HUD_OK,
+    "data.epa.gov/dmapservice": TRI_OK,
+    "api.sam.gov": SAM_OK,
   });
 }
 
@@ -131,8 +158,36 @@ describe("prescreen pipeline", () => {
     expect(report.sources.flood.status).toBe("ok");
     expect(report.sources.lead.status).toBe("ok");
     expect(report.sources.disasters.status).toBe("ok");
+    expect(report.sources.hudAssisted.status).toBe("ok");
+    expect(report.sources.hudAssisted.summary).toContain("none flagged troubled");
+    expect(report.sources.epaTri.status).toBe("ok");
+    expect(report.sources.sam.status).toBe("skipped");
     expect(seen.filter((url) => url.includes("geocoding.geo.census.gov"))).toHaveLength(1);
     expect(new Set(seen).size).toBe(seen.length);
+  });
+
+  it("flags troubled assisted properties and gates SAM on key plus owner", async () => {
+    const troubledFetch = liveFetch({
+      "geocoding.geo.census.gov": GEOCODE_OK,
+      "MULTIFAMILY_PROPERTIES_ASSISTED": {
+        features: [{ attributes: { PROPERTY_NAME_TEXT: "X", TROUBLED_CODE: "Y", OPIIS_RISK_CATEGORY: "High" } }],
+      },
+      "data.epa.gov/dmapservice": [],
+      "api.sam.gov": SAM_OK,
+    });
+    const noKey = await runPrescreen(QUERY, { fetchImpl: troubledFetch, samApiKey: null });
+    expect(noKey.sources.hudAssisted.summary).toContain("1 flagged troubled");
+    expect(noKey.sources.epaTri.status).toBe("empty");
+    expect(noKey.sources.sam.status).toBe("skipped");
+    expect(noKey.sources.sam.detail).toContain("SAM_API_KEY");
+
+    const noOwner = await runPrescreen(QUERY, { fetchImpl: troubledFetch, samApiKey: "free-key" });
+    expect(noOwner.sources.sam.status).toBe("skipped");
+    expect(noOwner.sources.sam.detail).toContain("assessor");
+
+    const keyed = await runPrescreen(QUERY, { fetchImpl: troubledFetch, samApiKey: "free-key", ownerName: "Smith Construction" });
+    expect(keyed.sources.sam.status).toBe("ok");
+    expect(keyed.sources.sam.summary).toContain("1 federal exclusion record");
   });
 
   it("degrades one dead source without failing the report", async () => {

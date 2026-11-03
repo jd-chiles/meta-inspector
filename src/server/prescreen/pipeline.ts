@@ -6,7 +6,8 @@
  * timeouts (geocode, then the slowest fan-out leg).
  *
  * Privacy: the queried address is sent only to the allowlisted public-record
- * endpoints in ./sources, never persisted, never logged, and never traced.
+ * endpoints in ./sources (plus api.sam.gov only when SAM_API_KEY is set),
+ * never persisted, never logged, and never traced.
  * This route intentionally has no Langfuse instrumentation: addresses are
  * PII-adjacent and do not belong in traces.
  */
@@ -14,10 +15,13 @@ import { parseAnalysisMode } from "../meta/adapter";
 import {
   geocodeAddress,
   queryDisasters,
+  queryEpaTri,
   queryFloodZone,
+  queryHudAssisted,
   queryLadbsCases,
   queryLahdViolations,
   queryLeadIndex,
+  querySamExclusion,
   type FetchLike,
   type PrescreenQuery,
   type PrescreenSourceResult,
@@ -35,12 +39,19 @@ export interface PrescreenReport {
     flood: PrescreenSourceResult;
     lead: PrescreenSourceResult;
     disasters: PrescreenSourceResult;
+    hudAssisted: PrescreenSourceResult;
+    epaTri: PrescreenSourceResult;
+    sam: PrescreenSourceResult;
   };
   fixtureNotice?: string;
 }
 
 export interface PrescreenPipelineDeps {
   fetchImpl?: FetchLike;
+  /** Server-only free SAM.gov key; absent means the SAM source reports skipped. */
+  samApiKey?: string | null;
+  /** Owner name for the SAM check; null until a parcel source verifies. */
+  ownerName?: string | null;
 }
 
 function failure(status: number, code: string, message: string) {
@@ -130,6 +141,25 @@ export function fixturePrescreen(query: PrescreenQuery): PrescreenReport {
         records: [{ title: "SEVERE WINTER STORMS", type: "Storm", date: "2024-04-01", area: "Los Angeles (County)" }],
         sourceUrl: "https://www.fema.gov/about/reports-and-data/openfema",
       },
+      hudAssisted: {
+        status: "ok",
+        summary: "2 assisted properties within 1 km, none flagged troubled.",
+        records: [{ property: "Sample Assisted Homes", address: "100 S MAIN ST Los Angeles CA 90012", units: "60/61 assisted", reac: "90", troubled: "No", risk: "Low" }],
+        sourceUrl: "https://catalog.data.gov/dataset/multifamily-housing-physical-inspection-scores",
+      },
+      epaTri: {
+        status: "ok",
+        summary: "1 TRI-reporting facility in ZIP 90012 (emissions context, not a disqualifier).",
+        records: [{ facility: "SAMPLE METAL WORKS", id: "90012SMPL12345" }],
+        sourceUrl: "https://www.epa.gov/enviro/web-services",
+      },
+      sam: {
+        status: "skipped",
+        summary: "Federal exclusion check needs a free SAM.gov API key on the server.",
+        detail: "Any registered SAM.gov user generates one free on Account Details; set it as SAM_API_KEY.",
+        records: [],
+        sourceUrl: "https://open.gsa.gov/api/exclusions-api/",
+      },
     },
   };
 }
@@ -161,15 +191,21 @@ export async function runPrescreen(
         flood: skipped("Address could not be located, so the flood check was skipped."),
         lead: skipped("Address could not be located, so the lead check was skipped."),
         disasters: skipped("Address could not be located, so the disaster check was skipped."),
+        hudAssisted: skipped("Address could not be located, so the assisted-housing lookup was skipped."),
+        epaTri: skipped("Address could not be located, so the emissions lookup was skipped."),
+        sam: skipped("Address could not be located, so the exclusion check was skipped."),
       },
     };
   }
-  const [ladbs, lahd, flood, lead, disasters] = await Promise.all([
+  const [ladbs, lahd, flood, lead, disasters, hudAssisted, epaTri, sam] = await Promise.all([
     queryLadbsCases(query, fetchImpl, signal),
     queryLahdViolations(query, fetchImpl, signal),
     queryFloodZone(hit, fetchImpl, signal),
     queryLeadIndex(hit, fetchImpl, signal),
     queryDisasters(hit.state ?? query.state.slice(0, 2).toUpperCase(), fetchImpl, signal),
+    queryHudAssisted(hit, fetchImpl, signal),
+    queryEpaTri(query.zip, fetchImpl, signal),
+    querySamExclusion(deps.ownerName ?? null, deps.samApiKey !== undefined ? deps.samApiKey : (process.env.SAM_API_KEY ?? null), fetchImpl, signal),
   ]);
   return {
     mode: "live",
@@ -177,7 +213,7 @@ export async function runPrescreen(
     coords: { lat: hit.lat, lon: hit.lon },
     tract: hit.tract,
     county: hit.county,
-    sources: { ladbs, lahd, flood, lead, disasters },
+    sources: { ladbs, lahd, flood, lead, disasters, hudAssisted, epaTri, sam },
   };
 }
 

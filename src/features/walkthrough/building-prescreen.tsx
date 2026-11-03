@@ -4,7 +4,8 @@
  * Building pre-screen card (REQ-R1). The demo literal still answers from a
  * labeled example; any other address runs the free public-record pipeline
  * (Census geocode, then LADBS cases, LAHD violations, FEMA flood, HUD lead
- * index, and OpenFEMA disasters in parallel — all keyless). The query is
+ * index, OpenFEMA disasters, HUD assisted housing, and EPA emissions in
+ * parallel — all keyless — plus a key-gated SAM exclusion check). The query is
  * never persisted: it lives in component state, is sent only to the
  * same-origin /api/prescreen route, and never enters the inspection record.
  */
@@ -53,6 +54,9 @@ interface PrescreenReport {
     flood: SourceResult;
     lead: SourceResult;
     disasters: SourceResult;
+    hudAssisted: SourceResult;
+    epaTri: SourceResult;
+    sam: SourceResult;
   };
   fixtureNotice?: string;
 }
@@ -97,13 +101,16 @@ function parseReport(value: unknown): PrescreenReport | null {
   const flood = parseSource(sources.flood);
   const lead = parseSource(sources.lead);
   const disasters = parseSource(sources.disasters);
-  if (!ladbs || !lahd || !flood || !lead || !disasters) return null;
+  const hudAssisted = parseSource(sources.hudAssisted);
+  const epaTri = parseSource(sources.epaTri);
+  const sam = parseSource(sources.sam);
+  if (!ladbs || !lahd || !flood || !lead || !disasters || !hudAssisted || !epaTri || !sam) return null;
   return {
     mode: record.mode,
     matchedAddress: record.matchedAddress.slice(0, 300),
     tract: typeof record.tract === "string" ? record.tract : null,
     county: typeof record.county === "string" ? record.county : null,
-    sources: { ladbs, lahd, flood, lead, disasters },
+    sources: { ladbs, lahd, flood, lead, disasters, hudAssisted, epaTri, sam },
     fixtureNotice: typeof record.fixtureNotice === "string" ? record.fixtureNotice : undefined,
   };
 }
@@ -111,9 +118,12 @@ function parseReport(value: unknown): PrescreenReport | null {
 const SOURCE_META: Array<{ key: keyof PrescreenReport["sources"]; title: string }> = [
   { key: "ladbs", title: "Open code-enforcement cases" },
   { key: "lahd", title: "LAHD violations" },
+  { key: "hudAssisted", title: "Assisted housing nearby" },
   { key: "flood", title: "Flood zone" },
   { key: "lead", title: "Lead risk" },
+  { key: "epaTri", title: "Nearby emissions" },
   { key: "disasters", title: "Disaster history" },
+  { key: "sam", title: "Federal exclusions" },
 ];
 
 function statusLabel(status: SourceStatus): string {

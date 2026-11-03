@@ -8,6 +8,11 @@
  * - FEMA NFHL flood zones, Layer 28 (no key)
  * - HUD Deteriorated Paint Index by tract (no key)
  * - OpenFEMA disaster declarations (no key)
+ * - HUD assisted multifamily properties nearby (no key)
+ * - EPA TRI facilities by ZIP (no key)
+ * - SAM.gov exclusions by owner name (free key, server env SAM_API_KEY;
+ *   dormant until the key exists AND an owner name is available — parcel
+ *   coverage for owner identity is unverified, so this reports skipped)
  *
  * Each source builds a fixed allowlisted URL from validated inputs (the
  * client never supplies a URL), fetches with a bounded timeout, and parses
@@ -57,10 +62,16 @@ export interface PrescreenQuery {
   zip: string;
 }
 
+/** Body-read budget: headers arriving must not let a trickling body hang the route. */
+const READ_TIMEOUT_MS = 5000;
+
 async function readBoundedText(response: Response): Promise<string | null> {
   try {
-    const text = await response.text();
-    if (text.length > MAX_UPSTREAM_BYTES) return null;
+    const text = (await Promise.race([
+      response.text(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), READ_TIMEOUT_MS)),
+    ])) as string | null;
+    if (text === null || text.length > MAX_UPSTREAM_BYTES) return null;
     return text;
   } catch {
     return null;
@@ -205,7 +216,7 @@ export async function queryLahdViolations(
   const params = new URLSearchParams({
     $where: `starts_with(address,'${prefix}')`,
     $limit: "50",
-    $select: "address,violationtype,violations_cited,violations_cleared,criscase,casetype,opendate",
+    $select: "apn,address,violationtype,violations_cited,violations_cleared,criscase,casetype,opendate",
   });
   const data = await fetchJson(`${LAHD_DATASET_URL}?${params.toString()}`, fetchImpl, signal);
   if (!Array.isArray(data)) {
@@ -215,6 +226,7 @@ export async function queryLahdViolations(
     const record = row as Record<string, unknown>;
     const cleared = record.violations_cleared;
     return {
+      apn: stringField(record.apn, 20) ?? "—",
       address: stringField(record.address, 140) ?? "—",
       violation: stringField(record.violationtype, 80) ?? "—",
       cited: typeof record.violations_cited === "string" ? record.violations_cited.slice(0, 10) : "—",
@@ -320,6 +332,184 @@ export async function queryLeadIndex(
       ? "HUD lead-risk record found for this tract."
       : `Lead-risk index ${percent.toFixed(1)}% of pre-1980 households with deteriorated paint in this tract.`,
     records: [{ tract: hit.tract, index: percent === null ? "—" : `${percent.toFixed(1)}%`, childrenUnder6: young }],
+  };
+}
+
+const HUD_ASSISTED_HUMAN_URL = "https://catalog.data.gov/dataset/multifamily-housing-physical-inspection-scores";
+
+/** Assisted multifamily properties within 1 km: subsidy, REAC score, troubled flag. */
+export async function queryHudAssisted(
+  hit: GeocodeHit,
+  fetchImpl: FetchLike,
+  signal?: AbortSignal,
+): Promise<PrescreenSourceResult> {
+  const base = { sourceUrl: HUD_ASSISTED_HUMAN_URL, records: [] as Record<string, string>[] };
+  const params = new URLSearchParams({
+    geometry: `${hit.lon},${hit.lat}`,
+    geometryType: "esriGeometryPoint",
+    inSR: "4326",
+    spatialRel: "esriSpatialRelIntersects",
+    distance: "1000",
+    units: "esriSRUnit_Meter",
+    outFields: [
+      "PROPERTY_NAME_TEXT",
+      "STD_ADDR",
+      "STD_CITY",
+      "STD_ST",
+      "STD_ZIP5",
+      "TOTAL_ASSISTED_UNIT_COUNT",
+      "TOTAL_UNIT_COUNT",
+      "REAC_LAST_INSPECTION_SCORE",
+      "TROUBLED_CODE",
+      "OPIIS_RISK_CATEGORY",
+      "PROGRAM_TYPE1",
+      "HAS_ACTIVE_ASSISTANCE_IND",
+    ].join(","),
+    returnGeometry: "false",
+    resultRecordCount: "10",
+    f: "json",
+  });
+  const data = await fetchJson(
+    `https://services.arcgis.com/VTyQ9soqVukalItT/arcgis/rest/services/MULTIFAMILY_PROPERTIES_ASSISTED/FeatureServer/0/query?${params.toString()}`,
+    fetchImpl,
+    signal,
+  );
+  const features = typeof data === "object" && data !== null ? (data as { features?: unknown }).features : null;
+  if (!Array.isArray(features)) {
+    return { ...base, status: "unavailable", summary: "Assisted-housing lookup could not run right now.", detail: "The HUD service did not answer. Try again later." };
+  }
+  if (features.length === 0) {
+    return { ...base, status: "empty", summary: "No HUD-assisted multifamily properties within 1 km." };
+  }
+  const rows = features.slice(0, 5).map((feature) => {
+    const attrs = (feature as { attributes?: Record<string, unknown> }).attributes ?? {};
+    const assisted = typeof attrs.TOTAL_ASSISTED_UNIT_COUNT === "number" ? String(attrs.TOTAL_ASSISTED_UNIT_COUNT) : "—";
+    const total = typeof attrs.TOTAL_UNIT_COUNT === "number" ? String(attrs.TOTAL_UNIT_COUNT) : "—";
+    return {
+      property: stringField(attrs.PROPERTY_NAME_TEXT, 80) ?? "—",
+      address: [attrs.STD_ADDR, attrs.STD_CITY, attrs.STD_ST, attrs.STD_ZIP5]
+        .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+        .join(" ").replace(/\s+/g, " ").slice(0, 140) || "—",
+      units: `${assisted}/${total} assisted`,
+      reac: stringField(attrs.REAC_LAST_INSPECTION_SCORE, 10) ?? "—",
+      troubled: attrs.TROUBLED_CODE === "Y" ? "Yes" : "No",
+      risk: stringField(attrs.OPIIS_RISK_CATEGORY, 20) ?? "—",
+    };
+  });
+  const troubled = (features as Array<{ attributes?: Record<string, unknown> }>)
+    .filter((feature) => feature.attributes?.TROUBLED_CODE === "Y").length;
+  return {
+    ...base,
+    status: "ok",
+    summary: troubled > 0
+      ? `${features.length} assisted ${features.length === 1 ? "property" : "properties"} within 1 km — ${troubled} flagged troubled.`
+      : `${features.length} assisted ${features.length === 1 ? "property" : "properties"} within 1 km, none flagged troubled.`,
+    records: rows,
+  };
+}
+
+const EPA_TRI_HUMAN_URL = "https://www.epa.gov/enviro/web-services";
+
+/** Toxics Release Inventory facilities reporting in the ZIP (emissions context). */
+export async function queryEpaTri(
+  zip: string,
+  fetchImpl: FetchLike,
+  signal?: AbortSignal,
+): Promise<PrescreenSourceResult> {
+  const base = { sourceUrl: EPA_TRI_HUMAN_URL, records: [] as Record<string, string>[] };
+  const cleanZip = zip.trim().slice(0, 5);
+  if (!/^\d{5}$/.test(cleanZip)) {
+    return { ...base, status: "skipped", summary: "Emissions lookup needs a 5-digit ZIP for this address." };
+  }
+  const data = await fetchJson(
+    `https://data.epa.gov/dmapservice/tri.tri_facility/zip_code/equals/${cleanZip}/1:25/JSON`,
+    fetchImpl,
+    signal,
+  );
+  if (!Array.isArray(data)) {
+    return { ...base, status: "unavailable", summary: "Emissions lookup could not run right now.", detail: "EPA Envirofacts did not answer. Try again later." };
+  }
+  if (data.length === 0) {
+    return { ...base, status: "empty", summary: `No TRI-reporting facilities in ZIP ${cleanZip}.` };
+  }
+  return {
+    ...base,
+    status: "ok",
+    summary: `${data.length} TRI-reporting ${data.length === 1 ? "facility" : "facilities"} in ZIP ${cleanZip} (emissions context, not a disqualifier).`,
+    records: data.slice(0, 5).map((row) => {
+      const record = row as Record<string, unknown>;
+      return {
+        facility: stringField(record.facility_name, 80) ?? "—",
+        id: stringField(record.tri_facility_id, 30) ?? "—",
+      };
+    }),
+  };
+}
+
+const SAM_HUMAN_URL = "https://open.gsa.gov/api/exclusions-api/";
+const ASSESSOR_PORTAL_URL = "https://portal.assessor.lacounty.gov/";
+
+/**
+ * Federal exclusion check for the property owner. Dormant until two gates
+ * clear: a free SAM.gov API key on the server (SAM_API_KEY) and an owner
+ * name (parcel coverage unverified — see module note). Either missing
+ * reports skipped with the exact remedy; nothing is guessed.
+ */
+export async function querySamExclusion(
+  ownerName: string | null,
+  apiKey: string | null,
+  fetchImpl: FetchLike,
+  signal?: AbortSignal,
+): Promise<PrescreenSourceResult> {
+  const base = { sourceUrl: SAM_HUMAN_URL, records: [] as Record<string, string>[] };
+  if (!apiKey || apiKey.trim().length === 0) {
+    return {
+      ...base,
+      status: "skipped",
+      summary: "Federal exclusion check needs a free SAM.gov API key on the server.",
+      detail: "Any registered SAM.gov user generates one free on Account Details; set it as SAM_API_KEY.",
+    };
+  }
+  if (!ownerName || ownerName.trim().length === 0) {
+    return {
+      ...base,
+      status: "skipped",
+      summary: "Federal exclusion check needs the property owner name.",
+      detail: `Owner identity is not in a verified free API. Look it up at ${ASSESSOR_PORTAL_URL} first.`,
+    };
+  }
+  const params = new URLSearchParams({
+    api_key: apiKey.trim(),
+    q: ownerName.trim().slice(0, 100),
+    page: "0",
+    size: "10",
+  });
+  const data = await fetchJson(
+    `https://api.sam.gov/entity-information/v4/exclusions?${params.toString()}`,
+    fetchImpl,
+    signal,
+  );
+  const root = typeof data === "object" && data !== null ? (data as Record<string, unknown>) : null;
+  const total = root && typeof root.totalRecords === "number" ? root.totalRecords : null;
+  const records = root && Array.isArray(root.exclusionRecords) ? root.exclusionRecords : null;
+  if (total === null || records === null) {
+    return { ...base, status: "unavailable", summary: "Federal exclusion check could not run right now.", detail: "SAM.gov did not return usable records. Try again later." };
+  }
+  if (total === 0 || records.length === 0) {
+    return { ...base, status: "empty", summary: `No federal exclusions found matching "${ownerName.trim().slice(0, 60)}".` };
+  }
+  return {
+    ...base,
+    status: "ok",
+    summary: `${total} federal exclusion ${total === 1 ? "record" : "records"} matching the owner name — verify identity before relying on it.`,
+    records: records.slice(0, 5).map((row) => {
+      const record = row as Record<string, unknown>;
+      return {
+        name: stringField(record.name ?? record.entityName, 80) ?? "—",
+        type: stringField(record.exclusionType, 60) ?? "—",
+        effective: typeof record.effectiveDate === "string" ? record.effectiveDate.slice(0, 10) : "—",
+      };
+    }),
   };
 }
 

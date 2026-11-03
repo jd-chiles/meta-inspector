@@ -26,10 +26,13 @@ test("pre-screen answers the demo literal and screens real addresses", async ({ 
   const result = card.getByTestId("prescreen-result");
   await expect(result).toContainText("Sample pre-screen — not live public records.");
   await expect(card.getByTestId("prescreen-matched")).toContainText("200 N Spring St");
-  for (const key of ["ladbs", "lahd", "flood", "lead", "disasters"]) {
+  for (const key of ["ladbs", "lahd", "flood", "lead", "disasters", "hudAssisted", "epaTri", "sam"]) {
     await expect(card.getByTestId(`prescreen-source-${key}`)).toBeVisible();
   }
   await expect(card.getByTestId("prescreen-source-ladbs")).toContainText("Found");
   await expect(card.getByTestId("prescreen-source-lahd")).toContainText("None found");
   await expect(card.getByTestId("prescreen-source-flood")).toContainText("Flood Zone X");
+  await expect(card.getByTestId("prescreen-source-hudAssisted")).toContainText("none flagged troubled");
+  await expect(card.getByTestId("prescreen-source-epaTri")).toContainText("TRI-reporting facility");
+  await expect(card.getByTestId("prescreen-source-sam")).toContainText("Skipped");
 });

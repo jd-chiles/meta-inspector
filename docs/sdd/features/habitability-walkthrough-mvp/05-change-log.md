@@ -1,5 +1,11 @@
 # Change log
 
+## Pre-screen round 2: assisted housing, emissions, exclusions (REQ-R1) — November 3, 2026 (Muse Code)
+
+- Three more sources join the fan-out: HUD assisted multifamily within 1 km (subsidy, REAC score, troubled flag, risk), EPA TRI facilities by ZIP (emissions context), and SAM.gov exclusions by owner name (dormant: needs free `SAM_API_KEY` plus an owner name; parcel coverage for owner identity unverified, so it reports skipped with the assessor-portal remedy). LAHD rows gain the APN. Upstream body reads are now time-bounded (5 s) after a trickling EPA response hung the route past the client timeout; full 8-source live report returns in ~4 s.
+- Verified live before wiring: assisted-properties proximity (Angelus Plaza REAC 92), TRI-by-ZIP facilities, SAM endpoint/params from GSA docs. ECHO facility-radius stays deferred (service URL not in static docs); LA parcel owner identity stays deferred (only a regional Zone_8 layer and APN-only tables found).
+- Verification: extended server unit tests (troubled flag, SAM key/owner gating) + pre-screen e2e asserts all eight sources. Full gates below.
+
 ## Live building pre-screen, free sources (REQ-R1 live path) — November 3, 2026 (Muse Code)
 
 - REQ-R1 live: `POST /api/prescreen` (`src/server/prescreen/`) runs one Census geocode, then five keyless sources in parallel — LADBS open cases (Socrata `u82d-eh7z`), LAHD violations (Socrata `cr8f-uc4j`), FEMA NFHL flood Layer 28, HUD deteriorated-paint index by tract, OpenFEMA disaster declarations. Each source degrades independently (ok/empty/unavailable/skipped); the demo literal still answers from the labeled example. Queries are sent only to the allowlisted endpoints, never persisted, never logged, and the route has no tracing (addresses stay out of Langfuse).
