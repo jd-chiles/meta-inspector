@@ -97,6 +97,33 @@ export type ConfirmDraftResult =
   | { ok: true; draft: DecisionDraft }
   | { ok: false; reason: string };
 
+/** Deficiency-detail fields the evaluator completes for a D decision. */
+export interface ElementDetailsInput {
+  issueDescription: string;
+  correction: string;
+  completionDate: string;
+  reinspectionDate: string;
+}
+
+/**
+ * True when a one-tap confirm would fail for an incomplete D correction
+ * plan. The guided tour routes those elements to its in-tour detail
+ * card instead of leaving for the review detail form; every other
+ * confirm failure (no draft, stale clip, empty observation, missing
+ * stills) still needs the full review UI.
+ */
+export function confirmNeedsDetails(proposal: ModelElementProposal | undefined): boolean {
+  if (!proposal || proposal.modelSuggestion !== "D") return false;
+  const suggestion = proposal.deficiencySuggestion;
+  return !(
+    suggestion &&
+    suggestion.deficientArea.trim() &&
+    suggestion.correction.trim() &&
+    suggestion.completionDate.trim() &&
+    suggestion.reinspectionDate.trim()
+  );
+}
+
 /**
  * Build a complete decision draft for one-tap confirm. The confirm tap is
  * the evaluator's in-person acknowledgment and plan review, so the caller

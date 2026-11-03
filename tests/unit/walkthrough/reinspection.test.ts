@@ -203,6 +203,7 @@ describe("re-inspection review queue (REQ-L1)", () => {
       online: true,
       batchActive: false,
       skippedElementIds: new Set(),
+      detailsElementId: null,
     });
     expect(node).toEqual({ kind: "review-item", elementId: "demo-item-11" });
   });

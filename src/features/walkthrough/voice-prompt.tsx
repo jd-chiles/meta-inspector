@@ -61,6 +61,14 @@ export default function VoicePrompt({ question, autoSpeak, language = "en", tran
     }
   }, [question, language, stopAll]);
 
+  // A new question cancels the previous turn first: without this, a
+  // late transcript can land on the next question after navigation and
+  // record an answer against the wrong prompt. Declared before the
+  // auto-speak effect so mount order is stop (no-op) then speak.
+  useEffect(() => {
+    stopAll();
+  }, [question, stopAll]);
+
   useEffect(() => {
     if (autoSpeak) void speak();
   }, [autoSpeak, speak]);
@@ -71,6 +79,8 @@ export default function VoicePrompt({ question, autoSpeak, language = "en", tran
       return;
     }
     stopAll();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setTranscribeProvider(null);
     setPhase("listening");
     try {
@@ -78,14 +88,24 @@ export default function VoicePrompt({ question, autoSpeak, language = "en", tran
       listenRef.current = handle;
       const { blob } = await handle.done;
       listenRef.current = null;
+      if (controller.signal.aborted) return;
       setPhase("transcribing");
-      const result = await transcribeClip(blob);
+      const result = await transcribeClip(blob, controller.signal);
+      // Drop transcripts from a superseded turn: only the current
+      // controller may deliver. Aborts land silently, never as errors.
+      if (controller.signal.aborted || abortRef.current !== controller) return;
       setTranscribeProvider(result.providerUsed);
       setPhase("ready");
       onTranscript(result.text.trim());
     } catch {
       listenRef.current = null;
+      if (controller.signal.aborted || abortRef.current !== controller) {
+        setPhase("ready");
+        return;
+      }
       setPhase("error");
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
     }
   }, [phase, stopAll, onTranscript]);
 

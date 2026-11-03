@@ -20,7 +20,9 @@ import {
   VolumeX,
 } from "lucide-react";
 import {
+  EVALUATOR_ATTESTATION_TEXT,
   MOVE_IN_READY_ELEMENTS,
+  PARTICIPANT_ATTESTATION_TEXT,
   roomLabel,
   type MoveInReadyElementId,
   type MoveInReadyRoomId,
@@ -45,10 +47,20 @@ import WalkthroughVideoCapture from "./video-capture";
 import DetectorTestCapture, { type CapturedDetectorStill } from "./detector-test-capture";
 import { DETECTOR_TEST_STILL_PREFIX, isDetectorPresenceQuestion, isDetectorTestRoom } from "./detector-test";
 import {
+  confirmNeedsDetails,
+  createDecisionDraft,
+  prefillDraftFromProposal,
+  type DecisionDraft,
+  type ElementDetailsInput,
+  type FireSafetyDraftOutcome,
+} from "./decision-draft";
+import {
   deriveTourNode,
   elementLabel,
   filmRoomShots,
   guidedReviewQueue,
+  LANDLORD_VOICE_QUESTION,
+  LANDLORD_VOICE_QUESTION_ES,
   nameReadbackScript,
   REVIEW_VOICE_QUESTION,
   REVIEW_VOICE_QUESTION_ES,
@@ -96,6 +108,32 @@ export interface GuidedTourBindings {
   confirmProposalDraft: (elementId: MoveInReadyElementId) => void;
   markNeedsCheck: (elementId: MoveInReadyElementId, note: string) => void;
   changeStep: (step: "home" | "capture" | "review" | "signoff" | "profile") => void;
+  /** Current decision drafts for resuming in-tour detail edits. */
+  drafts: Partial<Record<MoveInReadyElementId, DecisionDraft>>;
+  /** Save a D correction plan through the detail-form validators. */
+  saveElementDetails: (elementId: MoveInReadyElementId, details: ElementDetailsInput) => boolean;
+  /** Save independent Fire Safety 11a/11b marks. */
+  saveFireSafety: (unit: FireSafetyDraftOutcome, publicArea: FireSafetyDraftOutcome) => boolean;
+  setAgencyName: (name: string) => void;
+  setLandlordDiscussion: (value: "" | "yes" | "no") => void;
+  setLandlordDate: (date: string) => void;
+  setLeadershipName: (name: string) => void;
+  setLeadershipSignature: (signature: string) => void;
+  setLeadershipDate: (date: string) => void;
+  participantName: string;
+  participantSignature: string;
+  participantAttested: boolean;
+  setParticipantName: (name: string) => void;
+  setParticipantSignature: (signature: string) => void;
+  setParticipantAttested: (attested: boolean) => void;
+  saveParticipantSignoff: () => boolean;
+  signoffName: string;
+  signoffAttested: boolean;
+  setSignoffName: (name: string) => void;
+  setSignoffAttested: (attested: boolean) => void;
+  saveSignoff: () => boolean;
+  /** Latest save failure message for the tour's save cards. */
+  actionError: string;
 }
 
 const UNIT_OPTIONS: readonly { value: MoveInReadyUnitType; label: string }[] = [
@@ -139,6 +177,11 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
   const [detectorSkipped, setDetectorSkipped] = useState<ReadonlySet<MoveInReadyRoomId>>(new Set());
   const [detectorSaving, setDetectorSaving] = useState(false);
   const [detectorError, setDetectorError] = useState<string | null>(null);
+  const [detailsElementId, setDetailsElementId] = useState<MoveInReadyElementId | null>(null);
+  const [detailsFields, setDetailsFields] = useState<ElementDetailsInput>({ issueDescription: "", correction: "", completionDate: "", reinspectionDate: "" });
+  const [fireUnit, setFireUnit] = useState<FireSafetyDraftOutcome>("");
+  const [firePublic, setFirePublic] = useState<FireSafetyDraftOutcome>("");
+  const [saveTried, setSaveTried] = useState(false);
   const speechControllerRef = useRef<AbortController | null>(null);
   const topRef = useRef<HTMLDivElement>(null);
 
@@ -156,9 +199,10 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
     online: bindings.online,
     batchActive: bindings.batchActive,
     skippedElementIds: skipped,
+    detailsElementId,
   }), [
     started, bathsConfirmed, analysisSettled, bindings.record, bindings.capturedRoomIds,
-    bindings.analysisMode, bindings.online, bindings.batchActive, skipped,
+    bindings.analysisMode, bindings.online, bindings.batchActive, skipped, detailsElementId,
   ]);
   const nodeKey = tourNodeKey(node);
 
@@ -262,15 +306,9 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
     if (node.kind === "analyze" && bindings.batchActive) setBatchSeen(true);
   }, [node.kind, nodeKey, bindings.batchActive]);
 
-  // Auto-start batch analysis once per analyze visit when it can run.
-  useEffect(() => {
-    if (node.kind !== "analyze") return;
-    if (bindings.analysisMode !== "live" || !bindings.online) return;
-    if (bindings.batchActive || batchSeen || analysisSettled) return;
-    bindings.grantBatchConsent();
-    bindings.startBatchAnalysis();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeKey, bindings.analysisMode, bindings.online, bindings.batchActive, batchSeen, analysisSettled]);
+  // Paid analysis never auto-starts: the evaluator taps Start analysis
+  // on the analyze card, so a reload or revisit cannot re-send paid
+  // calls without a fresh explicit tap.
 
   // Batch finished clean: move on without another tap.
   useEffect(() => {
@@ -300,6 +338,53 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
   const skipElement = useCallback((elementId: MoveInReadyElementId) => {
     setSkipped((current) => new Set(current).add(elementId));
   }, []);
+
+  // Save cards show the flow's save error only after an attempt on the
+  // current node, so stale errors from other steps never greet the node.
+  useEffect(() => {
+    setSaveTried(false);
+  }, [nodeKey]);
+
+  // Prefill deficiency details from the current draft (resumed edits win)
+  // or the AI suggestion when the card opens. Runs on entry only so
+  // typing is never clobbered by record updates.
+  useEffect(() => {
+    if (node.kind !== "element-details") return;
+    const draft = bindings.drafts[node.elementId];
+    if (draft && (draft.issueDescription || draft.correction || draft.completionDate || draft.reinspectionDate)) {
+      setDetailsFields({
+        issueDescription: draft.issueDescription,
+        correction: draft.correction,
+        completionDate: draft.completionDate,
+        reinspectionDate: draft.reinspectionDate,
+      });
+      return;
+    }
+    const proposal = bindings.record.proposals[node.elementId];
+    if (!proposal) {
+      setDetailsFields({ issueDescription: "", correction: "", completionDate: "", reinspectionDate: "" });
+      return;
+    }
+    const prefilled = prefillDraftFromProposal(createDecisionDraft({ status: "unreviewed" }), proposal);
+    setDetailsFields({
+      issueDescription: prefilled.issueDescription,
+      correction: prefilled.correction,
+      completionDate: prefilled.completionDate,
+      reinspectionDate: prefilled.reinspectionDate,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeKey]);
+
+  // Prefill Fire Safety marks from the draft, else the saved assessment.
+  useEffect(() => {
+    if (node.kind !== "fire-safety") return;
+    const draft = bindings.drafts["demo-smoke-co"];
+    const decision = bindings.record.decisions["demo-smoke-co"];
+    const saved = decision && "fireSafetyAssessment" in decision ? decision.fireSafetyAssessment : undefined;
+    setFireUnit(draft?.fireSafetyUnitDetectors || saved?.unitDetectors || "");
+    setFirePublic(draft?.fireSafetyPublicAreaDetectors || saved?.publicAreaDetectors || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeKey]);
 
   const agentStatus: AgentStatus =
     tourSpeaking || voicePhase === "speaking"
@@ -341,15 +426,37 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
     if (text.trim()) sayNow(reprompts.yesNo);
   }, [bindings, sayNow, reprompts]);
 
+  const attemptReviewConfirm = useCallback((elementId: MoveInReadyElementId) => {
+    // A Deficient draft without a complete correction plan completes it
+    // on the in-tour detail card (except Fire Safety, whose plan shares
+    // the detail form with its 11a/11b marks); every other confirm path
+    // is unchanged.
+    if (elementId !== "demo-smoke-co" && confirmNeedsDetails(bindings.record.proposals[elementId])) {
+      setDetailsElementId(elementId);
+      return;
+    }
+    bindings.confirmProposalDraft(elementId);
+  }, [bindings]);
+
   const handleReviewTranscript = useCallback((elementId: MoveInReadyElementId) => (text: string) => {
     bindings.onVoiceTranscript(text);
     const action = reviewVoiceAction(text);
     if (action === "confirm") {
-      bindings.confirmProposalDraft(elementId);
+      attemptReviewConfirm(elementId);
       return;
     }
     if (action === "edit") {
       bindings.reviewProposalDraft(elementId);
+      return;
+    }
+    if (text.trim()) sayNow(reprompts.yesNo);
+  }, [bindings, sayNow, reprompts, attemptReviewConfirm]);
+
+  const handleLandlordTranscript = useCallback((text: string) => {
+    bindings.onVoiceTranscript(text);
+    const parsed = parseYesNo(text);
+    if (parsed) {
+      bindings.setLandlordDiscussion(parsed);
       return;
     }
     if (text.trim()) sayNow(reprompts.yesNo);
@@ -528,6 +635,9 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
               This demo inspects a staged mock unit only: no tenants, faces, addresses, personal
               documents, or real case notes. Each filmed clip is sent to Meta for AI analysis.
               Local deletion does not delete provider copies.
+            </p>
+            <p className={flowStyles.helpText} data-testid="tour-consent-path">
+              LAHSA / Form 1083 path · Unit {bindings.record.pseudonym.trim() || "nickname auto-fills on confirm"}
             </p>
             <button
               className={`${flowStyles.button} ${flowStyles.wideButton}`}
@@ -775,7 +885,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
                     type="button"
                     data-testid="tour-confirm-draft"
                     aria-label={`Confirm: I checked this in person and agree: ${approved ? "Approved" : "Deficient"}`}
-                    onClick={() => bindings.confirmProposalDraft(node.elementId)}
+                    onClick={() => attemptReviewConfirm(node.elementId)}
                   >
                     Confirm: {approved ? "Approved" : "Deficient"} <ArrowRight size={17} aria-hidden="true" />
                   </button>
@@ -803,6 +913,306 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
             </div>
           );
         })()}
+
+        {node.kind === "element-details" && (
+          <div className={flowStyles.card} key={node.elementId} data-testid="tour-details-card">
+            <p className={flowStyles.draftLabel}>Deficiency plan</p>
+            <h2>{elementLabel(node.elementId)}</h2>
+            <p className={flowStyles.helpText}>The AI draft has no complete correction plan. Fill in every field — saving records your in-person decision.</p>
+            <div role="group" aria-label="Deficiency details">
+              <label className={styles.stackLabel} htmlFor="tour-details-issue">Issue description</label>
+              <textarea
+                id="tour-details-issue"
+                className={flowStyles.formInput}
+                data-testid="tour-details-issue"
+                value={detailsFields.issueDescription}
+                maxLength={1000}
+                rows={2}
+                onChange={(event) => setDetailsFields((current) => ({ ...current, issueDescription: event.currentTarget.value }))}
+              />
+              <label className={styles.stackLabel} htmlFor="tour-details-correction">Correction</label>
+              <textarea
+                id="tour-details-correction"
+                className={flowStyles.formInput}
+                data-testid="tour-details-correction"
+                value={detailsFields.correction}
+                maxLength={1000}
+                rows={2}
+                onChange={(event) => setDetailsFields((current) => ({ ...current, correction: event.currentTarget.value }))}
+              />
+              <label className={styles.stackLabel} htmlFor="tour-details-completion">Completion date</label>
+              <input
+                id="tour-details-completion"
+                className={flowStyles.formInput}
+                data-testid="tour-details-completion"
+                type="date"
+                value={detailsFields.completionDate}
+                onChange={(event) => setDetailsFields((current) => ({ ...current, completionDate: event.currentTarget.value }))}
+              />
+              <label className={styles.stackLabel} htmlFor="tour-details-reinspection">Reinspection date</label>
+              <input
+                id="tour-details-reinspection"
+                className={flowStyles.formInput}
+                data-testid="tour-details-reinspection"
+                type="date"
+                value={detailsFields.reinspectionDate}
+                onChange={(event) => setDetailsFields((current) => ({ ...current, reinspectionDate: event.currentTarget.value }))}
+              />
+            </div>
+            {saveTried && bindings.actionError && <p className={flowStyles.inlineError} role="alert">{bindings.actionError}</p>}
+            <div className={styles.reviewActions}>
+              <button
+                className={flowStyles.button}
+                type="button"
+                data-testid="tour-details-save"
+                onClick={() => {
+                  setSaveTried(true);
+                  if (bindings.saveElementDetails(node.elementId, detailsFields)) setDetailsElementId(null);
+                }}
+              >
+                Save Deficient decision <ArrowRight size={17} aria-hidden="true" />
+              </button>
+              <button
+                className={flowStyles.secondaryButton}
+                type="button"
+                data-testid="tour-details-form"
+                onClick={() => bindings.reviewProposalDraft(node.elementId)}
+              >
+                Open full detail form
+              </button>
+            </div>
+          </div>
+        )}
+
+        {node.kind === "fire-safety" && (
+          <div className={flowStyles.card} data-testid="tour-fire-card">
+            <p className={flowStyles.draftLabel}>Fire Safety · 11a + 11b</p>
+            <h2>Two separate marks</h2>
+            <p className={flowStyles.helpText}>Unit detectors and public-area detectors are independent Form 1083 marks. Set each one.</p>
+            <div className={styles.optionGrid} role="group" aria-label="Unit detectors (11a)">
+              {(["A", "D", "needs-human-check"] as const).map((outcome) => (
+                <button
+                  key={`unit-${outcome}`}
+                  type="button"
+                  className={flowStyles.secondaryButton}
+                  data-testid={`tour-fire-unit-${outcome}`}
+                  aria-pressed={fireUnit === outcome}
+                  onClick={() => setFireUnit(outcome)}
+                >
+                  Unit: {outcome === "A" ? "Meets" : outcome === "D" ? "Deficient" : "Needs check"}
+                </button>
+              ))}
+            </div>
+            <div className={styles.optionGrid} role="group" aria-label="Public-area detectors (11b)">
+              {(["A", "D", "needs-human-check"] as const).map((outcome) => (
+                <button
+                  key={`public-${outcome}`}
+                  type="button"
+                  className={flowStyles.secondaryButton}
+                  data-testid={`tour-fire-public-${outcome}`}
+                  aria-pressed={firePublic === outcome}
+                  onClick={() => setFirePublic(outcome)}
+                >
+                  Public: {outcome === "A" ? "Meets" : outcome === "D" ? "Deficient" : "Needs check"}
+                </button>
+              ))}
+            </div>
+            {saveTried && bindings.actionError && <p className={flowStyles.inlineError} role="alert">{bindings.actionError}</p>}
+            <div className={styles.reviewActions}>
+              <button
+                className={flowStyles.button}
+                type="button"
+                data-testid="tour-fire-save"
+                disabled={fireUnit === "" || firePublic === ""}
+                onClick={() => {
+                  setSaveTried(true);
+                  bindings.saveFireSafety(fireUnit, firePublic);
+                }}
+              >
+                Save Fire Safety marks <ArrowRight size={17} aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {node.kind === "agency" && (
+          <div className={flowStyles.card} data-testid="tour-agency-card">
+            <p className={flowStyles.draftLabel}>Form 1083 · Evaluator</p>
+            <h2>Agency name</h2>
+            <label className={styles.stackLabel} htmlFor="tour-agency-input">Evaluator agency name</label>
+            <input
+              id="tour-agency-input"
+              className={flowStyles.formInput}
+              data-testid="tour-agency-input"
+              value={bindings.record.evaluatorAgencyName}
+              maxLength={120}
+              placeholder="Agency name"
+              onChange={(event) => bindings.setAgencyName(event.currentTarget.value)}
+            />
+            <p className={flowStyles.helpText}>Required by Form 1083. The tour continues once it is filled.</p>
+          </div>
+        )}
+
+        {node.kind === "landlord-discussion" && (
+          <div className={flowStyles.card} data-testid="tour-landlord-card">
+            <p className={flowStyles.draftLabel}>Form 1083 · Landlord</p>
+            <VoicePrompt
+              question={lang === "es" ? LANDLORD_VOICE_QUESTION_ES : LANDLORD_VOICE_QUESTION}
+              autoSpeak={speakOn}
+              language={lang}
+              transcript={bindings.voiceTranscript}
+              onTranscript={handleLandlordTranscript}
+              onPhaseChange={setVoicePhase}
+            >
+              <div className={styles.optionGrid} data-testid="tour-options" role="group" aria-label="Discussed with landlord">
+                <button type="button" className={flowStyles.secondaryButton} onClick={() => bindings.setLandlordDiscussion("yes")}>
+                  YES
+                </button>
+                <button type="button" className={flowStyles.secondaryButton} onClick={() => bindings.setLandlordDiscussion("no")}>
+                  NO
+                </button>
+              </div>
+            </VoicePrompt>
+            {bindings.record.landlordDiscussion === "yes" && (
+              <div>
+                <label className={styles.stackLabel} htmlFor="tour-landlord-date">Discussion date</label>
+                <input
+                  id="tour-landlord-date"
+                  className={flowStyles.formInput}
+                  data-testid="tour-landlord-date"
+                  type="date"
+                  value={bindings.record.landlordDiscussionDate}
+                  onChange={(event) => bindings.setLandlordDate(event.currentTarget.value)}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {node.kind === "leadership" && (
+          <div className={flowStyles.card} data-testid="tour-leadership-card">
+            <p className={flowStyles.draftLabel}>Form 1083 · Agency leadership</p>
+            <h2>Leadership sign-off</h2>
+            <p className={flowStyles.helpText}>Your agency requires a leadership sign-off before export.</p>
+            <label className={styles.stackLabel} htmlFor="tour-leadership-name">Printed name and title</label>
+            <input
+              id="tour-leadership-name"
+              className={flowStyles.formInput}
+              data-testid="tour-leadership-name"
+              value={bindings.record.leadershipNameAndTitle}
+              maxLength={120}
+              onChange={(event) => bindings.setLeadershipName(event.currentTarget.value)}
+            />
+            <label className={styles.stackLabel} htmlFor="tour-leadership-signature">Leadership signature</label>
+            <input
+              id="tour-leadership-signature"
+              className={flowStyles.formInput}
+              data-testid="tour-leadership-signature"
+              value={bindings.record.leadershipSignoff}
+              maxLength={120}
+              onChange={(event) => bindings.setLeadershipSignature(event.currentTarget.value)}
+            />
+            <label className={styles.stackLabel} htmlFor="tour-leadership-date">Signature date</label>
+            <input
+              id="tour-leadership-date"
+              className={flowStyles.formInput}
+              data-testid="tour-leadership-date"
+              type="date"
+              value={bindings.record.leadershipSignedAt}
+              onChange={(event) => bindings.setLeadershipDate(event.currentTarget.value)}
+            />
+          </div>
+        )}
+
+        {node.kind === "participant" && (
+          <div className={flowStyles.card} data-testid="tour-participant-card">
+            <p className={flowStyles.draftLabel}>Form 1083 · Participant</p>
+            <h2>Participant sign-off</h2>
+            <p className={flowStyles.helpText}>{PARTICIPANT_ATTESTATION_TEXT}</p>
+            <label className={styles.stackLabel} htmlFor="tour-participant-name">Participant name</label>
+            <input
+              id="tour-participant-name"
+              className={flowStyles.formInput}
+              data-testid="tour-participant-name"
+              value={bindings.participantName}
+              maxLength={120}
+              onChange={(event) => bindings.setParticipantName(event.currentTarget.value)}
+            />
+            <label className={styles.stackLabel} htmlFor="tour-participant-signature">Participant signature</label>
+            <input
+              id="tour-participant-signature"
+              className={flowStyles.formInput}
+              data-testid="tour-participant-signature"
+              value={bindings.participantSignature}
+              maxLength={120}
+              onChange={(event) => bindings.setParticipantSignature(event.currentTarget.value)}
+            />
+            <label className={flowStyles.checkLabel}>
+              <input
+                type="checkbox"
+                data-testid="tour-participant-attest"
+                checked={bindings.participantAttested}
+                onChange={(event) => bindings.setParticipantAttested(event.currentTarget.checked)}
+              />
+              <span>I walked through this unit with the evaluator.</span>
+            </label>
+            {saveTried && bindings.actionError && <p className={flowStyles.inlineError} role="alert">{bindings.actionError}</p>}
+            <div className={styles.reviewActions}>
+              <button
+                className={flowStyles.button}
+                type="button"
+                data-testid="tour-participant-save"
+                onClick={() => {
+                  setSaveTried(true);
+                  bindings.saveParticipantSignoff();
+                }}
+              >
+                Save participant sign-off <ArrowRight size={17} aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {node.kind === "signoff" && (
+          <div className={flowStyles.card} data-testid="tour-signoff-card">
+            <p className={flowStyles.draftLabel}>Form 1083 · Evaluator</p>
+            <h2>Your sign-off</h2>
+            <p className={flowStyles.helpText}>{EVALUATOR_ATTESTATION_TEXT}</p>
+            <label className={styles.stackLabel} htmlFor="tour-signoff-signature">Typed signature</label>
+            <input
+              id="tour-signoff-signature"
+              className={flowStyles.formInput}
+              data-testid="tour-signoff-signature"
+              value={bindings.signoffName}
+              maxLength={120}
+              placeholder={bindings.record.evaluatorName || "Evaluator name"}
+              onChange={(event) => bindings.setSignoffName(event.currentTarget.value)}
+            />
+            <label className={flowStyles.checkLabel}>
+              <input
+                type="checkbox"
+                data-testid="tour-signoff-attest"
+                checked={bindings.signoffAttested}
+                onChange={(event) => bindings.setSignoffAttested(event.currentTarget.checked)}
+              />
+              <span>I completed and reviewed this inspection based on my own assessment.</span>
+            </label>
+            {saveTried && bindings.actionError && <p className={flowStyles.inlineError} role="alert">{bindings.actionError}</p>}
+            <div className={styles.reviewActions}>
+              <button
+                className={flowStyles.button}
+                type="button"
+                data-testid="tour-signoff-save"
+                onClick={() => {
+                  setSaveTried(true);
+                  bindings.saveSignoff();
+                }}
+              >
+                Save evaluator sign-off <ArrowRight size={17} aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+        )}
 
         {node.kind === "finish" && (() => {
           const decided = MOVE_IN_READY_ELEMENTS.filter(

@@ -34,6 +34,13 @@ export type GuidedTourNode =
   | { kind: "room-check"; roomId: MoveInReadyRoomId; index: number }
   | { kind: "analyze" }
   | { kind: "review-item"; elementId: MoveInReadyElementId }
+  | { kind: "element-details"; elementId: MoveInReadyElementId }
+  | { kind: "fire-safety" }
+  | { kind: "agency" }
+  | { kind: "landlord-discussion" }
+  | { kind: "leadership" }
+  | { kind: "participant" }
+  | { kind: "signoff" }
   | { kind: "finish" };
 
 export interface GuidedTourInput {
@@ -46,6 +53,13 @@ export interface GuidedTourInput {
   online: boolean;
   batchActive: boolean;
   skippedElementIds: ReadonlySet<MoveInReadyElementId>;
+  /**
+   * Element routed to the in-tour deficiency-detail card after a
+   * review-item confirm failed for an incomplete D plan. View-held
+   * (like bathsConfirmed): a reload falls back to the review item,
+   * which re-routes on the next failed confirm.
+   */
+  detailsElementId: MoveInReadyElementId | null;
 }
 
 /** Risk-ranked review order: life and safety first, never form order. */
@@ -65,6 +79,8 @@ export function tourNodeKey(node: GuidedTourNode): string {
       return `room-check:${node.roomId}:${node.index}`;
     case "review-item":
       return `review-item:${node.elementId}`;
+    case "element-details":
+      return `element-details:${node.elementId}`;
     default:
       return node.kind;
   }
@@ -107,10 +123,70 @@ export function deriveTourNode(input: GuidedTourInput): GuidedTourNode {
 
   if (!record.evaluatorName.trim()) return { kind: "ask-name" };
 
+  // A Deficient confirm that failed for an incomplete correction plan
+  // completes its details here instead of leaving the tour. The card
+  // saves through the same validators as the detail form. Checked before
+  // the review queue so the failed item resumes here, not on its card;
+  // saved or skipped elements fall through to the normal chain.
+  if (input.detailsElementId && !input.skippedElementIds.has(input.detailsElementId)) {
+    const detailsDecision = record.decisions[input.detailsElementId];
+    if (!detailsDecision || detailsDecision.status === "unreviewed") {
+      return { kind: "element-details", elementId: input.detailsElementId };
+    }
+  }
+
   const reviewId = guidedReviewQueue(record, input.skippedElementIds)[0];
   if (reviewId) return { kind: "review-item", elementId: reviewId };
 
+  // Skipped-but-undecided items finish the tour: the evaluator chose
+  // manual review for them, and sign-off cannot save until they decide.
+  const skippedOpen = [...input.skippedElementIds].some(
+    (elementId) => (record.decisions[elementId]?.status ?? "unreviewed") === "unreviewed",
+  );
+  if (skippedOpen) return { kind: "finish" };
+
+  // Fire Safety 11a/11b are independent marks: an aggregate A/D decision
+  // without explicit unit + public-area outcomes gets them here.
+  const smoke = record.decisions["demo-smoke-co"];
+  if (
+    (smoke?.status === "A" || smoke?.status === "D") &&
+    !fireAssessmentDecided(smoke.fireSafetyAssessment)
+  ) {
+    return { kind: "fire-safety" };
+  }
+
+  // Administrative inputs in form-blocker order: the participant and
+  // evaluator sign-offs cannot save until agency, landlord discussion,
+  // and any required leadership fields exist.
+  if (!record.evaluatorAgencyName.trim()) return { kind: "agency" };
+  if (!record.landlordDiscussion || (record.landlordDiscussion === "yes" && !record.landlordDiscussionDate)) {
+    return { kind: "landlord-discussion" };
+  }
+  if (record.leadershipSignoffRequired && !leadershipComplete(record)) {
+    return { kind: "leadership" };
+  }
+  if (!record.participantSignoff) return { kind: "participant" };
+  if (!record.signoff) return { kind: "signoff" };
+
   return { kind: "finish" };
+}
+
+/** True when both 11a unit and 11b public-area clauses carry an A/D mark. */
+export function fireAssessmentDecided(
+  assessment: { unitDetectors: string; publicAreaDetectors: string } | undefined,
+): boolean {
+  if (!assessment) return false;
+  const decided = (clause: string): boolean => clause === "A" || clause === "D";
+  return decided(assessment.unitDetectors) && decided(assessment.publicAreaDetectors);
+}
+
+/** True when the required leadership name, signature, and date exist. */
+export function leadershipComplete(record: MoveInReadyInspection): boolean {
+  return Boolean(
+    record.leadershipNameAndTitle.trim() &&
+    record.leadershipSignoff.trim() &&
+    record.leadershipSignedAt,
+  );
 }
 
 export interface TourScriptContext {
@@ -174,7 +250,14 @@ export const TOUR_SCRIPT_ES = {
   welcome: "Le guiaré en esta inspección paso a paso. Usted filma cada habitación, responde algunas preguntas por voz y revisa los borradores de la IA. Unos diez minutos. Toque Comenzar cuando esté listo.",
   consent: "Un consentimiento rápido antes de filmar. Esta demostración inspecciona solo una unidad simulada de prueba, sin inquilinos, rostros ni datos reales. Cada clip que filme se envía a Meta para el análisis de IA. Toque Entiendo, vamos a filmar para continuar.",
   analyze: "Ya filmó todas las habitaciones. Enviando sus clips para el análisis de IA. Esto toma unos minutos. Permanezca en esta pantalla.",
-  finishComplete: "Inspección completa. Todos los requisitos están decididos. Vaya a la firma para revisar el resultado y exportar.",
+  finishComplete: "Inspección completa. Todas las entradas están listas, firmas incluidas. Vaya a la firma para revisar y exportar.",
+  elementDetails: "Este requisito es deficiente. Complete el problema, la corrección y ambas fechas, luego guarde.",
+  fireSafety: "Seguridad contra incendios tiene dos marcas: detectores de la unidad y de áreas comunes. Marque cada uno, luego guarde.",
+  agency: "Escriba el nombre de su agencia para el formulario.",
+  landlord: "¿Habló de los resultados con el propietario?",
+  leadership: "Dirección de la agencia: nombre en letra de imprenta, firma y fecha.",
+  participant: "El participante firma aquí: nombre, firma y la declaración del recorrido.",
+  signoff: "Su turno: firma escrita y la declaración del evaluador.",
 } as const;
 
 /**
@@ -183,6 +266,13 @@ export const TOUR_SCRIPT_ES = {
  */
 export const REVIEW_VOICE_QUESTION = "Say yes to confirm this draft, or no to edit it.";
 export const REVIEW_VOICE_QUESTION_ES = "Diga sí para confirmar este borrador, o no para editarlo.";
+
+/**
+ * Spoken landlord-discussion question. Static in both languages, pinned
+ * by the voice-inventory contract test.
+ */
+export const LANDLORD_VOICE_QUESTION = "Did you discuss the findings with the landlord?";
+export const LANDLORD_VOICE_QUESTION_ES = "¿Habló de los resultados con el propietario?";
 
 /** Spoken read-back after the evaluator answers their name (dynamic: embeds the name). */
 export function nameReadbackScript(name: string, language: "en" | "es" = "en"): string {
@@ -237,6 +327,24 @@ export function tourScriptForNode(node: GuidedTourNode, context: TourScriptConte
       const prefix = position ? `Item ${position.index} of ${position.total}. ` : "";
       return `${prefix}${label}. The A I suggests ${suggestionWord(proposal)}, confidence ${proposal.confidence} percent. ${excerpt} Say yes to confirm, no to edit it, or tap Needs human check.`;
     }
+    case "element-details": {
+      const label = elementLabel(node.elementId);
+      return es
+        ? `${label}. ${TOUR_SCRIPT_ES.elementDetails}`
+        : `${label}. This one is Deficient. Fill in the issue, the fix, and both dates, then save.`;
+    }
+    case "fire-safety":
+      return es ? TOUR_SCRIPT_ES.fireSafety : "Fire Safety has two marks: unit detectors and public-area detectors. Set each one, then save.";
+    case "agency":
+      return es ? TOUR_SCRIPT_ES.agency : "Enter your agency name for the form.";
+    case "landlord-discussion":
+      return "";
+    case "leadership":
+      return es ? TOUR_SCRIPT_ES.leadership : "Agency leadership: printed name, signature, and date.";
+    case "participant":
+      return es ? TOUR_SCRIPT_ES.participant : "The participant signs here: name, signature, and the walkthrough statement.";
+    case "signoff":
+      return es ? TOUR_SCRIPT_ES.signoff : "Your turn: typed signature and the evaluator statement.";
     case "finish": {
       const decided = MOVE_IN_READY_ELEMENTS.filter(
         (element) => (record.decisions[element.id]?.status ?? "unreviewed") !== "unreviewed",
@@ -244,7 +352,7 @@ export function tourScriptForNode(node: GuidedTourNode, context: TourScriptConte
       const total = MOVE_IN_READY_ELEMENTS.length;
       const missing = total - decided;
       if (missing === 0) {
-        return es ? TOUR_SCRIPT_ES.finishComplete : "Inspection complete. Every requirement is decided. Head to sign-off to review the result and export.";
+        return es ? TOUR_SCRIPT_ES.finishComplete : "Inspection complete. Every input is done, signatures included. Head to sign-off to review and export.";
       }
       return es
         ? `Recorrido completo. ${decided} de ${total} requisitos decididos. ${missing} aún ${missing === 1 ? "necesita" : "necesitan"} el formulario detallado en la revisión manual. Vaya a la firma cuando esté listo.`
@@ -272,11 +380,18 @@ export function tourProgress(
   const reviewDone = MOVE_IN_READY_ELEMENTS.filter(
     (element) => (record.decisions[element.id]?.status ?? "unreviewed") !== "unreviewed",
   ).length;
+  const signoffDone =
+    (record.evaluatorAgencyName.trim() ? 1 : 0) +
+    (record.landlordDiscussion ? 1 : 0) +
+    (!record.leadershipSignoffRequired || leadershipComplete(record) ? 1 : 0) +
+    (record.participantSignoff ? 1 : 0) +
+    (record.signoff ? 1 : 0);
   return [
     { key: "setup", label: "Setup", done: Math.min(setupDone, 3), total: 3 },
     { key: "film", label: "Film", done: Math.min(capturedRoomCount, record.roomIds.length), total: Math.max(record.roomIds.length, 1) },
     { key: "analyze", label: "Analyze", done: analysisSettled ? 1 : 0, total: 1 },
     { key: "review", label: "Review", done: reviewDone, total: MOVE_IN_READY_ELEMENTS.length },
+    { key: "signoff", label: "Sign off", done: signoffDone, total: 5 },
   ];
 }
 

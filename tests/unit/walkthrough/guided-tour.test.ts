@@ -12,8 +12,10 @@ import {
 import { VOICE_ROOM_CHECKS, VOICE_ROOM_CHECKS_ES } from "../../../src/features/walkthrough/voice-checks";
 import {
   deriveTourNode,
+  fireAssessmentDecided,
   guidedReviewQueue,
   filmRoomScript,
+  leadershipComplete,
   nameReadbackScript,
   reviewVoiceAction,
   roomLabelEs,
@@ -35,6 +37,7 @@ function baseInput(overrides: Partial<GuidedTourInput> = {}): GuidedTourInput {
     online: true,
     batchActive: false,
     skippedElementIds: new Set(),
+    detailsElementId: null,
     ...overrides,
   };
 }
@@ -334,6 +337,182 @@ describe("deriveTourNode", () => {
       { record, capturedRoomCount: 4, batchActive: false, reviewPosition: { index: 1, total: 3 } },
     );
     expect(script).toContain("Say yes to confirm");
+  });
+
+  it("routes incomplete D plans to the in-tour detail card until saved", () => {
+    const record = withSetup(createInitialInspectionRecord("tour-session-details"));
+    const noRooms = { ...record, roomIds: [] as MoveInReadyInspection["roomIds"] };
+    const decidedRest = { ...noRooms.decisions };
+    for (const elementId of MOVE_IN_READY_ELEMENT_IDS) {
+      if (elementId === "demo-water-supply") continue;
+      decidedRest[elementId] = {
+        status: "A",
+        evaluatorName: "Rae Evaluator",
+        decidedAt: "2026-11-01T00:00:00.000Z",
+        inPersonCheckAcknowledgment: { evaluatorName: "Rae Evaluator", completedAt: "2026-11-01T00:00:00.000Z" },
+        rationale: "Checked.",
+        evidence: [],
+        analysisIdentity: null,
+      };
+    }
+    const open: MoveInReadyInspection = { ...noRooms, decisions: decidedRest };
+    // Review item first; the detail card only opens after a failed confirm.
+    expect(deriveTourNode(baseInput({ record: open })))
+      .toEqual({ kind: "review-item", elementId: "demo-water-supply" });
+    expect(deriveTourNode(baseInput({ record: open, detailsElementId: "demo-water-supply" })))
+      .toEqual({ kind: "element-details", elementId: "demo-water-supply" });
+    expect(tourNodeKey({ kind: "element-details", elementId: "demo-water-supply" }))
+      .toBe("element-details:demo-water-supply");
+    const saved: EvaluatorDecision = {
+      ...(decidedRest["demo-item-05"] as Extract<EvaluatorDecision, { status: "A" }>),
+      status: "D",
+      deficiency: {
+        issueDescription: "Leak.",
+        correction: "Fix.",
+        completionDate: "2026-11-10",
+        reinspectionDate: "2026-11-12",
+      },
+    };
+    const done: MoveInReadyInspection = {
+      ...open,
+      decisions: { ...decidedRest, "demo-water-supply": saved },
+    };
+    // Saved decisions leave the detail card even with a stale element id.
+    expect(deriveTourNode(baseInput({ record: done, detailsElementId: "demo-water-supply" })).kind)
+      .not.toBe("element-details");
+  });
+
+  it("asks Fire Safety 11a/11b only when the aggregate lacks explicit marks", () => {
+    expect(fireAssessmentDecided(undefined)).toBe(false);
+    expect(fireAssessmentDecided({ unitDetectors: "A", publicAreaDetectors: "needs-human-check" })).toBe(false);
+    expect(fireAssessmentDecided({ unitDetectors: "A", publicAreaDetectors: "D" })).toBe(true);
+    const record = withSetup(createInitialInspectionRecord("tour-session-fire"));
+    const noRooms = { ...record, roomIds: [] as MoveInReadyInspection["roomIds"] };
+    const decided = {} as MoveInReadyInspection["decisions"];
+    for (const elementId of MOVE_IN_READY_ELEMENT_IDS) {
+      decided[elementId] = {
+        status: "A",
+        evaluatorName: "Rae Evaluator",
+        decidedAt: "2026-11-01T00:00:00.000Z",
+        inPersonCheckAcknowledgment: { evaluatorName: "Rae Evaluator", completedAt: "2026-11-01T00:00:00.000Z" },
+        rationale: "Checked.",
+        evidence: [],
+        analysisIdentity: null,
+      };
+    }
+    const allDecided: MoveInReadyInspection = { ...noRooms, decisions: decided };
+    // Aggregate A with no assessment: the fire node collects both marks.
+    expect(deriveTourNode(baseInput({ record: allDecided })).kind).toBe("fire-safety");
+    const assessed: MoveInReadyInspection = {
+      ...allDecided,
+      decisions: {
+        ...decided,
+        "demo-smoke-co": {
+          status: "A",
+          evaluatorName: "Rae Evaluator",
+          decidedAt: "2026-11-01T00:00:00.000Z",
+          inPersonCheckAcknowledgment: { evaluatorName: "Rae Evaluator", completedAt: "2026-11-01T00:00:00.000Z" },
+          rationale: "Checked.",
+          evidence: [],
+          analysisIdentity: null,
+          fireSafetyAssessment: { unitDetectors: "A", publicAreaDetectors: "A" },
+        },
+      },
+    };
+    // Explicit marks skip the node; agency is next.
+    expect(deriveTourNode(baseInput({ record: assessed })).kind).toBe("agency");
+    const needsCheck: MoveInReadyInspection = {
+      ...allDecided,
+      decisions: {
+        ...decided,
+        "demo-smoke-co": { status: "needs-human-check", note: "Check later." },
+      },
+    };
+    expect(deriveTourNode(baseInput({ record: needsCheck })).kind).toBe("agency");
+  });
+
+  it("walks agency, landlord, leadership, participant, and signoff in blocker order", () => {
+    const record = withSetup(createInitialInspectionRecord("tour-session-admin"));
+    const noRooms = { ...record, roomIds: [] as MoveInReadyInspection["roomIds"] };
+    const decided = {} as MoveInReadyInspection["decisions"];
+    for (const elementId of MOVE_IN_READY_ELEMENT_IDS) {
+      decided[elementId] = {
+        status: "A",
+        evaluatorName: "Rae Evaluator",
+        decidedAt: "2026-11-01T00:00:00.000Z",
+        inPersonCheckAcknowledgment: { evaluatorName: "Rae Evaluator", completedAt: "2026-11-01T00:00:00.000Z" },
+        rationale: "Checked.",
+        evidence: [],
+        analysisIdentity: null,
+        ...(elementId === "demo-smoke-co"
+          ? { fireSafetyAssessment: { unitDetectors: "A" as const, publicAreaDetectors: "A" as const } }
+          : {}),
+      };
+    }
+    let current: MoveInReadyInspection = { ...noRooms, decisions: decided };
+    expect(deriveTourNode(baseInput({ record: current })).kind).toBe("agency");
+    current = { ...current, evaluatorAgencyName: "LAHSA Demo" };
+    expect(deriveTourNode(baseInput({ record: current })).kind).toBe("landlord-discussion");
+    current = { ...current, landlordDiscussion: "yes", landlordDiscussionDate: "2026-11-02" };
+    // A yes without its date holds the node.
+    expect(deriveTourNode(baseInput({ record: { ...current, landlordDiscussionDate: "" } })).kind)
+      .toBe("landlord-discussion");
+    // Leadership stays skipped until agency policy requires it.
+    expect(deriveTourNode(baseInput({ record: current })).kind).toBe("participant");
+    expect(leadershipComplete(current)).toBe(false);
+    const required: MoveInReadyInspection = { ...current, leadershipSignoffRequired: true };
+    expect(deriveTourNode(baseInput({ record: required })).kind).toBe("leadership");
+    expect(leadershipComplete({
+      ...required,
+      leadershipNameAndTitle: "Lee Lead",
+      leadershipSignoff: "Lee Lead",
+      leadershipSignedAt: "2026-11-02",
+    })).toBe(true);
+    current = {
+      ...current,
+      participantSignoff: {
+        participantName: "Pat Participant",
+        typedSignature: "Pat Participant",
+        attested: true,
+        signedAt: "2026-11-02T00:00:00.000Z",
+      },
+    };
+    expect(deriveTourNode(baseInput({ record: current })).kind).toBe("signoff");
+    current = {
+      ...current,
+      signoff: {
+        evaluatorName: "Rae Evaluator",
+        typedSignature: "Rae Evaluator",
+        attested: true,
+        signedAt: "2026-11-02T00:00:00.000Z",
+      },
+    };
+    expect(deriveTourNode(baseInput({ record: current }))).toEqual({ kind: "finish" });
+  });
+
+  it("finishes when skipped items are left for manual review", () => {
+    const record = withSetup(createInitialInspectionRecord("tour-session-skip"));
+    const noRooms = { ...record, roomIds: [] as MoveInReadyInspection["roomIds"] };
+    expect(deriveTourNode(baseInput({
+      record: noRooms,
+      skippedElementIds: new Set(MOVE_IN_READY_ELEMENT_IDS),
+    }))).toEqual({ kind: "finish" });
+  });
+
+  it("narrates the signoff nodes in both languages", () => {
+    const record = withSetup(createInitialInspectionRecord("tour-session-scripts"));
+    const context = { record, capturedRoomCount: 0, batchActive: false, reviewPosition: null };
+    for (const kind of ["fire-safety", "agency", "leadership", "participant", "signoff"] as const) {
+      const script = tourScriptForNode({ kind }, context);
+      expect(script.length).toBeGreaterThan(10);
+      expect(script.length).toBeLessThan(200);
+      expect(tourScriptForNode({ kind }, context, "es").length).toBeGreaterThan(10);
+    }
+    expect(tourScriptForNode({ kind: "landlord-discussion" }, context)).toBe("");
+    const details = tourScriptForNode({ kind: "element-details", elementId: "demo-water-supply" }, context);
+    expect(details).toContain("Deficient");
+    const sections = tourProgress(record, 0, true);
+    expect(sections.find((section) => section.key === "signoff")).toMatchObject({ done: 1, total: 5 });
   });
 
   it("narrates review items in Spanish when the tour language is Spanish", () => {

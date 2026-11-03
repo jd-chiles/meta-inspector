@@ -19,7 +19,6 @@ import {
   ShieldCheck,
   Share2,
   Smartphone,
-  Sparkles,
   StickyNote,
   Trash2,
   Video,
@@ -151,16 +150,11 @@ import {
   prefillDraftFromProposal,
   type DecisionChoice,
   type DecisionDraft,
+  type ElementDetailsInput,
   type FireSafetyDraftOutcome,
 } from "./decision-draft";
-import { deriveGuideModel, type GuideAction } from "./walkthrough-guide";
-import AssistantGuide from "./assistant-guide";
-import {
-  filmingScriptForRoom,
-  deriveAssistantNode,
-  type AssistantAction as AssistantGuideAction,
-} from "./assistant-script";
-import { cancelSpeech, readVoiceEnabled, speakText, writeVoiceEnabled } from "./voice-guide";
+import { deriveGuideModel } from "./walkthrough-guide";
+import { filmingScriptForRoom } from "./assistant-script";
 import VoicePrompt from "./voice-prompt";
 import GuidedTourView from "./guided-tour-view";
 import { SETUP_VOICE_QUESTIONS, checksForRoom } from "./voice-checks";
@@ -430,9 +424,6 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
   const [walkthroughAttested, setWalkthroughAttested] = useState(false);
   const [walkthroughSendConsent, setWalkthroughSendConsent] = useState(false);
   const batchAutoStartedRef = useRef(false);
-  const [assistantOpen, setAssistantOpen] = useState(() =>
-    typeof navigator !== "undefined" && (navigator as { webdriver?: boolean }).webdriver === true ? false : true);
-  const [voiceOn, setVoiceOn] = useState(() => readVoiceEnabled());
   const [inspections, setInspections] = useState<MoveInReadyInspection[]>([]);
 
   const refreshInspectionList = useCallback(async (): Promise<void> => {
@@ -444,7 +435,6 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     }
   }, []);
   const captureControlRef = useRef<{ startCapture: () => void } | null>(null);
-  const spokenAssistantKeyRef = useRef<string | null>(null);
   const [drafts, setDrafts] = useState<Partial<Record<MoveInReadyElementId, DecisionDraft>>>({});
   const [reviewError, setReviewError] = useState("");
   const [evidenceViews, setEvidenceViews] = useState<EvidenceView[]>([]);
@@ -999,32 +989,6 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     totalElements: MOVE_IN_READY_ELEMENTS.length,
     signed: Boolean(completedResult && currentRecord?.signoff),
   }), [currentRecord, canCapture, roomClips, reviewCounts.resolved, completedResult]);
-  const assistantNode = useMemo(() => {
-    const analyzedRoomIds = new Set<MoveInReadyRoomId>();
-    for (const proposal of Object.values(currentRecord?.proposals ?? {})) {
-      if (proposal) analyzedRoomIds.add(proposal.analysisIdentity.roomId);
-    }
-    return deriveAssistantNode({
-      fundingType: currentRecord?.fundingType === "hud" ? "hud" : currentRecord?.fundingType === "lahsa" ? "lahsa" : "unknown",
-      flowStarted: capturedRoomIds.length > 0 ||
-        Object.keys(currentRecord?.proposals ?? {}).length > 0 ||
-        reviewCounts.resolved > 0 ||
-        Boolean(completedResult && currentRecord?.signoff),
-      canCapture: isCaptureSetupComplete(currentRecord),
-      pseudonym: currentRecord?.pseudonym ?? "",
-      evaluatorName: currentRecord?.evaluatorName ?? "",
-      roomIds: currentRecord?.roomIds ?? [...LEGACY_DEFAULT_ROOM_IDS],
-      filmedRoomIds: capturedRoomIds,
-      analyzedRoomIds: [...analyzedRoomIds],
-      analyzedTotal: analyzedRoomIds.size,
-      resolvedDecisions: reviewCounts.resolved,
-      nextUndecidedLabel: nextUndecidedElement?.label ?? null,
-      nextUndecidedId: nextUndecidedElement?.id ?? null,
-      signed: Boolean(completedResult && currentRecord?.signoff),
-      batchActive,
-    });
-  }, [currentRecord, capturedRoomIds, reviewCounts.resolved, nextUndecidedElement, completedResult, batchActive]);
-
   const profileSectionReady = {
     unit: Boolean(currentRecord?.pseudonym.trim() && currentRecord.fundingType !== "unknown" && currentRecord.unitType !== ""),
     evaluator: Boolean(currentRecord?.evaluatorName.trim() && currentRecord.evaluatorAgencyName.trim()),
@@ -1289,32 +1253,21 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     startBatchAnalysis();
   });
 
-  // Speak each new guidance node aloud while the assistant is open.
-  useEffect(() => {
-    if (!assistantOpen || !voiceOn) return;
-    if (spokenAssistantKeyRef.current === assistantNode.key) return;
-    spokenAssistantKeyRef.current = assistantNode.key;
-    speakText(assistantNode.speak);
-    return () => cancelSpeech();
-  }, [assistantNode, assistantOpen, voiceOn]);
-
   // Step through the filming script on timed cues while a take is
-  // recording. The cue index always advances (muted users read the current
-  // cue in the guide banner); speech additionally narrates when on.
+  // recording. The cue index always advances and the current cue captions
+  // on the viewport; spoken narration lives in the guided tour.
   useEffect(() => {
     if (!recordingInProgress) return;
     const cues = filmingScriptForRoom(selectedRoomId);
-    const timers = cues.map((cue, index) =>
+    const timers = cues.map((_, index) =>
       window.setTimeout(() => {
         setRecordingCueIndex(index);
-        if (assistantOpen && voiceOn) speakText(cue);
       }, 800 + index * 7000));
     return () => {
       timers.forEach((timer) => window.clearTimeout(timer));
       setRecordingCueIndex(-1);
-      cancelSpeech();
     };
-  }, [recordingInProgress, selectedRoomId, assistantOpen, voiceOn]);
+  }, [recordingInProgress, selectedRoomId]);
 
   // Dashboard: when a clip lands, bring the yes/no checks into view under
   // the pinned viewport. Fires only on the null-to-clip transition.
@@ -1574,43 +1527,6 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     setBatchProgress(null);
     invalidateActiveAnalysis();
     setAnalysisNotice("Batch AI analysis was cancelled. Finished rooms keep their drafts.");
-  }
-
-  function handleGuideAction(action: GuideAction): void {
-    if (action.type === "setup") {
-      changeStep("capture");
-      setSetupExpanded(true);
-      window.setTimeout(() => {
-        document.getElementById("capture-pseudonym")?.focus({ preventScroll: false });
-      }, 60);
-    } else if (action.type === "room") {
-      changeStep("capture");
-      selectRoom(action.roomId);
-    } else if (action.type === "step") {
-      changeStep(action.step);
-    }
-  }
-
-  function handleAssistantAction(action: AssistantGuideAction): void {
-    if (action.id === "setup") {
-      handleGuideAction({ type: "setup" });
-    } else if (action.id === "film-room" && action.roomId) {
-      changeStep("capture");
-      selectRoom(action.roomId);
-      window.setTimeout(() => captureControlRef.current?.startCapture(), 400);
-    } else if (action.id === "analyze-all") {
-      changeStep("capture");
-      setBatchAttested(true);
-      setBatchSendConsent(true);
-      window.setTimeout(() => startBatchAnalysis(), 60);
-    } else if (action.id === "open-requirement" && action.elementId) {
-      changeStep("review");
-      openReviewElement(action.elementId);
-    } else if (action.id === "signoff") {
-      changeStep("signoff");
-    } else if (action.id === "dismiss") {
-      setAssistantOpen(false);
-    }
   }
 
   function openProfileForRequiredDetails(): void {
@@ -2431,6 +2347,62 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     return savedOk;
   }
 
+  /**
+   * Tour deficiency-detail save: completes a D correction plan in-tour
+   * through the same saveDecision validators as the detail form. The
+   * Save tap is the plan review, mirroring one-tap confirm semantics.
+   */
+  function saveElementDetails(elementId: MoveInReadyElementId, details: ElementDetailsInput): boolean {
+    const current = recordRef.current;
+    const proposal = current?.proposals[elementId];
+    if (!current || !proposal) {
+      setReviewError("No AI draft for this requirement. Assess it in the detail form.");
+      return false;
+    }
+    if (elementId === "demo-smoke-co") {
+      setReviewError("Fire Safety details share the detail form with the 11a/11b marks. Assess it there.");
+      return false;
+    }
+    const draft: DecisionDraft = {
+      ...prefillDraftFromProposal(drafts[elementId] ?? createDecisionDraft(current.decisions[elementId]), proposal),
+      choice: "D",
+      issueDescription: details.issueDescription,
+      correction: details.correction,
+      completionDate: details.completionDate,
+      reinspectionDate: details.reinspectionDate,
+      planSuggestionReviewed: true,
+    };
+    return saveDecision(elementId, draft);
+  }
+
+  /**
+   * Tour Fire Safety save: records independent 11a unit and 11b
+   * public-area marks. Both clauses must be set; the aggregate verdict
+   * derives from them exactly like the detail form.
+   */
+  function saveFireSafety(unit: FireSafetyDraftOutcome, publicArea: FireSafetyDraftOutcome): boolean {
+    const current = recordRef.current;
+    if (!current) return false;
+    if (unit === "" || publicArea === "") {
+      setReviewError("Set both the unit and public-area detector marks before saving.");
+      return false;
+    }
+    const draft: DecisionDraft = {
+      ...(drafts["demo-smoke-co"] ?? createDecisionDraft(current.decisions["demo-smoke-co"])),
+      fireSafetyUnitDetectors: unit,
+      fireSafetyPublicAreaDetectors: publicArea,
+    };
+    if (fireSafetyChoiceFromDraft(draft) === "D") {
+      const planReady = draft.issueDescription.trim() && draft.correction.trim() &&
+        draft.completionDate && draft.reinspectionDate;
+      if (!planReady) {
+        setReviewError("A Deficient mark needs a correction plan. Complete it in the detail form.");
+        return false;
+      }
+    }
+    return saveDecision("demo-smoke-co", draft);
+  }
+
   function updateDecisionDraft(
     elementId: MoveInReadyElementId,
     update: Partial<DecisionDraft> | ((current: DecisionDraft) => DecisionDraft),
@@ -2570,14 +2542,14 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     if (next) openReviewElement(next);
   }
 
-  function saveSignoff(): void {
+  function saveSignoff(): boolean {
     const current = recordRef.current;
-    if (!current) return;
+    if (!current) return false;
     if (current.fundingType !== "lahsa") {
       setExportError(current.fundingType === "hud"
         ? "HQS is required for HUD-funded units. Form 1083 sign-off is disabled."
         : "Choose LAHSA / Form 1083 funding in Profile before signing.");
-      return;
+      return false;
     }
     const signoff: EvaluatorSignoff = {
       evaluatorName: current.evaluatorName.trim(),
@@ -2588,12 +2560,12 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     const parsed = validateEvaluatorSignoff(signoff);
     if (!parsed.ok) {
       setExportError(decisionMessage(parsed.errors));
-      return;
+      return false;
     }
     const formBlocker = form1083AdministrativeBlocker(current);
     if (formBlocker) {
       setExportError(formBlocker);
-      return;
+      return false;
     }
     const result = deriveFinalInspectionResult({
       fundingType: current.fundingType,
@@ -2604,21 +2576,22 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     });
     if (result.status !== "complete") {
       setExportError(result.blockers[0] ?? "Complete all evaluator decisions before sign-off.");
-      return;
+      return false;
     }
     updateRecord((latest) => ({ ...latest, signoff: parsed.value }));
     setExportError("");
     setExportNotice("Evaluator sign-off saved to this device. No result has been sent to LAHSA or HMIS.");
+    return true;
   }
 
-  function saveParticipantSignoff(): void {
+  function saveParticipantSignoff(): boolean {
     const current = recordRef.current;
-    if (!current) return;
+    if (!current) return false;
     if (current.fundingType !== "lahsa") {
       setExportError(current.fundingType === "hud"
         ? "HQS is required for HUD-funded units. Form 1083 sign-off is disabled."
         : "Choose LAHSA / Form 1083 funding in Profile before signing.");
-      return;
+      return false;
     }
     const participantSignoff: ParticipantSignoff = {
       participantName: participantName.trim(),
@@ -2629,12 +2602,12 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     const parsed = validateParticipantSignoff(participantSignoff);
     if (!parsed.ok) {
       setExportError(decisionMessage(parsed.errors));
-      return;
+      return false;
     }
     const formBlocker = form1083AdministrativeBlocker(current);
     if (formBlocker) {
       setExportError(formBlocker);
-      return;
+      return false;
     }
     const result = deriveFinalInspectionResult({
       fundingType: current.fundingType,
@@ -2645,11 +2618,12 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     });
     if (result.status !== "complete" && result.status !== "signoff-required") {
       setExportError(result.blockers[0] ?? "Complete all evaluator decisions before participant sign-off.");
-      return;
+      return false;
     }
     updateRecord((latest) => ({ ...latest, participantSignoff: parsed.value }));
     setExportError("");
     setExportNotice("Participant sign-off saved to this device. No result has been sent to LAHSA or HMIS.");
+    return true;
   }
 
   /**
@@ -2943,8 +2917,6 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     setExportError("");
     setExportNotice("");
     setProfileSection("unit");
-    spokenAssistantKeyRef.current = null;
-    cancelSpeech();
   }
 
   async function activateInspection(next: MoveInReadyInspection): Promise<void> {
@@ -3351,6 +3323,28 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
                   confirmProposalDraft,
                   markNeedsCheck,
                   changeStep,
+                  drafts,
+                  saveElementDetails,
+                  saveFireSafety,
+                  setAgencyName: (name) => setProfileField("evaluatorAgencyName", name),
+                  setLandlordDiscussion: (value) => setProfileField("landlordDiscussion", value),
+                  setLandlordDate: (date) => setProfileField("landlordDiscussionDate", date),
+                  setLeadershipName: (name) => setProfileField("leadershipNameAndTitle", name),
+                  setLeadershipSignature: (signature) => setProfileField("leadershipSignoff", signature),
+                  setLeadershipDate: (date) => setProfileField("leadershipSignedAt", date),
+                  participantName,
+                  participantSignature,
+                  participantAttested,
+                  setParticipantName,
+                  setParticipantSignature,
+                  setParticipantAttested,
+                  saveParticipantSignoff,
+                  signoffName,
+                  signoffAttested,
+                  setSignoffName,
+                  setSignoffAttested,
+                  saveSignoff,
+                  actionError: reviewError || exportError,
                 }}
               />
             </section>
@@ -4406,7 +4400,6 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
       <div className={styles.appFooter}>
         <nav className={styles.bottomNav} aria-label="Main navigation">
           <NavButton icon={<Home size={19} aria-hidden="true" />} label="Home" active={step === "home"} onClick={() => changeStep("home")} disabled={recordingInProgress} />
-          <NavButton icon={<Sparkles size={19} aria-hidden="true" />} label="Guide" active={assistantOpen} onClick={() => setAssistantOpen(true)} disabled={recordingInProgress} />
           <NavButton icon={<ClipboardCheck size={19} aria-hidden="true" />} label="Review" active={step === "review"} onClick={() => changeStep("review")} disabled={recordingInProgress} />
           <NavButton icon={<CheckCircle2 size={19} aria-hidden="true" />} label="Sign-Off" active={step === "signoff"} onClick={() => changeStep("signoff")} disabled={recordingInProgress} />
           <NavButton icon={<CircleHelp size={19} aria-hidden="true" />} label="Profile" active={step === "profile"} onClick={() => changeStep("profile")} disabled={recordingInProgress} />
@@ -4441,24 +4434,6 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
         </div>}
       </div>
 
-      <AssistantGuide
-        open={assistantOpen}
-        node={assistantNode}
-        voiceOn={voiceOn}
-        recording={recordingInProgress}
-        tourLanguage={record?.tourLanguage === "es" ? "es" : "en"}
-        recordingCue={recordingInProgress ? filmingScriptForRoom(selectedRoomId)[recordingCueIndex] ?? null : null}
-        onAction={handleAssistantAction}
-        onVoiceToggle={() => {
-          const next = !voiceOn;
-          setVoiceOn(next);
-          writeVoiceEnabled(next);
-          if (!next) cancelSpeech();
-          else speakText(assistantNode.speak);
-        }}
-        onReplay={() => speakText(recordingInProgress ? filmingScriptForRoom(selectedRoomId)[0] ?? assistantNode.speak : assistantNode.speak)}
-        onClose={() => { cancelSpeech(); setAssistantOpen(false); }}
-      />
     </div>
   );
 
