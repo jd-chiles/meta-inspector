@@ -95,7 +95,7 @@ describe("voice handlers", () => {
     expect(JSON.stringify(body)).not.toContain("server-only-fish-key");
   });
 
-  it("transcribes one mic clip through Fish ASR", async () => {
+  it("transcribes one mic clip through Fish ASR when selected", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       Response.json({ text: "two bedrooms", duration: 1.2 }),
     );
@@ -103,13 +103,99 @@ describe("voice handlers", () => {
     form.append("audio", new File([webmBytes()], "mic.webm", { type: "audio/webm" }));
     const response = await handleTranscribeRequest(
       new Request(`${ORIGIN}/api/voice/transcribe`, { method: "POST", headers: APP_HEADERS, body: form }),
-      { env: ENV, fetch: fetchImpl as unknown as typeof fetch },
+      { env: { ...ENV, VOICE_ASR_PROVIDER: "fish" }, fetch: fetchImpl as unknown as typeof fetch },
     );
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true, text: "two bedrooms" });
+    expect(await response.json()).toEqual({ ok: true, text: "two bedrooms", providerUsed: "fish" });
     const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://api.fish.audio/v1/asr");
     expect((init.headers as Record<string, string>).model).toBe("transcribe-1-pro");
+  });
+
+  it("uses Muse ASR by default and reports the provider", async () => {
+    const fetchImpl = vi.fn();
+    const transcribeWithMuse = vi.fn().mockResolvedValue({ text: "two bedrooms" });
+    const form = new FormData();
+    form.append("audio", new File([webmBytes()], "mic.webm", { type: "audio/webm" }));
+    const response = await handleTranscribeRequest(
+      new Request(`${ORIGIN}/api/voice/transcribe`, { method: "POST", headers: APP_HEADERS, body: form }),
+      {
+        env: { ...ENV, META_API_KEY: "server-only-meta-key" },
+        fetch: fetchImpl as unknown as typeof fetch,
+        transcribeWithMuse,
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, text: "two bedrooms", providerUsed: "muse" });
+    expect(transcribeWithMuse).toHaveBeenCalledOnce();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("falls back to Fish on any Muse failure and flags the backup provider", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(Response.json({ text: "two bedrooms" }));
+    const transcribeWithMuse = vi.fn().mockRejectedValue(new Error("muse 500"));
+    const form = new FormData();
+    form.append("audio", new File([webmBytes()], "mic.webm", { type: "audio/webm" }));
+    const response = await handleTranscribeRequest(
+      new Request(`${ORIGIN}/api/voice/transcribe`, { method: "POST", headers: APP_HEADERS, body: form }),
+      {
+        env: { ...ENV, META_API_KEY: "server-only-meta-key" },
+        fetch: fetchImpl as unknown as typeof fetch,
+        transcribeWithMuse,
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, text: "two bedrooms", providerUsed: "fish" });
+    const [url] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.fish.audio/v1/asr");
+  });
+
+  it("falls back to Fish when Meta credentials are missing", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(Response.json({ text: "two bedrooms" }));
+    const form = new FormData();
+    form.append("audio", new File([webmBytes()], "mic.webm", { type: "audio/webm" }));
+    const response = await handleTranscribeRequest(
+      new Request(`${ORIGIN}/api/voice/transcribe`, { method: "POST", headers: APP_HEADERS, body: form }),
+      { env: ENV, fetch: fetchImpl as unknown as typeof fetch },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, text: "two bedrooms", providerUsed: "fish" });
+  });
+
+  it("surfaces failure when both Muse and Fish fail", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("down", { status: 500 }));
+    const transcribeWithMuse = vi.fn().mockRejectedValue(new Error("muse 500"));
+    const form = new FormData();
+    form.append("audio", new File([webmBytes()], "mic.webm", { type: "audio/webm" }));
+    const response = await handleTranscribeRequest(
+      new Request(`${ORIGIN}/api/voice/transcribe`, { method: "POST", headers: APP_HEADERS, body: form }),
+      {
+        env: { ...ENV, META_API_KEY: "server-only-meta-key" },
+        fetch: fetchImpl as unknown as typeof fetch,
+        transcribeWithMuse,
+      },
+    );
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ ok: false, error: { code: "PROVIDER_FAILURE" } });
+  });
+
+  it("rejects an unknown ASR provider without calling anyone", async () => {
+    const fetchImpl = vi.fn();
+    const transcribeWithMuse = vi.fn();
+    const form = new FormData();
+    form.append("audio", new File([webmBytes()], "mic.webm", { type: "audio/webm" }));
+    const response = await handleTranscribeRequest(
+      new Request(`${ORIGIN}/api/voice/transcribe`, { method: "POST", headers: APP_HEADERS, body: form }),
+      {
+        env: { ...ENV, VOICE_ASR_PROVIDER: "parrot" },
+        fetch: fetchImpl as unknown as typeof fetch,
+        transcribeWithMuse,
+      },
+    );
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ ok: false, error: { code: "SETUP_REQUIRED" } });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(transcribeWithMuse).not.toHaveBeenCalled();
   });
 
   it("trusts the public origin behind managed ingress with an internal request URL", async () => {
@@ -154,6 +240,56 @@ describe("voice handlers", () => {
     expect(response.status).toBe(503);
     const body = await response.json();
     expect(body).toMatchObject({ ok: false, error: { code: "SETUP_REQUIRED" } });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("speaks Spanish text through the Spanish owner voice", async () => {
+    __resetSpeakCacheForTests();
+    const audio = new Uint8Array([0x49, 0x44, 0x33, 0x0e]);
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(audio, { status: 200 }));
+    const response = await handleSpeakRequest(
+      new Request(`${ORIGIN}/api/voice/speak`, {
+        method: "POST",
+        headers: { ...APP_HEADERS, "content-type": "application/json" },
+        body: JSON.stringify({ text: "¿Cuántos baños tiene?", language: "es" }),
+      }),
+      { env: { ...ENV, FISH_VOICE_ID_ES: "voice-es-456" }, fetch: fetchImpl as unknown as typeof fetch },
+    );
+    expect(response.status).toBe(200);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(audio);
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({ text: "¿Cuántos baños tiene?", reference_id: "voice-es-456" });
+    __resetSpeakCacheForTests();
+  });
+
+  it("fails closed on Spanish speech when the Spanish voice is not configured", async () => {
+    const fetchImpl = vi.fn();
+    const response = await handleSpeakRequest(
+      new Request(`${ORIGIN}/api/voice/speak`, {
+        method: "POST",
+        headers: { ...APP_HEADERS, "content-type": "application/json" },
+        body: JSON.stringify({ text: "¿Cuántos baños tiene?", language: "es" }),
+      }),
+      { env: ENV, fetch: fetchImpl as unknown as typeof fetch },
+    );
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body).toMatchObject({ ok: false, error: { code: "SETUP_REQUIRED" } });
+    expect(String(body.error.message)).toContain("Spanish voice");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown speech languages without provider calls", async () => {
+    const fetchImpl = vi.fn();
+    const response = await handleSpeakRequest(
+      new Request(`${ORIGIN}/api/voice/speak`, {
+        method: "POST",
+        headers: { ...APP_HEADERS, "content-type": "application/json" },
+        body: JSON.stringify({ text: "hi", language: "fr" }),
+      }),
+      { env: ENV, fetch: fetchImpl as unknown as typeof fetch },
+    );
+    expect(response.status).toBe(400);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 

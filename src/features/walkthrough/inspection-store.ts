@@ -17,12 +17,16 @@ import {
   validateEvaluatorDecision,
   validateModelDeficiencySuggestion,
   validateEvaluatorSignoff,
+  validateParticipantSignoff,
   validateEvidenceReference,
+  validateInspectionLocation,
   validateVideoAnalysisIdentity,
   type EvaluatorDecisionSet,
   type EvaluatorSignoff,
+  type ParticipantSignoff,
   type EvidenceReference,
   type FundingType,
+  type InspectionLocation,
   type ModelElementProposal,
   type MoveInReadyElementId,
   type MoveInReadyPromptId,
@@ -94,6 +98,9 @@ export interface VoiceCheckAnswer {
   recordedAt: string;
 }
 
+/** Guided-tour narration language (REQ-R2). "en" default; "es" needs FISH_VOICE_ID_ES. */
+export type TourLanguage = "en" | "es";
+
 export interface MoveInReadyInspection {
   schemaVersion: typeof INSPECTION_SCHEMA_VERSION;
   catalogVersion: string;
@@ -120,7 +127,15 @@ export interface MoveInReadyInspection {
   proposals: Partial<Record<string, ModelElementProposal>>;
   decisions: EvaluatorDecisionSet;
   pendingAnalysisIntent: PendingAnalysisIntent | null;
+  /** Persisted offline analysis queue (REQ-L2): room ids awaiting analysis, in enqueue order. */
+  analysisQueue: MoveInReadyRoomId[];
+  /** Optional GPS attestation captured at sign-off (REQ-L3); never blocks signing. */
+  inspectionLocation: InspectionLocation | null;
   signoff: EvaluatorSignoff | null;
+  /** REQ-F1 dual attestation: participant co-signature; name + typed signature only. */
+  participantSignoff: ParticipantSignoff | null;
+  /** REQ-F2: the participant needs visual (strobe) alarms; adds room checks + Fire Safety criteria. */
+  participantVisualAlarmsRequired: boolean;
   evaluatorAgencyName: string;
   landlordDiscussion: "" | "yes" | "no";
   landlordDiscussionDate: string;
@@ -129,6 +144,8 @@ export interface MoveInReadyInspection {
   leadershipSignoff: string;
   leadershipSignedAt: string;
   inspectionNote: string;
+  /** Spoken + question language for the guided tour only; review/export stay English. */
+  tourLanguage: TourLanguage;
 }
 
 interface InspectionDatabase extends DBSchema {
@@ -404,7 +421,11 @@ export function createInitialInspectionRecord(
     proposals: {},
     decisions: createUnreviewedEvaluatorDecisions(),
     pendingAnalysisIntent: null,
+    analysisQueue: [],
+    inspectionLocation: null,
     signoff: null,
+    participantSignoff: null,
+    participantVisualAlarmsRequired: false,
     evaluatorAgencyName: "",
     landlordDiscussion: "",
     landlordDiscussionDate: "",
@@ -413,6 +434,7 @@ export function createInitialInspectionRecord(
     leadershipSignoff: "",
     leadershipSignedAt: "",
     inspectionNote: "",
+    tourLanguage: "en",
   };
 }
 
@@ -446,6 +468,25 @@ function normalizeVoiceChecks(value: Record<string, unknown>): MoveInReadyInspec
     checks[roomId as MoveInReadyRoomId] = normalized;
   }
   return checks;
+}
+
+/**
+ * Normalize the persisted offline analysis queue (REQ-L2). Records saved
+ * before Sprint 3 have no queue and default to empty; entries dedupe in
+ * enqueue order. Non-room entries fail closed.
+ */
+function normalizeAnalysisQueue(value: unknown): MoveInReadyRoomId[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 12) return null;
+  const seen = new Set<string>();
+  const normalized: MoveInReadyRoomId[] = [];
+  for (const entry of value) {
+    if (!isMoveInReadyRoomId(entry)) return null;
+    if (seen.has(entry)) continue;
+    seen.add(entry);
+    normalized.push(entry);
+  }
+  return normalized;
 }
 
 function normalizeRoomFields(value: Record<string, unknown>): NormalizedRoomFields | null {
@@ -587,7 +628,11 @@ export function validateInspectionRecord(
     !isRecord(value.proposals) ||
     !isRecord(value.decisions) ||
     !(value.pendingAnalysisIntent === null || isRecord(value.pendingAnalysisIntent)) ||
+    (value.analysisQueue !== undefined && !Array.isArray(value.analysisQueue)) ||
+    (value.inspectionLocation !== undefined && value.inspectionLocation !== null && !isRecord(value.inspectionLocation)) ||
     (value.signoff !== null && !validateEvaluatorSignoff(value.signoff).ok) ||
+    (value.participantSignoff !== undefined && value.participantSignoff !== null && !validateParticipantSignoff(value.participantSignoff).ok) ||
+    (value.participantVisualAlarmsRequired !== undefined && typeof value.participantVisualAlarmsRequired !== "boolean") ||
     typeof value.evaluatorAgencyName !== "string" ||
     value.evaluatorAgencyName.length > 120 ||
     (value.landlordDiscussion !== "" && value.landlordDiscussion !== "yes" && value.landlordDiscussion !== "no") ||
@@ -600,7 +645,8 @@ export function validateInspectionRecord(
     value.leadershipSignoff.length > 120 ||
     typeof value.leadershipSignedAt !== "string" ||
     !isValidOptionalDate(value.leadershipSignedAt) ||
-    (value.inspectionNote !== undefined && (typeof value.inspectionNote !== "string" || value.inspectionNote.length > 2000))
+    (value.inspectionNote !== undefined && (typeof value.inspectionNote !== "string" || value.inspectionNote.length > 2000)) ||
+    (value.tourLanguage !== undefined && value.tourLanguage !== "en" && value.tourLanguage !== "es")
   ) {
     return { ok: false, message: "The saved inspection fields are incomplete or invalid." };
   }
@@ -684,6 +730,18 @@ export function validateInspectionRecord(
   if (!voiceChecks) {
     return { ok: false, message: "The saved inspection contains invalid voice check answers." };
   }
+  const analysisQueue = normalizeAnalysisQueue(value.analysisQueue);
+  if (!analysisQueue) {
+    return { ok: false, message: "The saved inspection contains an invalid analysis queue." };
+  }
+  let inspectionLocation: InspectionLocation | null = null;
+  if (value.inspectionLocation !== undefined && value.inspectionLocation !== null) {
+    const parsedLocation = validateInspectionLocation(value.inspectionLocation);
+    if (!parsedLocation.ok) {
+      return { ok: false, message: "The saved inspection contains an invalid inspection location." };
+    }
+    inspectionLocation = parsedLocation.value;
+  }
 
   if (hasStaleVersions) {
     return {
@@ -709,7 +767,11 @@ export function validateInspectionRecord(
         proposals: {},
         decisions: createUnreviewedEvaluatorDecisions(),
         pendingAnalysisIntent: null,
+        analysisQueue: [],
+        inspectionLocation: null,
         signoff: null,
+        participantSignoff: null,
+        participantVisualAlarmsRequired: value.participantVisualAlarmsRequired === true,
         evaluatorAgencyName: value.evaluatorAgencyName,
         landlordDiscussion: value.landlordDiscussion as MoveInReadyInspection["landlordDiscussion"],
         landlordDiscussionDate: value.landlordDiscussionDate,
@@ -718,6 +780,7 @@ export function validateInspectionRecord(
         leadershipSignoff: value.leadershipSignoff,
         leadershipSignedAt: value.leadershipSignedAt,
         inspectionNote: typeof value.inspectionNote === "string" ? value.inspectionNote : "",
+        tourLanguage: value.tourLanguage === "es" ? "es" : "en",
       },
     };
   }
@@ -850,7 +913,11 @@ export function validateInspectionRecord(
       proposals,
       decisions,
       pendingAnalysisIntent: parsedPendingAnalysisIntent.value,
+      analysisQueue,
+      inspectionLocation,
       signoff: value.signoff as EvaluatorSignoff | null,
+      participantSignoff: (value.participantSignoff ?? null) as ParticipantSignoff | null,
+      participantVisualAlarmsRequired: value.participantVisualAlarmsRequired === true,
       evaluatorAgencyName: value.evaluatorAgencyName,
       landlordDiscussion: value.landlordDiscussion as MoveInReadyInspection["landlordDiscussion"],
       landlordDiscussionDate: value.landlordDiscussionDate,
@@ -859,6 +926,7 @@ export function validateInspectionRecord(
       leadershipSignoff: value.leadershipSignoff,
       leadershipSignedAt: value.leadershipSignedAt,
       inspectionNote: typeof value.inspectionNote === "string" ? value.inspectionNote : "",
+      tourLanguage: value.tourLanguage === "es" ? "es" : "en",
     },
   };
 }
@@ -882,6 +950,8 @@ export function migrateLegacyInspectionRecord(
       ...(value as unknown as MoveInReadyInspection),
       schemaVersion: INSPECTION_SCHEMA_VERSION,
       sessionId: expectedSessionId,
+      participantSignoff: null,
+      participantVisualAlarmsRequired: false,
     }, PREVIOUS_SCHEMA_VERSION_WITHOUT_IDENTITY_VERSIONS);
   }
   if (value.schemaVersion === PREVIOUS_INSPECTION_SCHEMA_VERSION) {
@@ -900,6 +970,8 @@ export function migrateLegacyInspectionRecord(
       sessionId: expectedSessionId,
       decisions: decisions as EvaluatorDecisionSet,
       signoff: resetFireSafety ? null : value.signoff as EvaluatorSignoff | null,
+      participantSignoff: null,
+      participantVisualAlarmsRequired: false,
       evaluatorAgencyName: typeof value.evaluatorAgencyName === "string" ? value.evaluatorAgencyName : "",
       landlordDiscussion: value.landlordDiscussion === "yes" || value.landlordDiscussion === "no" ? value.landlordDiscussion : "",
       landlordDiscussionDate: typeof value.landlordDiscussionDate === "string" ? value.landlordDiscussionDate : "",
@@ -919,6 +991,8 @@ export function migrateLegacyInspectionRecord(
       leadershipNameAndTitle: "",
       leadershipSignedAt: "",
       inspectionNote: typeof value.inspectionNote === "string" ? value.inspectionNote.slice(0, 2000) : "",
+      participantSignoff: null,
+      participantVisualAlarmsRequired: false,
     }, ACKNOWLEDGMENT_INSPECTION_SCHEMA_VERSION);
   }
   if (value.schemaVersion !== LEGACY_INSPECTION_SCHEMA_VERSION) return null;
@@ -952,6 +1026,8 @@ export function migrateLegacyInspectionRecord(
     decisions: createUnreviewedEvaluatorDecisions(),
     pendingAnalysisIntent: null,
     signoff: null,
+    participantSignoff: null,
+    participantVisualAlarmsRequired: false,
     evaluatorAgencyName: "",
     landlordDiscussion: "",
     landlordDiscussionDate: "",
@@ -1053,6 +1129,8 @@ function migrateAcknowledgmentInspectionRecord(
     sessionId: expectedSessionId,
     decisions: decisions as EvaluatorDecisionSet,
     signoff: resetReview ? null : value.signoff as EvaluatorSignoff | null,
+    participantSignoff: null,
+    participantVisualAlarmsRequired: false,
   };
 }
 

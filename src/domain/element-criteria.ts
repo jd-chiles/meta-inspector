@@ -47,3 +47,23 @@ export const MOVE_IN_READY_ELEMENT_CRITERIA = {
     ],
   },
 } as const satisfies Record<MoveInReadyElementId, MoveInReadyElementCriteria>;
+
+/** REQ-F2 visual-alarms criterion (Form 1083 fire safety 10c). */
+export const VISUAL_ALARMS_FIRE_SAFETY_CRITERION =
+  "Visual alarms: a working visual strobe alarm is installed for the sleeping area where the participant requires one (Form 1083 fire safety 10c).";
+
+/**
+ * Record-aware criteria: the constant table above is the base; when the
+ * record flags that the participant needs visual (strobe) alarms, the Fire
+ * Safety criteria mention visual alarms.
+ */
+export function checklistItemsForElement(
+  record: { participantVisualAlarmsRequired?: boolean | null },
+  elementId: MoveInReadyElementId,
+): readonly string[] {
+  const base = MOVE_IN_READY_ELEMENT_CRITERIA[elementId].checklistItems;
+  if (elementId === "demo-smoke-co" && record.participantVisualAlarmsRequired === true) {
+    return [...base, VISUAL_ALARMS_FIRE_SAFETY_CRITERION];
+  }
+  return base;
+}

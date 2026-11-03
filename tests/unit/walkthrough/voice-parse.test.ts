@@ -27,4 +27,26 @@ describe("voice parsing", () => {
     expect(parseBathCount("3")).toBe(3);
     expect(parseBathCount("several")).toBeNull();
   });
+
+  it("parses Spanish yes/no, with and without the accent", () => {
+    expect(parseYesNo("Sí, funciona")).toBe("yes");
+    expect(parseYesNo("Si, todo bien")).toBe("yes");
+    expect(parseYesNo("No funciona")).toBe("no");
+    expect(parseYesNo("Claro que sí")).toBe("yes");
+    expect(parseYesNo("No, pero sí")).toBe("no");
+    expect(parseYesNo("Quizás")).toBeNull();
+  });
+
+  it("parses Spanish unit types and bath counts", () => {
+    expect(parseUnitType("Es un estudio")).toBe("studio");
+    expect(parseUnitType("Dos dormitorios")).toBe("2-bedroom");
+    expect(parseUnitType("tres habitaciones")).toBe("3-bedroom");
+    expect(parseUnitType("cuatro")).toBe("4-bedroom");
+    expect(parseUnitType("un dormitorio")).toBe("1-bedroom");
+    expect(parseBathCount("dos baños")).toBe(2);
+    expect(parseBathCount("un baño")).toBe(1);
+    expect(parseBathCount("tres")).toBe(3);
+    expect(parseBathCount("cinco baños")).toBe(5);
+    expect(parseBathCount("varios")).toBeNull();
+  });
 });

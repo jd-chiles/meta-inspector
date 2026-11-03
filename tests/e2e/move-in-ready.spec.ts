@@ -793,8 +793,13 @@ test.describe("Move-in Ready mobile flow", () => {
       const bottomNav = page.getByRole("navigation", { name: "Main navigation" });
       const navBox = await bottomNav.boundingBox();
       if (tab === "Sign-Off") {
+        // The dual sign-off block plus the Sprint 2 export actions legitimately
+        // extend this screen: assert reachability (scroll into view, never
+        // covered by the nav) instead of above-the-fold placement.
         for (const name of [/Client-file export/, /Landlord fix-list/, /^PDF$/, /^JSON$/]) {
-          const box = await page.getByRole("button", { name }).boundingBox();
+          const button = page.getByRole("button", { name });
+          await button.first().scrollIntoViewIfNeeded();
+          const box = await button.first().boundingBox();
           expect(box).not.toBeNull();
           expect(navBox).not.toBeNull();
           expect(box!.y + box!.height).toBeLessThanOrEqual(navBox!.y - 4);
@@ -1719,6 +1724,17 @@ test.describe("Move-in Ready mobile flow", () => {
         });
       });
 
+      const uploadRoomClip = async (roomId: "kitchen" | "bathroom" | "living-room" | "hallway"): Promise<void> => {
+        await selectRoom(page, roomId);
+        await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
+          name: `synthetic-${roomId}-test-pattern.mp4`,
+          mimeType: "video/mp4",
+          buffer: videoBytes,
+        });
+        await expect(page.getByText(/Clip saved on this device\./)).toBeVisible({ timeout: 20_000 });
+      };
+      const segmentCalls = (): number => stages.filter((stage) => stage === "segment").length;
+
       try {
         await page.goto(MOCK_LIVE_BASE_URL);
         await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
@@ -1728,39 +1744,38 @@ test.describe("Move-in Ready mobile flow", () => {
         await goToCapture(page);
         expect(await browserCanDecodeH264(page), "this E2E needs the bundled synthetic MP4 to decode in Chromium").toBe(true);
 
+        // Walkthrough consent stays on: analyze-on-save (REQ-S5) and the
+        // offline queue runner (REQ-L2) are live, so the first save
+        // auto-starts analysis on its own.
         const consent = page.getByTestId("walkthrough-consent");
         await expect(consent).toBeVisible();
         await consent.getByRole("checkbox", { name: /Every clip I film is staged\/mock-unit footage/ }).check();
         await consent.getByRole("checkbox", { name: /I understand each filmed clip will be sent/ }).check();
 
-        for (const roomId of ["kitchen", "bathroom", "living-room"] as const) {
-          await selectRoom(page, roomId);
-          await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
-            name: `synthetic-${roomId}-test-pattern.mp4`,
-            mimeType: "video/mp4",
-            buffer: videoBytes,
-          });
-          await expect(page.getByText(/Clip saved on this device\./)).toBeVisible({ timeout: 20_000 });
-        }
+        await uploadRoomClip("kitchen");
+        await expect(page.getByText(/1 room needing attention/)).toBeVisible({ timeout: 60_000 });
+        expect(segmentCalls()).toBe(1);
 
+        // Further saves must not restart while failures await review.
+        await uploadRoomClip("bathroom");
+        await uploadRoomClip("living-room");
+        await page.waitForTimeout(3_000);
+        expect(segmentCalls(), "saving rooms must not restart while failures await review").toBe(1);
+
+        // Explicit manual retry still analyzes every room needing work.
         const disclosure = page.getByTestId("batch-analysis-disclosure");
         const batchOpen = await disclosure.evaluate((element) => (element as HTMLDetailsElement).open);
         if (!batchOpen) await disclosure.locator("summary").click();
         await page.getByRole("checkbox", { name: /All 3 filmed clips are staged\/mock-unit footage/ }).check();
-        await page.getByRole("checkbox", { name: /I understand the filmed clips will be sent one room at a time/ }).check();
+        await page.getByRole("checkbox", { name: /I understand the filmed clips will be sent/ }).check();
         await page.getByRole("button", { name: "Analyze 3 filmed rooms", exact: true }).click();
         await expect(page.getByText(/3 rooms needing attention/)).toBeVisible({ timeout: 60_000 });
-        expect(stages.filter((stage) => stage === "segment")).toHaveLength(3);
+        expect(segmentCalls()).toBe(4);
 
-        await selectRoom(page, "hallway");
-        await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
-          name: "synthetic-hallway-test-pattern.mp4",
-          mimeType: "video/mp4",
-          buffer: videoBytes,
-        });
+        await uploadRoomClip("hallway");
         await expect(page.getByText("4 of 4 clips saved", { exact: true })).toBeVisible({ timeout: 20_000 });
         await page.waitForTimeout(3_000);
-        expect(stages.filter((stage) => stage === "segment"), "filming the last room must not restart a finished batch").toHaveLength(3);
+        expect(segmentCalls(), "filming the last room must not restart a finished batch").toBe(4);
         await expect(page.getByText(/3 rooms needing attention/)).toBeVisible();
       } finally {
         if (!page.isClosed()) await page.unroute("**/api/video/segment*");
@@ -1875,6 +1890,11 @@ test.describe("Move-in Ready mobile flow", () => {
     await page.getByRole("checkbox", { name: /I evaluated this unit to the best of my ability/ }).check();
     await page.getByRole("button", { name: "Sign inspection", exact: true }).click();
     await expect(page.getByTestId("inspection-result")).toHaveText("Not Approved");
+    await page.getByLabel("Participant name", { exact: true }).fill("Mock Participant");
+    await page.getByLabel("Type participant name to sign", { exact: true }).fill("Mock Participant");
+    await page.getByRole("checkbox", { name: /walked through this unit/ }).check();
+    await page.getByRole("button", { name: "Sign as participant", exact: true }).click();
+    await expect(page.getByText(/Participant sign-off saved to this device/)).toBeVisible();
 
     const downloadPromise = page.waitForEvent("download");
     await page.getByRole("button", { name: /Landlord fix-list/ }).click();
@@ -1919,6 +1939,18 @@ test.describe("Move-in Ready mobile flow", () => {
     await signInspection.click();
     await expect(page.getByTestId("inspection-result")).toHaveText("Approved");
     await expect(page.getByText(/Evaluator sign-off saved to this device/)).toBeVisible();
+
+    // Dual attestation: one signature is not enough to unlock exports.
+    for (const name of [/Client-file export/, /Landlord fix-list/, /^PDF$/, /^JSON$/]) {
+      await expect(page.getByRole("button", { name })).toBeDisabled();
+    }
+    await page.getByLabel("Participant name", { exact: true }).fill("Mock Participant");
+    await page.getByLabel("Type participant name to sign", { exact: true }).fill("Mock Participant");
+    await page.getByRole("checkbox", { name: /walked through this unit/ }).check();
+    const signParticipant = page.getByRole("button", { name: "Sign as participant", exact: true });
+    await expect(signParticipant).toBeEnabled();
+    await signParticipant.click();
+    await expect(page.getByText(/Participant sign-off saved to this device/)).toBeVisible();
 
     const exports = [
       { name: /Client-file export/, suffix: /client-file.*\.pdf$/ },

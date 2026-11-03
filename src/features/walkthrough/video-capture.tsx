@@ -68,6 +68,8 @@ export interface WalkthroughVideoCaptureProps {
   capturedRoomCount?: number;
   /** Room identities with a locally saved clip. */
   capturedRoomIds?: readonly string[];
+  /** Room identities awaiting analysis (REQ-L2 persisted queue). */
+  queuedRoomIds?: readonly string[];
   onRoomChange: (roomId: string) => void;
   /** Optional concise prompts; defaults are selected from the room id. */
   prompts?: readonly string[];
@@ -138,6 +140,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
     roomId,
     capturedRoomCount = 0,
     capturedRoomIds = [],
+    queuedRoomIds = [],
     onRoomChange,
     prompts,
     completedPromptIds = [],
@@ -738,6 +741,9 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
         </div>
         <div className={styles.roomHeaderActions}>
           <span className={styles.roomSaved}>{capturedRoomCount} of {rooms.length} clips saved</span>
+          {queuedRoomIds.includes(roomId) && (
+            <span className={styles.roomQueued} role="status" data-testid={`analysis-queued-${roomId}`}>Analysis queued</span>
+          )}
           <button
             type="button"
             className={styles.roomPickerToggle}
@@ -756,6 +762,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
         {rooms.map((option, index) => {
           const current = option.id === roomId;
           const saved = capturedRoomIds.includes(option.id);
+          const queued = queuedRoomIds.includes(option.id);
           const shortLabel = option.id === "bathroom"
             ? "Bath"
             : option.id === "bedroom-living"
@@ -772,7 +779,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
             type="button"
             className={`${styles.roomStep} ${current ? styles.roomStepCurrent : ""} ${saved ? styles.roomStepSaved : ""}`}
             data-testid={`room-step-${option.id}`}
-            aria-label={`Room ${index + 1}: ${option.label}${current ? ", selected" : ""}${saved ? ", clip saved" : ", no clip saved"}`}
+            aria-label={`Room ${index + 1}: ${option.label}${current ? ", selected" : ""}${saved ? ", clip saved" : ", no clip saved"}${queued ? ", analysis queued" : ""}`}
             aria-pressed={current}
             disabled={disabled || busy || recording}
             onClick={() => {
@@ -785,6 +792,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
           >
             <span className={styles.roomStepNumber}>{saved ? <Check aria-hidden="true" size={12} /> : index + 1}</span>
             <span className={styles.roomStepName}>{shortLabel}</span>
+            {queued && <span className={styles.roomStepQueue}>Queued</span>}
           </button>;
         })}
       </div>

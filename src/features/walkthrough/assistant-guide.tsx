@@ -12,6 +12,8 @@ interface AssistantGuideProps {
   voiceOn: boolean;
   recording: boolean;
   recordingCue?: string | null;
+  /** Guided-tour language; the guide itself stays English and says so (REQ-R2). */
+  tourLanguage?: "en" | "es";
   onAction: (action: AssistantAction) => void;
   onVoiceToggle: () => void;
   onReplay: () => void;
@@ -24,6 +26,7 @@ export default function AssistantGuide({
   voiceOn,
   recording,
   recordingCue = null,
+  tourLanguage = "en",
   onAction,
   onVoiceToggle,
   onReplay,
@@ -75,6 +78,11 @@ export default function AssistantGuide({
       {expanded && (
         <div className={styles.body}>
           <p className={styles.message}>{node.message}</p>
+          {tourLanguage === "es" && (
+            <p className={styles.message} data-testid="assistant-guide-english-only">
+              <small>This guide answers in English.</small>
+            </p>
+          )}
           {node.actions.length > 0 && (
             <div className={styles.actions}>
               {node.actions.map((action) => (

@@ -1,9 +1,12 @@
 # Implementation Prompt — Habitability Walkthrough Companion
 
-**Hand this entire file to the implementing agent team.** It is
+**Hand this entire file to Muse Code.** It is
 self-contained: mission, current-state facts, non-negotiable rules,
 requirements with exact specs, sprint order, and gates. Work through the
 sprints in order. Do not ask clarifying questions that this file answers.
+
+Do not use OpenCode. Muse Code is the only authorized implementation
+agent for this work (per AGENTS.md).
 
 ## Mission
 
@@ -51,9 +54,30 @@ and after your work).
    sprint with your REQ ids. Never hand-edit plugin state/evidence; never
    claim an approval or check that did not run.
 
+Verbatim source — AGENTS.md Code Review Rules (these exact sentences
+govern; the list above is only an operational summary):
+
+> 1. Evidence identity must survive asynchronous work correctly. A
+>    delayed response must not replace newer media, attach to another
+>    item/version, restore a deleted session, or retain approval after
+>    replacement/reanalysis.
+> 2. AI output is an unreviewed observation. Accepting text cannot
+>    complete a manual check, remove required unknowns, produce an
+>    inspection verdict, or include pending/rejected draft text as
+>    approved export content. Fixture mode and illustrative catalogs
+>    must remain labeled.
+> 3. Keep Meta keys/provider bodies out of browser bundles, logs and
+>    exports. Validate actual image bytes and resource limits; never
+>    fetch client URLs. Escape worker/model text in printable HTML.
+>    Local deletion must not claim provider deletion.
+> 4. Verification must exercise the actual flow. Flag silent fixture
+>    fallback, no-op/skipped required checks, missing acceptance tests,
+>    or fabricated live/provider confirmation. Keep formatting and
+>    mechanical checks in CI.
+
 ## Git discipline
 
-- Branch `opencode/sprints` off `dev`. One commit per sprint, in order,
+- Branch `muse-code/sprints` off `dev`. One commit per sprint, in order,
   only when that sprint's gates are green. Commit messages:
   `Sprint N: <REQ ids> <one-line summary>`.
 - Never commit to `dev` directly, never amend, never force-push, never
@@ -153,6 +177,9 @@ measured on the staged clips, with the measurement recorded honestly.
   "Analyze" action then covers only rooms not yet analyzed/queued).
   Offline at save time: do nothing in this sprint (Sprint 3 persists
   the queue). Analysis still never auto-decides anything.
+  Test: saving a clip with consent + LAHSA funding + live mode +
+  online enqueues that room (deduped); saving while offline or
+  without consent enqueues nothing.
 - **REQ-S6 — Concept cleanup.** In `VIDEO_PROMPTS`: bathroom loses
   `smoke detector` and `carbon monoxide detector`; kitchen loses
   `carbon monoxide detector`. (Bathroom voice checks and shot lists
@@ -239,9 +266,11 @@ beyond fewer concepts.
   (publicAreaDetectors), `visual_alarms_required` (REQ-F2 flag),
   `visual_alarms_approved` (true only when the flag is on and Fire
   Safety is A; null when the flag is off). `overall_determination`:
-  "APPROVED" only when every criterion is true, else "DEFICIENT" —
-  derived, never stored independently; an internal assertion must make
-  an inconsistent export impossible. `signatures`:
+  "APPROVED" only when every criterion is true, else "NOT APPROVED"
+  (any D or needs-human-check ⇒ not APPROVED, matching the repo's
+  approved/not-approved result convention) — derived, never stored
+  independently; an internal assertion must make an inconsistent
+  export impossible. `signatures`:
   `participant_signature` + `staff_signature` {name, signature text,
   timestamp}. Fields this app does not hold (address, HMIS ids) are
   emitted as null — never invented. Top-level
@@ -361,6 +390,44 @@ beyond fewer concepts.
   misses are listed in the demo notes." No accuracy percentage may
   appear anywhere unless it comes from that recorded run.
 
+## Sprint 5 — Observability (REQ-O1, REQ-O2)
+
+Added after Sprints 0–4: the app runs but AI failures are opaque.
+Instrument before changing Muse prompts or rewriting the pipeline.
+
+- **REQ-O1 — Langfuse pipeline tracing.** New server-only module
+  `src/server/observability/langfuse-trace.ts`: `isLangfuseConfigured`
+  (both `LANGFUSE_SECRET_KEY` + `LANGFUSE_PUBLIC_KEY` required,
+  optional `LANGFUSE_BASEURL` defaulting to cloud), deterministic
+  `analysisTraceId` shared by the segment and map stages of one
+  attempt, no-op-safe `AnalysisTracer` (span/generation/flush never
+  throw; unset keys mean zero overhead and no network calls), and
+  `runSpan`/`runSpanSync` phase wrappers that fail spans with safe
+  codes and rethrow. Hooks in `src/server/video/meta-sam.ts`:
+  `preflight-decode`, `sam-upload`, per-concept `sam-concept:*`
+  (labels, boxes, confidences), `select-candidates`,
+  `frame-decode`, a `muse-map` generation (model, still references,
+  instructions SHA-256, raw response text), and
+  `validate-proposals` (raw vs kept claim counts, per-element
+  summaries); one best-effort flush per request. Sanitization is
+  structural: metadata only — never media bytes/base64, pseudonyms,
+  names, keys, or provider bodies (Muse response text excepted as
+  the debugging target). The module is imported only by
+  server code; verify no client path reaches it.
+  Tests: unit gating/trace-id/no-op/`runSpan` success+failure
+  (no network); existing segment/map suites stay green.
+- **REQ-O2 — Eval dataset.** New pure module
+  `src/server/observability/eval-cases.ts`: dataset
+  `meta-inspect-walkthrough-v1`, five dimensions
+  (water-flow-accuracy, object-classification, evidence-grounding,
+  uncertainty-abstention, false-positives), validated
+  `buildEvalCaseItem` (references only: room, clip SHA-256, task,
+  expected), and `seedEvalCases` against the staged kitchen/bathroom
+  clips. Owner-run push script `scripts/langfuse-eval-push.mjs`
+  (`--dry-run` prints without sending; refuses invented hashes and
+  missing keys; never in CI). Scoring runs in Langfuse against
+  recorded traces. Tests: unit builders/validation/seed coverage.
+
 ## Gates — run after every sprint, all must pass before its commit
 
 ```bash
@@ -384,7 +451,7 @@ deselect, or weaken a failing test to get green.
 Gates green; new behavior covered by the tests named in its REQs;
 `02-design.md` + `05-change-log.md` updated with REQ ids, env vars, and
 honest verification mode (fixture vs live); one commit on
-`opencode/sprints`; a short report to the owner listing: REQs done,
+`muse-code/sprints`; a short report to the owner listing: REQs done,
 files changed, gate outputs, anything verified live vs fixture, and
 open risks. No deploy, no merge — the owner takes it from there.
 

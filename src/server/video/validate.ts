@@ -7,6 +7,7 @@
  */
 import { VideoSegmentError } from "./errors";
 import {
+  ANALYSIS_CLIP_CAP_SECONDS,
   isSupportedMp4Brand,
   MAX_FTYP_BOX_BYTES,
   QUICKTIME_BRAND,
@@ -15,7 +16,7 @@ import {
 export const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
 export const MAX_MULTIPART_BYTES = MAX_VIDEO_BYTES + 128 * 1024;
 export const MAX_VIDEO_FRAMES = 15_000;
-export const MAX_VIDEO_DURATION_MS = 30_000;
+export const MAX_VIDEO_DURATION_MS = ANALYSIS_CLIP_CAP_SECONDS * 1000;
 
 export type VideoContainer = "mp4" | "mov";
 

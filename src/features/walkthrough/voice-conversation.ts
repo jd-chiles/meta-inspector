@@ -61,14 +61,20 @@ function playAudioUrl(url: string, signal?: AbortSignal): Promise<void> {
   });
 }
 
+export interface SpeakPromptOptions {
+  /** Tour narration language; "es" uses the Spanish owner voice (REQ-R2). */
+  language?: "en" | "es";
+}
+
 /** Speak one prompt; resolves with the engine that spoke. Aborted on signal. */
-export async function speakPrompt(text: string, signal?: AbortSignal): Promise<SpeakResult> {
+export async function speakPrompt(text: string, signal?: AbortSignal, options: SpeakPromptOptions = {}): Promise<SpeakResult> {
+  const language = options.language ?? "en";
   if (signal?.aborted) return { engine: "none" };
   // Static-first: pre-generated clips for the fixed script play instantly
   // with zero provider latency. They are the same Fish voice, so a static
   // hit reports "fish"; anything missing falls through to live speech.
   try {
-    const clip = await staticVoiceUrl(text);
+    const clip = await staticVoiceUrl(text, fetch, language);
     if (clip && !signal?.aborted) {
       await playAudioUrl(clip, signal);
       return { engine: "fish" };
@@ -85,7 +91,7 @@ export async function speakPrompt(text: string, signal?: AbortSignal): Promise<S
         "content-type": "application/json",
         [WALKTHROUGH_CLIENT_HEADER]: WALKTHROUGH_CLIENT_ID,
       },
-      body: JSON.stringify({ text: text.slice(0, 500) }),
+      body: JSON.stringify(language === "es" ? { text: text.slice(0, 500), language: "es" } : { text: text.slice(0, 500) }),
       signal,
     });
     if (!response.ok) throw new Error(`voice speak ${response.status}`);
@@ -180,8 +186,16 @@ export function listenOnce(options: { maxMs?: number } = {}): {
   return { done, stop: () => stopRecording() };
 }
 
-/** Transcribe one mic clip; returns raw text (possibly empty). */
-export async function transcribeClip(blob: Blob, signal?: AbortSignal): Promise<string> {
+/** Which ASR engine answered: Muse (primary), Fish (flagged backup), or unknown (older stub). */
+export type TranscribeProvider = "muse" | "fish" | "unknown";
+
+export interface TranscribeResult {
+  text: string;
+  providerUsed: TranscribeProvider;
+}
+
+/** Transcribe one mic clip; returns raw text (possibly empty) plus which engine answered. */
+export async function transcribeClip(blob: Blob, signal?: AbortSignal): Promise<TranscribeResult> {
   const form = new FormData();
   form.append("audio", blob, "mic.webm");
   const response = await fetch("/api/voice/transcribe", {
@@ -193,5 +207,9 @@ export async function transcribeClip(blob: Blob, signal?: AbortSignal): Promise<
   if (!response.ok) throw new Error(`voice transcribe ${response.status}`);
   const body: unknown = await response.json().catch(() => null);
   const text = typeof body === "object" && body !== null ? (body as { text?: unknown }).text : undefined;
-  return typeof text === "string" ? text : "";
+  const providerUsed = typeof body === "object" && body !== null ? (body as { providerUsed?: unknown }).providerUsed : undefined;
+  return {
+    text: typeof text === "string" ? text : "",
+    providerUsed: providerUsed === "muse" || providerUsed === "fish" ? providerUsed : "unknown",
+  };
 }

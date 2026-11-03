@@ -39,13 +39,22 @@ export interface AnalysisCurrencyInput {
   record: AnalysisCurrencyRecord | null | undefined;
   identity: AnalysisCurrencyIdentity | null | undefined;
   expected: AnalysisCurrencyExpected;
+  /**
+   * Batch pipelines (Sprint 0 REQ-S2) analyze rooms other than the
+   * selected one. They still bind every response to the full media
+   * identity (session, room, video, attempt, versions); only the UI
+   * selection comparison is skipped. Defaults to true (manual flow).
+   */
+  requireSelectedRoom?: boolean;
 }
 
 export function isAnalysisCurrent(input: AnalysisCurrencyInput): boolean {
   const { record, identity, expected } = input;
+  const selectionCurrent = input.requireSelectedRoom === false ||
+    record?.selectedRoomId === expected.roomId;
   return !input.aborted && input.generation === input.currentGeneration && Boolean(
-    record && identity &&
-    record.sessionId === expected.sessionId && record.selectedRoomId === expected.roomId &&
+    selectionCurrent && record && identity &&
+    record.sessionId === expected.sessionId &&
     record.schemaVersion === expected.schemaVersion && record.catalogVersion === expected.catalogVersion &&
     identity.schemaVersion === expected.schemaVersion && identity.catalogVersion === expected.catalogVersion &&
     identity.videoId === expected.videoId && identity.videoRevision === expected.videoRevision &&

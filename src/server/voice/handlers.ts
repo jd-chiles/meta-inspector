@@ -13,13 +13,29 @@ import {
   MAX_TRANSCRIBE_BYTES,
   isFishCallError,
   resolveFishConfig,
+  resolveFishConfigForLanguage,
   speakText,
   transcribeAudio,
 } from "./fish";
+import {
+  resolveMuseTranscribeConfig,
+  transcribeWithMuse,
+  type MuseTranscribeConfig,
+  type MuseTranscription,
+} from "./muse-transcribe";
 
 export interface VoiceDeps {
   env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
   fetch?: typeof fetch;
+  /**
+   * Test seam for the Muse ASR path (production uses transcribeWithMuse,
+   * which converts the clip with server FFmpeg before posting).
+   */
+  transcribeWithMuse?: (
+    audio: Uint8Array,
+    config: MuseTranscribeConfig,
+    fetchImpl?: typeof fetch,
+  ) => Promise<MuseTranscription>;
 }
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
@@ -141,17 +157,25 @@ export async function handleSpeakRequest(request: Request, deps: VoiceDeps = {})
     return fishErrorResponse(error);
   }
   let text: unknown = "";
+  let language: unknown = "en";
   try {
     const body: unknown = await request.json();
     text = typeof body === "object" && body !== null ? (body as { text?: unknown }).text : "";
+    language = typeof body === "object" && body !== null && "language" in body
+      ? (body as { language?: unknown }).language
+      : "en";
   } catch {
     return errorResponse("INVALID_REQUEST", "Send the text to speak as JSON.", 400);
   }
   if (typeof text !== "string" || text.trim().length === 0 || text.length > MAX_SPEAK_TEXT_LENGTH) {
     return errorResponse("INVALID_REQUEST", `Text must be 1–${MAX_SPEAK_TEXT_LENGTH} characters.`, 400);
   }
+  if (language === undefined) language = "en";
+  if (language !== "en" && language !== "es") {
+    return errorResponse("INVALID_REQUEST", "Language must be en or es.", 400);
+  }
   try {
-    const config = resolveFishConfig(deps.env ?? process.env);
+    const config = resolveFishConfigForLanguage(deps.env ?? process.env, language);
     const key = speakCacheKey(text, config.voiceId, config.ttsModel);
     const cached = speakCacheGet(key);
     if (cached) {
@@ -213,11 +237,37 @@ export async function handleTranscribeRequest(request: Request, deps: VoiceDeps 
   if (!sniffAudio(bytes)) {
     return errorResponse("INVALID_REQUEST", "The mic clip is not recognized audio.", 400);
   }
+  const env = deps.env ?? process.env;
+  const fetchImpl = deps.fetch ?? fetch;
+  const provider = (env.VOICE_ASR_PROVIDER ?? "muse").trim().toLowerCase();
+  if (provider !== "muse" && provider !== "fish") {
+    return errorResponse("SETUP_REQUIRED", "The server voice transcription provider is not configured.", 503);
+  }
+  if (provider === "fish") {
+    try {
+      const config = resolveFishConfig(env);
+      const { text } = await transcribeAudio(bytes, "mic.webm", config, fetchImpl);
+      return Response.json({ ok: true, text, providerUsed: "fish" }, { status: 200 });
+    } catch (error) {
+      return fishErrorResponse(error);
+    }
+  }
+  // Default Muse ASR with a flagged Fish fallback: any Muse failure (HTTP,
+  // timeout, conversion, or missing Meta credentials) retries once against
+  // Fish, and providerUsed tells the client which engine answered so the
+  // fallback is surfaced, never silent.
   try {
-    const config = resolveFishConfig(deps.env ?? process.env);
-    const { text } = await transcribeAudio(bytes, "mic.webm", config, deps.fetch ?? fetch);
-    return Response.json({ ok: true, text }, { status: 200 });
-  } catch (error) {
-    return fishErrorResponse(error);
+    const museConfig = resolveMuseTranscribeConfig(env);
+    const museImpl = deps.transcribeWithMuse ?? transcribeWithMuse;
+    const { text } = await museImpl(bytes, museConfig, fetchImpl);
+    return Response.json({ ok: true, text, providerUsed: "muse" }, { status: 200 });
+  } catch {
+    try {
+      const fishConfig = resolveFishConfig(env);
+      const { text } = await transcribeAudio(bytes, "mic.webm", fishConfig, fetchImpl);
+      return Response.json({ ok: true, text, providerUsed: "fish" }, { status: 200 });
+    } catch (error) {
+      return fishErrorResponse(error);
+    }
   }
 }

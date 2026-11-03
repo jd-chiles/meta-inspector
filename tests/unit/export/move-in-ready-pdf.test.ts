@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createUnreviewedEvaluatorDecisions,
   EVALUATOR_ATTESTATION_TEXT,
+  PARTICIPANT_ATTESTATION_TEXT,
   MOVE_IN_READY_ELEMENTS,
   MOVE_IN_READY_ELEMENT_IDS,
   MOVE_IN_READY_SCHEMA_VERSION,
@@ -99,6 +100,12 @@ function inputFor(
     signoff: {
       evaluatorName: "Demo Evaluator",
       typedSignature: "Demo Evaluator",
+      attested: true,
+      signedAt: SIGNED_AT,
+    },
+    participantSignoff: {
+      participantName: "Demo Participant",
+      typedSignature: "Demo Participant",
       attested: true,
       signedAt: SIGNED_AT,
     },
@@ -294,6 +301,46 @@ describe("Move-in Ready signed export PDFs", () => {
         signedAt: SIGNED_AT,
       },
     }))).rejects.toThrow();
+  });
+
+  it("requires the participant co-signature before any export", async () => {
+    await expect(buildHmisReadyJson(inputFor({
+      participantSignoff: undefined as unknown as MoveInReadyExportInput["participantSignoff"],
+    }))).rejects.toThrow(/participant sign-off is required/i);
+    await expect(buildHmisReadyJson(inputFor({
+      participantSignoff: { ...inputFor().participantSignoff, attested: false },
+    }))).rejects.toThrow(/participant sign-off is required/i);
+    await expect(buildHmisReadyJson(inputFor({
+      participantSignoff: { ...inputFor().participantSignoff, typedSignature: "Someone Else" },
+    }))).rejects.toThrow(/participant sign-off is invalid/i);
+  });
+
+  it("carries both signatures in the HMIS JSON", async () => {
+    const json = await buildHmisReadyJson(inputFor());
+    expect(json.evaluator.typedSignature).toBe("Demo Evaluator");
+    expect(json.participant).toEqual({
+      name: "Demo Participant",
+      typedSignature: "Demo Participant",
+      attested: true,
+      attestationText: PARTICIPANT_ATTESTATION_TEXT,
+      signedAt: SIGNED_AT,
+    });
+  });
+
+  it("renders both signatures in every PDF", async () => {
+    const exports = await buildMoveInReadyExportSet(withConfirmedDeficiency());
+    for (const pdf of [exports.clientFilePdf, exports.landlordFixListPdf]) {
+      const text = decodedPdfStreams(pdf);
+      expect(text).toContain("Typed evaluator signature: Demo Evaluator");
+      expect(text).toContain("Typed participant signature: Demo Participant");
+      expect(text).toContain(PARTICIPANT_ATTESTATION_TEXT);
+    }
+    // The official form keeps its own evaluator wording; the participant
+    // co-signature rides in the appended local record.
+    const official = decodedPdfStreams(exports.hmisReadyPdf);
+    expect(official).toContain("Typed signature: Demo Evaluator");
+    expect(official).toContain("Participant: Demo Participant. Typed participant signature: Demo Participant.");
+    expect(official).toContain(PARTICIPANT_ATTESTATION_TEXT);
   });
 
   it.each([

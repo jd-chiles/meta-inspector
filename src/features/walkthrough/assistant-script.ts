@@ -87,6 +87,44 @@ export const ASSISTANT_FILMING_SCRIPTS: Record<MoveInReadyRoomType, readonly str
   ],
 };
 
+/**
+ * Spanish variants of the filming cues (REQ-R2). Same shape and order as
+ * the English table: cue N in one language is the same shot as cue N in
+ * the other. Pinned by the voice-inventory contract test against
+ * VOICE_CLIP_TEXTS_ES.
+ */
+export const ASSISTANT_FILMING_SCRIPTS_ES: Record<MoveInReadyRoomType, readonly string[]> = {
+  kitchen: [
+    "Grabando. Primero, abra el grifo de la cocina y muestre el flujo y el desagüe.",
+    "Ahora muestre el fregadero, las encimeras y los enchufes.",
+    "Abra la puerta de entrada y pruebe su cerradura.",
+    "Por último, muestre el detector de humo o monóxido de carbono y su luz indicadora.",
+  ],
+  bathroom: [
+    "Grabando. Primero, abra el grifo del baño y muestre el flujo y el desagüe.",
+    "Ahora muestre el inodoro, el lavabo y las superficies.",
+    "Muestre el ventilador funcionando.",
+  ],
+  bedroom: [
+    "Grabando. Primero, recorra la habitación mostrando paredes y pisos.",
+    "Ahora muestre las ventanas, las cerraduras y el equipo de calefacción o aire.",
+    "Muestre las lámparas y los enchufes.",
+    "Por último, muestre el detector de humo o monóxido de carbono.",
+  ],
+  "living-room": [
+    "Grabando. Primero, recorra la sala mostrando paredes y pisos.",
+    "Ahora muestre las ventanas, las cerraduras y el equipo de calefacción o aire.",
+    "Muestre las lámparas y los enchufes.",
+    "Por último, muestre el detector de humo o monóxido de carbono.",
+  ],
+  hallway: [
+    "Grabando. Primero, recorra todo el pasillo mostrando la ruta de salida.",
+    "Ahora muestre la puerta de salida y cualquier salida secundaria o ventana de escape.",
+    "Muestre la iluminación del pasaje.",
+    "Por último, muestre el detector de humo o monóxido de carbono.",
+  ],
+};
+
 export function deriveAssistantNode(input: AssistantScriptInput): AssistantNode {
   if (input.fundingType === "hud") {
     return {
@@ -132,7 +170,7 @@ export function deriveAssistantNode(input: AssistantScriptInput): AssistantNode 
     return {
       key: "analyzing",
       title: "AI is analyzing your clips",
-      message: "I'm running every filmed room through analysis, one at a time. Stay here — I'll take you to the checklist when the drafts are ready.",
+      message: "I'm running every filmed room through analysis, up to two rooms at a time. Stay here — I'll take you to the checklist when the drafts are ready.",
       speak: "I'm analyzing your clips now. Hang tight.",
       actions: [],
     };
@@ -180,8 +218,9 @@ export function deriveAssistantNode(input: AssistantScriptInput): AssistantNode 
 }
 
 /** Filming narration for a concrete room, resolved by room type. */
-export function filmingScriptForRoom(roomId: MoveInReadyRoomId): readonly string[] {
+export function filmingScriptForRoom(roomId: MoveInReadyRoomId, language: "en" | "es" = "en"): readonly string[] {
+  const table = language === "es" ? ASSISTANT_FILMING_SCRIPTS_ES : ASSISTANT_FILMING_SCRIPTS;
   const parsed = parseRoomId(roomId);
-  if (!parsed) return ASSISTANT_FILMING_SCRIPTS.hallway;
-  return ASSISTANT_FILMING_SCRIPTS[parsed.type];
+  if (!parsed) return table.hallway;
+  return table[parsed.type];
 }

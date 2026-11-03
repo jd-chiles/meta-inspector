@@ -11,5 +11,6 @@ export default function WalkthroughPage() {
     : modeSetting === "fixture"
       ? "fixture"
       : "unconfigured";
-  return <MoveInReadyFlow analysisMode={analysisMode} />;
+  const esVoiceConfigured = Boolean((process.env.FISH_VOICE_ID_ES ?? "").trim());
+  return <MoveInReadyFlow analysisMode={analysisMode} esVoiceConfigured={esVoiceConfigured} />;
 }

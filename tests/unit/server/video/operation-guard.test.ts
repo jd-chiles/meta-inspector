@@ -191,6 +191,40 @@ describe("video operation cancellation", () => {
   });
 });
 
+describe("same-session concurrent operations (Sprint 0 REQ-S2)", () => {
+  it("isolates two concurrent same-session operations by full request identity", () => {
+    const first = identity();
+    const second = { ...identity(), sessionId: first.sessionId };
+    const firstLease = claimVideoSegmentation(first);
+    const secondLease = claimVideoSegmentation(second);
+    firstLease.awaitingMap("token-first", Date.now() + 60_000);
+    secondLease.awaitingMap("token-second", Date.now() + 60_000);
+
+    // A cross-lease mapping is stale; each lease maps only with its own identity and token.
+    expectVideoError(() => claimVideoMapping(first, "token-second"), "STALE_REQUEST");
+    expectVideoError(() => claimVideoMapping(second, "token-first"), "STALE_REQUEST");
+    const firstMapping = claimVideoMapping(first, "token-first");
+    const secondMapping = claimVideoMapping(second, "token-second");
+    firstMapping.complete();
+    secondMapping.complete();
+  });
+
+  it("admits at most two concurrent operations per session", () => {
+    const base = identity();
+    const firstLease = claimVideoSegmentation(base);
+    const secondLease = claimVideoSegmentation({ ...identity(), sessionId: base.sessionId });
+    expectVideoError(
+      () => claimVideoSegmentation({ ...identity(), sessionId: base.sessionId }),
+      "OPERATION_BUSY",
+    );
+    firstLease.complete();
+    // Releasing one slot admits the next identity.
+    const nextLease = claimVideoSegmentation({ ...identity(), sessionId: base.sessionId });
+    secondLease.complete();
+    nextLease.complete();
+  });
+});
+
 describe("process-wide video operation admission", () => {
   it("rejects a third concurrent operation and admits it after capacity is released", () => {
     const first = claimVideoProcessing();

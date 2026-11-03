@@ -2,12 +2,15 @@ import {
   MOVE_IN_READY_ELEMENTS,
   MOVE_IN_READY_ELEMENT_IDS,
   EVALUATOR_ATTESTATION_TEXT,
+  PARTICIPANT_ATTESTATION_TEXT,
   deriveFinalInspectionResult,
   validateEvaluatorDecision,
   validateEvaluatorSignoff,
+  validateParticipantSignoff,
   type EvaluatorDecision,
   type EvaluatorDecisionSet,
   type EvaluatorSignoff,
+  type ParticipantSignoff,
   type EvidenceReference,
   type FireSafetyClauseOutcome,
   type FundingType,
@@ -19,6 +22,100 @@ import {
 import type { PDFFont, PDFPage } from "pdf-lib";
 
 export type MoveInReadyExportKind = "client-file" | "landlord-fix-list" | "hmis-ready";
+
+/** Boilerplate language for the landlord fix-list PDF (REQ-E3). */
+export type FixListLanguage = "en" | "es";
+
+interface FixListStrings {
+  title: string;
+  unitPseudonym: string;
+  fundingRoute: string;
+  fundingLahsa: string;
+  fundingIneligible: string;
+  evaluator: string;
+  agency: string;
+  typedSignature: string;
+  signed: string;
+  participant: string;
+  participantSignature: string;
+  participantSigned: string;
+  result: string;
+  resultApproved: string;
+  resultNotApproved: string;
+  notEntered: string;
+  headerIntro: string;
+  headerDeadline: string;
+  headerReinspection: string;
+  decision: string;
+  observedIssue: string;
+  correction: string;
+  completionDate: string;
+  reinspectionDate: string;
+  noDeficiencies: string;
+}
+
+/**
+ * The complete fix-list boilerplate in each supported language. Static
+ * author-written strings only — model text is never used for boilerplate.
+ * Signed and recorded content (attestation, names, rationales, dates,
+ * provenance) always renders verbatim, never retranslated.
+ */
+const FIX_LIST_STRINGS: Record<FixListLanguage, FixListStrings> = {
+  en: {
+    title: "Landlord fix list",
+    unitPseudonym: "Unit pseudonym",
+    fundingRoute: "Funding route",
+    fundingLahsa: "LAHSA Form 1083",
+    fundingIneligible: "Not eligible for this export",
+    evaluator: "Evaluator",
+    agency: "Agency",
+    typedSignature: "Typed evaluator signature",
+    signed: "Signed",
+    participant: "Participant",
+    participantSignature: "Typed participant signature",
+    participantSigned: "Participant signed",
+    result: "Result from evaluator decisions",
+    resultApproved: "APPROVED",
+    resultNotApproved: "NOT APPROVED",
+    notEntered: "Not entered",
+    headerIntro: "This document lists the habitability items the evaluator found deficient during the walkthrough.",
+    headerDeadline: "Each item must be corrected by its completion date.",
+    headerReinspection: "A re-inspection will verify that each correction is complete.",
+    decision: "Evaluator decision",
+    observedIssue: "Observed issue",
+    correction: "Correction",
+    completionDate: "Completion date",
+    reinspectionDate: "Reinspection date",
+    noDeficiencies: "No evaluator-confirmed deficiencies are listed.",
+  },
+  es: {
+    title: "Lista de reparaciones para el propietario",
+    unitPseudonym: "Seudónimo de la unidad",
+    fundingRoute: "Ruta de financiamiento",
+    fundingLahsa: "LAHSA Form 1083",
+    fundingIneligible: "No elegible para esta exportación",
+    evaluator: "Evaluador/a",
+    agency: "Agencia",
+    typedSignature: "Firma escrita del evaluador/a",
+    signed: "Firmado",
+    participant: "Participante",
+    participantSignature: "Firma escrita del participante",
+    participantSigned: "Participante firmó",
+    result: "Resultado de las decisiones del evaluador/a",
+    resultApproved: "APROBADO",
+    resultNotApproved: "NO APROBADO",
+    notEntered: "No ingresado",
+    headerIntro: "Este documento enumera los elementos de habitabilidad que el evaluador encontró deficientes durante la visita.",
+    headerDeadline: "Cada elemento debe corregirse antes de su fecha de finalización.",
+    headerReinspection: "Una nueva inspección verificará que cada corrección esté completa.",
+    decision: "Decisión del evaluador/a",
+    observedIssue: "Problema observado",
+    correction: "Corrección requerida",
+    completionDate: "Fecha de finalización",
+    reinspectionDate: "Fecha de nueva inspección",
+    noDeficiencies: "No se enumeran deficiencias confirmadas por el evaluador.",
+  },
+};
 
 export interface ExportStill {
   evidence: EvidenceReference;
@@ -34,6 +131,8 @@ export interface MoveInReadyExportInput {
   expectedRoomIds: readonly MoveInReadyRoomId[];
   decisions: EvaluatorDecisionSet;
   signoff: EvaluatorSignoff;
+  /** REQ-F1 dual attestation: required participant co-signature. */
+  participantSignoff: ParticipantSignoff;
   leadershipSignoffRequired?: boolean;
   leadershipSignoff?: string;
   /** Optional fields printed on LAHSA Form 1083 and collected by the host UI. */
@@ -66,6 +165,13 @@ export interface HmisReadyJson {
     signedAt: string;
     leadershipSignatureRequired: boolean;
     leadershipSignature: string | null;
+  };
+  participant: {
+    name: string;
+    typedSignature: string;
+    attested: true;
+    attestationText: string;
+    signedAt: string;
   };
   // Inspection occasion is a local-recording field describing which
   // contractual obligation this inspection satisfies. Not written to the
@@ -159,13 +265,17 @@ export async function buildMoveInReadyExportSet(
   };
 }
 
-/** Build only the requested PDF so mobile exports do not regenerate unused files. */
+/**
+ * Build only the requested PDF so mobile exports do not regenerate unused files.
+ * `language` selects the fix-list boilerplate language; other kinds ignore it.
+ */
 export async function buildMoveInReadyPdf(
   input: MoveInReadyExportInput,
   kind: MoveInReadyExportKind,
+  language: FixListLanguage = "en",
 ): Promise<Uint8Array> {
   const json = await buildHmisReadyJson(input);
-  return buildPdf(input, json, kind);
+  return buildPdf(input, json, kind, language);
 }
 
 export async function buildHmisReadyJson(input: MoveInReadyExportInput): Promise<HmisReadyJson> {
@@ -240,6 +350,13 @@ export async function buildHmisReadyJson(input: MoveInReadyExportInput): Promise
         ? cleanText(input.leadershipSignoff, 120)
         : null,
     },
+    participant: {
+      name: cleanText(input.participantSignoff.participantName, 120),
+      typedSignature: cleanText(input.participantSignoff.typedSignature, 120),
+      attested: true,
+      attestationText: PARTICIPANT_ATTESTATION_TEXT,
+      signedAt: input.participantSignoff.signedAt,
+    },
     // Carry the inspection occasion at the top-level for easier tests and
     // human readers; it is still not an official AcroForm field.
     inspectionOccasion: input.inspectionOccasion ?? null,
@@ -268,15 +385,17 @@ export async function buildHmisReadyJson(input: MoveInReadyExportInput): Promise
   };
 }
 
-export function exportFilename(kind: MoveInReadyExportKind, sessionId: string, generatedAt = new Date().toISOString()): string {
+export function exportFilename(kind: MoveInReadyExportKind, sessionId: string, generatedAt = new Date().toISOString(), language: FixListLanguage = "en"): string {
   const timestamp = generatedAt.replace(/[^0-9T]/g, "-").replace(/-+$/, "");
-  return `move-in-ready-${kind}-${safeIdentifier(sessionId)}-${timestamp}.pdf`;
+  const suffix = kind === "landlord-fix-list" && language === "es" ? "-es" : "";
+  return `move-in-ready-${kind}${suffix}-${safeIdentifier(sessionId)}-${timestamp}.pdf`;
 }
 
 async function buildPdf(
   input: MoveInReadyExportInput,
   json: HmisReadyJson,
   kind: MoveInReadyExportKind,
+  language: FixListLanguage = "en",
 ): Promise<Uint8Array> {
   if (kind === "hmis-ready") return buildOfficialHmisReadyPdf(input, json);
 
@@ -298,7 +417,8 @@ async function buildPdf(
   };
   await stampFooter(page);
 
-  const title = titleFor(kind);
+  const fixListStrings = FIX_LIST_STRINGS[language];
+  const title = titleFor(kind, language);
   await drawText(page, "MOVE-IN READY · LOCAL DRAFT", {
     x: margin,
     y: cursorY,
@@ -313,14 +433,30 @@ async function buildPdf(
   drawRule(page, margin, cursorY, contentWidth, rgb(0.78, 0.82, 0.88));
   cursorY -= 20;
 
-  const meta = [
-    `Unit pseudonym: ${json.pseudonym || "Not entered"}`,
-    `Funding route: ${input.fundingType === "lahsa" ? "LAHSA Form 1083" : "Not eligible for this export"}`,
-    `Evaluator: ${json.evaluator.name}`,
-    `Typed evaluator signature: ${json.evaluator.typedSignature}`,
-    `Signed: ${json.evaluator.signedAt}`,
-    `Result from evaluator decisions: ${json.result === "approved" ? "APPROVED" : "NOT APPROVED"}`,
-  ];
+  const meta = kind === "landlord-fix-list"
+    ? [
+        `${fixListStrings.unitPseudonym}: ${json.pseudonym || fixListStrings.notEntered}`,
+        `${fixListStrings.fundingRoute}: ${input.fundingType === "lahsa" ? fixListStrings.fundingLahsa : fixListStrings.fundingIneligible}`,
+        `${fixListStrings.evaluator}: ${json.evaluator.name}`,
+        `${fixListStrings.agency}: ${json.evaluator.agencyName ?? fixListStrings.notEntered}`,
+        `${fixListStrings.typedSignature}: ${json.evaluator.typedSignature}`,
+        `${fixListStrings.signed}: ${json.evaluator.signedAt}`,
+        `${fixListStrings.participant}: ${json.participant.name}`,
+        `${fixListStrings.participantSignature}: ${json.participant.typedSignature}`,
+        `${fixListStrings.participantSigned}: ${json.participant.signedAt}`,
+        `${fixListStrings.result}: ${json.result === "approved" ? fixListStrings.resultApproved : fixListStrings.resultNotApproved}`,
+      ]
+    : [
+        `Unit pseudonym: ${json.pseudonym || "Not entered"}`,
+        `Funding route: ${input.fundingType === "lahsa" ? "LAHSA Form 1083" : "Not eligible for this export"}`,
+        `Evaluator: ${json.evaluator.name}`,
+        `Typed evaluator signature: ${json.evaluator.typedSignature}`,
+        `Signed: ${json.evaluator.signedAt}`,
+        `Participant: ${json.participant.name}`,
+        `Typed participant signature: ${json.participant.typedSignature}`,
+        `Participant signed: ${json.participant.signedAt}`,
+        `Result from evaluator decisions: ${json.result === "approved" ? "APPROVED" : "NOT APPROVED"}`,
+      ];
   for (const line of meta) {
     cursorY = await drawWrappedText(page, line, {
       x: margin,
@@ -341,6 +477,15 @@ async function buildPdf(
     fonts,
     color: rgb(0.24, 0.29, 0.35),
   });
+  cursorY = await drawWrappedText(page, PARTICIPANT_ATTESTATION_TEXT, {
+    x: margin,
+    y: cursorY,
+    size: 8,
+    lineHeight: 11,
+    maxWidth: contentWidth,
+    fonts,
+    color: rgb(0.24, 0.29, 0.35),
+  });
   if (json.evaluator.leadershipSignature) {
     cursorY = await drawWrappedText(page, `Agency leadership sign-off: ${json.evaluator.leadershipSignature}`, {
       x: margin, y: cursorY, size: 10, lineHeight: 15, maxWidth: contentWidth,
@@ -353,12 +498,21 @@ async function buildPdf(
       fonts, color: rgb(0.14, 0.18, 0.24),
     });
   }
+  if (kind === "landlord-fix-list") {
+    for (const paragraph of [fixListStrings.headerIntro, fixListStrings.headerDeadline, fixListStrings.headerReinspection]) {
+      cursorY = await drawWrappedText(page, paragraph, {
+        x: margin, y: cursorY, size: 10, lineHeight: 15, maxWidth: contentWidth,
+        fonts, color: rgb(0.14, 0.18, 0.24),
+      });
+    }
+    cursorY -= 6;
+  }
   const stillByIdentity = new Map(input.stills.map((item) => [evidenceKey(item.evidence), item]));
   const elements = json.elements.filter((element) => {
     return kind !== "landlord-fix-list" || element.decision === "D";
   });
   if (kind === "landlord-fix-list" && elements.length === 0) {
-    await drawText(page, "No evaluator-confirmed deficiencies are listed.", {
+    await drawText(page, fixListStrings.noDeficiencies, {
       x: margin, y: cursorY, size: 12, weight: "bold", fonts, color: rgb(0.12, 0.35, 0.2),
     });
     cursorY -= 24;
@@ -370,13 +524,21 @@ async function buildPdf(
       throw new Error("An evaluator decision became incomplete during export.");
     }
     const bodyLines = element.decision === "D"
-      ? [
-          `Evaluator decision: D - ${element.rationale}`,
-          `Observed issue: ${element.deficiency!.issueDescription}`,
-          `Correction: ${element.deficiency!.correction}`,
-          `Completion date: ${element.deficiency!.completionDate}`,
-          `Reinspection date: ${element.deficiency!.reinspectionDate}`,
-        ]
+      ? kind === "landlord-fix-list"
+        ? [
+            `${fixListStrings.decision}: D - ${element.rationale}`,
+            `${fixListStrings.observedIssue}: ${element.deficiency!.issueDescription}`,
+            `${fixListStrings.correction}: ${element.deficiency!.correction}`,
+            `${fixListStrings.completionDate}: ${element.deficiency!.completionDate}`,
+            `${fixListStrings.reinspectionDate}: ${element.deficiency!.reinspectionDate}`,
+          ]
+        : [
+            `Evaluator decision: D - ${element.rationale}`,
+            `Observed issue: ${element.deficiency!.issueDescription}`,
+            `Correction: ${element.deficiency!.correction}`,
+            `Completion date: ${element.deficiency!.completionDate}`,
+            `Reinspection date: ${element.deficiency!.reinspectionDate}`,
+          ]
       : [`Evaluator decision: A - ${element.rationale}`];
     const provenanceLines = [
       ...decisionProvenanceLines(decision),
@@ -874,6 +1036,8 @@ async function appendOfficialForm1083Supplement(options: {
   });
   await appendText(`Form edition: LAHSA Form 1083, FY 2022-2023. Evaluator: ${json.evaluator.name}. Typed signature: ${json.evaluator.typedSignature}. Signed: ${dateOnly(json.evaluator.signedAt)}.`);
   await appendText(json.evaluator.attestationText);
+  await appendText(`Participant: ${json.participant.name}. Typed participant signature: ${json.participant.typedSignature}. Participant signed: ${dateOnly(json.participant.signedAt)}.`);
+  await appendText(json.participant.attestationText);
   await appendText(`Agency leadership sign-off required: ${json.evaluator.leadershipSignatureRequired ? "Yes" : "No"}. Leadership signature: ${json.evaluator.leadershipSignature ?? "Not recorded"}.`);
   await appendText("Participant name/HMIS number and unit address are intentionally blank because this workflow contains staged mock-unit data only.");
   await appendText(`Evaluator agency: ${json.evaluator.agencyName ?? "Not recorded"}. Landlord discussion: ${json.form1083.landlordDiscussion?.toUpperCase() ?? "Not recorded"}; date: ${json.form1083.landlordDiscussionDate ?? "Not recorded"}.`);
@@ -967,6 +1131,9 @@ async function assertExportable(input: MoveInReadyExportInput): Promise<void> {
   if (!input.signoff.attested || !input.signoff.evaluatorName.trim() || !input.signoff.typedSignature.trim()) {
     throw new Error("Evaluator sign-off is required before export.");
   }
+  if (!input.participantSignoff?.attested || !input.participantSignoff.participantName.trim() || !input.participantSignoff.typedSignature.trim()) {
+    throw new Error("Participant sign-off is required before export.");
+  }
   if (!input.evaluatorAgencyName?.trim()) {
     throw new Error("Evaluator agency name is required before export.");
   }
@@ -1018,6 +1185,9 @@ async function assertExportable(input: MoveInReadyExportInput): Promise<void> {
   }
   if (!validateEvaluatorSignoff(input.signoff).ok) {
     throw new Error("Evaluator sign-off is invalid.");
+  }
+  if (!validateParticipantSignoff(input.participantSignoff).ok) {
+    throw new Error("Participant sign-off is invalid.");
   }
   await validateReferencedStills(input);
 }
@@ -1345,9 +1515,9 @@ function cleanPdf(value: string): string {
   return value.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, " ").trim();
 }
 
-function titleFor(kind: MoveInReadyExportKind): string {
+function titleFor(kind: MoveInReadyExportKind, language: FixListLanguage = "en"): string {
   if (kind === "client-file") return "Client-file inspection copy";
-  if (kind === "landlord-fix-list") return "Landlord fix list";
+  if (kind === "landlord-fix-list") return FIX_LIST_STRINGS[language].title;
   return "Form 1083-style HMIS-ready copy";
 }
 

@@ -1,16 +1,21 @@
 import { createHash, createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_MAX_CONCURRENT_SAM_CONCEPTS,
   handleVideoSegmentRequest,
+  makeCandidates,
   makeMuseSampleTimestamps,
   META_UPLOAD_EXPIRY_SECONDS,
   MUSE_BASETEN_MODEL,
   MUSE_VIDEO_MODEL,
+  resolveMaxConcurrentSamConcepts,
   SAM_VIDEO_MODEL,
   VIDEO_PROMPTS,
   type VideoDraftSuggestion,
+  type VideoPromptResult,
   type VideoRequestIdentity,
 } from "../../../../src/server/video/meta-sam";
+import { ANALYSIS_CLIP_CAP_MS, ANALYSIS_WINDOW_NOTE } from "../../../../src/domain/video-format";
 import {
   MAX_MULTIPART_BYTES,
   MAX_VIDEO_BYTES,
@@ -385,7 +390,7 @@ describe("SAM video upload validation", () => {
     const candidates = body.candidates as VideoDraftSuggestion[];
 
     expect(response.status).toBe(200);
-    expect(candidates).toHaveLength(12);
+    expect(candidates).toHaveLength(10);
     for (const prompt of VIDEO_PROMPTS.kitchen) {
       const matchingCandidates = candidates.filter((candidate) =>
         candidate.elementId === prompt.elementId && candidate.concept === prompt.concept,
@@ -473,9 +478,11 @@ describe("POST /api/video/segment", () => {
     expect(Object.values(VIDEO_PROMPTS).every((prompts) => prompts.length <= 6)).toBe(true);
     expect(VIDEO_PROMPTS.kitchen).toEqual(expect.arrayContaining([
       { elementId: "demo-item-10", concept: "refuse bin" },
-      { elementId: "demo-smoke-co", concept: "carbon monoxide detector" },
     ]));
-    expect(VIDEO_PROMPTS.bathroom).toContainEqual({ elementId: "demo-smoke-co", concept: "carbon monoxide detector" });
+    // Sprint 0 REQ-S6: bathroom and kitchen no longer send detector concepts.
+    expect(VIDEO_PROMPTS.kitchen).not.toContainEqual({ elementId: "demo-smoke-co", concept: "carbon monoxide detector" });
+    expect(VIDEO_PROMPTS.bathroom).not.toContainEqual({ elementId: "demo-smoke-co", concept: "smoke detector" });
+    expect(VIDEO_PROMPTS.bathroom).not.toContainEqual({ elementId: "demo-smoke-co", concept: "carbon monoxide detector" });
     expect(VIDEO_PROMPTS.bedroom).toEqual(expect.arrayContaining([
       { elementId: "demo-item-09", concept: "heating equipment" },
       { elementId: "demo-item-09", concept: "air conditioning unit" },
@@ -635,7 +642,11 @@ describe("POST /api/video/segment", () => {
   it("creates a bounded one-frame-per-second source sample schedule", () => {
     expect(makeMuseSampleTimestamps(1_000)).toEqual([500]);
     expect(makeMuseSampleTimestamps(2_500)).toEqual([500, 1_500, 2_250]);
-    expect(makeMuseSampleTimestamps(30_000)).toHaveLength(30);
+    // Sprint 0 REQ-S4: the 12-still map payload keeps the earliest samples.
+    expect(makeMuseSampleTimestamps(30_000)).toHaveLength(12);
+    expect(makeMuseSampleTimestamps(30_000)).toEqual(
+      [500, 1_500, 2_500, 3_500, 4_500, 5_500, 6_500, 7_500, 8_500, 9_500, 10_500, 11_500],
+    );
     expect(makeMuseSampleTimestamps(30_001)).toEqual([]);
   });
 
@@ -1352,7 +1363,7 @@ describe("POST /api/video/segment", () => {
     expect(text).not.toContain("file-provider-secret-987");
   });
 
-  it("allows at most two exact-seek candidates per concept and twelve for the six-concept room", async () => {
+  it("allows at most two exact-seek candidates per concept and eight for the four-concept bathroom", async () => {
     const boxLine = (frame: number) =>
       `<${frame}f>3<|box;x1=${10 + frame};y1=20;x2=${30 + frame};y2=40;w=320;h=334|>` +
       "<|mask;x=0;y=0;data=27,60,~!!!!M!0c[0o91w?q1!pIH4pPRVp2B3'7`e.ioeAf6-k/#Xd8%dX9x(|>\n";
@@ -1366,7 +1377,7 @@ describe("POST /api/video/segment", () => {
 
     expect({ status: response.status, body }).toMatchObject({ status: 200 });
     const candidates = body.candidates as VideoDraftSuggestion[];
-    expect(candidates).toHaveLength(12);
+    expect(candidates).toHaveLength(8);
     const counts = new Map<string, number>();
     for (const candidate of candidates) {
       const key = `${candidate.elementId}\0${candidate.concept}`;
@@ -1375,7 +1386,7 @@ describe("POST /api/video/segment", () => {
     expect([...counts.values()].every((count) => count <= 2)).toBe(true);
   });
 
-  it("locks one active session operation and consumes duplicate analysis attempts", async () => {
+  it("locks one active operation per request identity and consumes duplicate analysis attempts", async () => {
     const identity = identityFor("segment-lock");
     let enteredUpload!: () => void;
     const firstUploadEntered = new Promise<void>((resolve) => { enteredUpload = resolve; });
@@ -1476,12 +1487,48 @@ describe("SAM per-concept concurrency", () => {
     const { response, body } = await segment({ identity: identityFor("concurrency") }, fetchImpl);
     expect(response.status).toBe(200);
     expect(maxInFlight).toBeGreaterThanOrEqual(2);
-    expect(maxInFlight).toBeLessThanOrEqual(3);
+    expect(maxInFlight).toBeLessThanOrEqual(6);
     expect(seenConcepts).toHaveLength(VIDEO_PROMPTS.kitchen.length);
     const candidates = body.candidates as Array<{ concept: string }>;
     expect(candidates.map((candidate) => candidate.concept)).toEqual(
       VIDEO_PROMPTS.kitchen.map((prompt) => prompt.concept),
     );
+  });
+
+  it("parses the concurrency override from env, clamped to 1-6 with a 6 default", () => {
+    expect(DEFAULT_MAX_CONCURRENT_SAM_CONCEPTS).toBe(6);
+    expect(resolveMaxConcurrentSamConcepts({})).toBe(6);
+    expect(resolveMaxConcurrentSamConcepts({ SAM_MAX_CONCURRENT_CONCEPTS: "2" })).toBe(2);
+    expect(resolveMaxConcurrentSamConcepts({ SAM_MAX_CONCURRENT_CONCEPTS: "6" })).toBe(6);
+    expect(resolveMaxConcurrentSamConcepts({ SAM_MAX_CONCURRENT_CONCEPTS: "99" })).toBe(6);
+    expect(resolveMaxConcurrentSamConcepts({ SAM_MAX_CONCURRENT_CONCEPTS: "0" })).toBe(1);
+    expect(resolveMaxConcurrentSamConcepts({ SAM_MAX_CONCURRENT_CONCEPTS: "-3" })).toBe(1);
+    expect(resolveMaxConcurrentSamConcepts({ SAM_MAX_CONCURRENT_CONCEPTS: "banana" })).toBe(6);
+  });
+
+  it("runs concepts sequentially when the env override is 1", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const { fetchImpl: base } = mockMetaFetch();
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (!url.endsWith("/responses")) return base(input, init);
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return await base(input, init);
+      } finally {
+        inFlight -= 1;
+      }
+    };
+    const response = await handleVideoSegmentRequest(requestFor({ identity: identityFor("concurrency-one") }), {
+      env: { ...LIVE_ENV, SAM_MAX_CONCURRENT_CONCEPTS: "1" },
+      fetch: fetchImpl,
+      decodeSourceFrames: testSourceFrameDecoder,
+    });
+    expect(response.status).toBe(200);
+    expect(maxInFlight).toBe(1);
   });
 
   it("fails fast on a concept error and aborts in-flight siblings", async () => {
@@ -1510,5 +1557,127 @@ describe("SAM per-concept concurrency", () => {
     expect(body).toMatchObject({ ok: false });
     expect(siblingSignals.length).toBeGreaterThanOrEqual(1);
     expect(siblingSignals.every((signal) => signal.aborted)).toBe(true);
+  });
+});
+
+describe("30-second analysis window (Sprint 0 REQ-S3)", () => {
+  it("states the first-30-seconds window on the segment response", async () => {
+    const { fetchImpl } = mockMetaFetch();
+    const { response, body } = await segment({ identity: identityFor("analysis-note") }, fetchImpl);
+    expect(response.status).toBe(200);
+    expect(body.analysisNote).toBe(ANALYSIS_WINDOW_NOTE);
+  });
+
+  it("rejects a longer-than-30-seconds staged clip with no evidence at or beyond the cap", async () => {
+    const { fetchImpl } = mockMetaFetch();
+    const { response, body } = await segment(
+      { bytes: makeMp4(31_000, 2), identity: identityFor("over-cap") },
+      fetchImpl,
+    );
+    expect(response.status).toBe(413);
+    expect(body).toMatchObject({ ok: false, error: { code: "VIDEO_TOO_LONG" } });
+    expect(body.candidates).toBeUndefined();
+    expect(body.sampleTimestampsMs).toBeUndefined();
+    expect(body.candidateToken).toBeUndefined();
+  });
+
+  it("drops candidate boxes at or beyond 30 seconds before selection", () => {
+    const prompt = VIDEO_PROMPTS.kitchen[0]!;
+    const box = { left: 10, top: 20, right: 30, bottom: 40 };
+    const results: VideoPromptResult[] = [{
+      ...prompt,
+      boxes: [
+        { frameIndex: 0, timestampMs: 500, objectOrdinal: 0, box },
+        { frameIndex: 29, timestampMs: ANALYSIS_CLIP_CAP_MS, objectOrdinal: 0, box },
+        { frameIndex: 30, timestampMs: ANALYSIS_CLIP_CAP_MS + 500, objectOrdinal: 1, box },
+      ],
+    }];
+    const candidates = makeCandidates(results);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      candidateId: "cand-0001",
+      elementId: prompt.elementId,
+      concept: prompt.concept,
+      evidence: { frameIndex: 0, timestampMs: 500 },
+    });
+  });
+});
+
+describe("two-room request isolation (Sprint 0 REQ-S2)", () => {
+  it("keeps two interleaved same-session segment requests on their own room and video identity", async () => {
+    const sessionId = "session-two-room-interleave";
+    const kitchenBytes = makeMp4(1_000, 2);
+    const bathroomBytes = makeMp4(2_000, 4);
+    const { fetchImpl: baseFetch } = mockMetaFetch();
+    // Force true overlap: the first upload waits for the sibling upload
+    // to arrive before either proceeds to the provider.
+    let releaseFirst!: () => void;
+    const siblingArrived = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    let uploadCount = 0;
+    let overlapped = false;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (!url.endsWith("/files")) return baseFetch(input, init);
+      uploadCount += 1;
+      if (uploadCount === 1) {
+        await Promise.race([
+          siblingArrived,
+          new Promise((_, reject) => setTimeout(() => reject(new Error("uploads never overlapped")), 5000)),
+        ]);
+        overlapped = true;
+      } else {
+        releaseFirst();
+      }
+      return baseFetch(input, init);
+    };
+
+    const [kitchenResponse, bathroomResponse] = await Promise.all([
+      handleVideoSegmentRequest(requestFor({
+        room: "kitchen",
+        bytes: kitchenBytes,
+        identity: identityFor("room-a", { sessionId, videoId: "video-room-a", analysisId: "analysis-room-a" }),
+      }), { env: LIVE_ENV, fetch: fetchImpl, decodeSourceFrames: testSourceFrameDecoder }),
+      handleVideoSegmentRequest(requestFor({
+        room: "bathroom",
+        bytes: bathroomBytes,
+        identity: identityFor("room-b", { sessionId, videoId: "video-room-b", analysisId: "analysis-room-b" }),
+      }), { env: LIVE_ENV, fetch: fetchImpl, decodeSourceFrames: testSourceFrameDecoder }),
+    ]);
+
+    expect(overlapped).toBe(true);
+    expect(kitchenResponse.status).toBe(200);
+    expect(bathroomResponse.status).toBe(200);
+    const kitchenBody = await json(kitchenResponse);
+    const bathroomBody = await json(bathroomResponse);
+    expect(kitchenBody.room).toBe("kitchen");
+    expect(bathroomBody.room).toBe("bathroom");
+    expect(kitchenBody.identity).toMatchObject({ sessionId, videoId: "video-room-a" });
+    expect(bathroomBody.identity).toMatchObject({ sessionId, videoId: "video-room-b" });
+    expect(kitchenBody.candidateToken).not.toBe(bathroomBody.candidateToken);
+    const kitchenConcepts = new Set(VIDEO_PROMPTS.kitchen.map((prompt) => prompt.concept));
+    const bathroomConcepts = new Set(VIDEO_PROMPTS.bathroom.map((prompt) => prompt.concept));
+    for (const candidate of kitchenBody.candidates as VideoDraftSuggestion[]) {
+      expect(kitchenConcepts.has(candidate.concept)).toBe(true);
+    }
+    for (const candidate of bathroomBody.candidates as VideoDraftSuggestion[]) {
+      expect(bathroomConcepts.has(candidate.concept)).toBe(true);
+    }
+
+    // Mapping each lease lands proposals on its own room and video identity.
+    const { fetchImpl: mapFetch } = mockMetaFetch();
+    const [kitchenMapped, bathroomMapped] = await Promise.all([
+      handleMap(kitchenBody, { env: LIVE_ENV, fetch: mapFetch }),
+      handleMap(bathroomBody, { env: LIVE_ENV, fetch: mapFetch }),
+    ]);
+    expect(kitchenMapped.status).toBe(200);
+    expect(bathroomMapped.status).toBe(200);
+    const kitchenMappedBody = await json(kitchenMapped);
+    const bathroomMappedBody = await json(bathroomMapped);
+    expect(kitchenMappedBody.room).toBe("kitchen");
+    expect(bathroomMappedBody.room).toBe("bathroom");
+    expect(kitchenMappedBody.identity).toMatchObject({ sessionId, videoId: "video-room-a" });
+    expect(bathroomMappedBody.identity).toMatchObject({ sessionId, videoId: "video-room-b" });
+    expect(kitchenMappedBody.media).toMatchObject({ sourceVideoSha256: sha256(kitchenBytes) });
+    expect(bathroomMappedBody.media).toMatchObject({ sourceVideoSha256: sha256(bathroomBytes) });
   });
 });

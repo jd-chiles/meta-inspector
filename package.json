@@ -23,6 +23,7 @@
     "@next/env": "15.1.6",
     "@pdf-lib/fontkit": "^1.1.1",
     "idb": "8.0.0",
+    "langfuse": "^3.39.2",
     "lucide-react": "^1.64.0",
     "mediabunny": "1.63.0",
     "next": "15.1.6",

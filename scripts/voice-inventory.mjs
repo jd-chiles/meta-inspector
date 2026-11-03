@@ -57,6 +57,13 @@ const REPROMPTS = [
   "I didn't catch that. Say yes or no, or tap an answer.",
 ];
 
+const REVIEW_AND_TEST = [
+  // REVIEW_VOICE_QUESTION (guided-tour.ts) + DETECTOR_TEST_PROMPT
+  // (detector-test.ts): static prompts spoken on their cards.
+  "Say yes to confirm this draft, or no to edit it.",
+  "Press the detector's test button now",
+];
+
 const FILMING_CUES = [
   // ASSISTANT_FILMING_SCRIPTS, raw spoken form per room type.
   "Recording. First, run the kitchen faucet and show the water flow and drainage.",
@@ -77,7 +84,76 @@ const FILMING_CUES = [
 ];
 
 /** Every static spoken string, deduplicated, in stable generation order. */
-export const VOICE_CLIP_TEXTS = [...new Set([...TOUR_STATIC, ...SETUP_QUESTIONS, ...ROOM_CHECKS, ...FILMING_CUES, ...ASSISTANT_STATIC, ...REPROMPTS])];
+export const VOICE_CLIP_TEXTS = [...new Set([...TOUR_STATIC, ...SETUP_QUESTIONS, ...ROOM_CHECKS, ...FILMING_CUES, ...ASSISTANT_STATIC, ...REPROMPTS, ...REVIEW_AND_TEST])];
+
+/**
+ * Spanish-tour static strings (REQ-R2), mirroring the English groups above.
+ * Generated with the Spanish owner voice (FISH_VOICE_ID_ES) into
+ * public/voice/es/ via `node scripts/generate-voice.mjs --lang es`. The AI
+ * Guide popup stays English, so ASSISTANT_STATIC has no ES counterpart.
+ */
+const TOUR_STATIC_ES = [
+  // TOUR_SCRIPT_ES welcome/consent/analyze + finishComplete.
+  "Le guiaré en esta inspección paso a paso. Usted filma cada habitación, responde algunas preguntas por voz y revisa los borradores de la IA. Unos diez minutos. Toque Comenzar cuando esté listo.",
+  "Un consentimiento rápido antes de filmar. Esta demostración inspecciona solo una unidad simulada de prueba, sin inquilinos, rostros ni datos reales. Cada clip que filme se envía a Meta para el análisis de IA. Toque Entiendo, vamos a filmar para continuar.",
+  "Ya filmó todas las habitaciones. Enviando sus clips para el análisis de IA. Esto toma unos minutos. Permanezca en esta pantalla.",
+  "Inspección completa. Todos los requisitos están decididos. Vaya a la firma para revisar el resultado y exportar.",
+];
+
+const SETUP_QUESTIONS_ES = [
+  // SETUP_VOICE_QUESTIONS_ES.
+  "Su nombre aparece en cada decisión. ¿Cómo se llama?",
+  "¿Qué tipo de unidad es?",
+  "¿Qué tipo de unidad es esta? Diga estudio o cuántas habitaciones tiene.",
+  "¿Cuántos baños tiene?",
+];
+
+const ROOM_CHECKS_ES = [
+  // VOICE_ROOM_CHECKS_ES, every room type.
+  "Abra el grifo. ¿Sale agua caliente y clara?",
+  "¿El área de cocina y almacenamiento de alimentos se puede usar?",
+  "Descargue el inodoro. ¿Funciona todo bien?",
+  "¿Funcionan las ventanas y las cerraduras de las puertas?",
+  "¿Hay un detector de humo en funcionamiento en esta habitación o cerca?",
+  "Encienda la calefacción o el aire acondicionado. ¿Funciona?",
+  "¿La ruta de salida está despejada y se puede usar?",
+  "¿Hay un detector de humo en funcionamiento a lo largo de este pasaje?",
+];
+
+const REPROMPTS_ES = [
+  // TOUR_REPROMPTS_ES.
+  "No le entendí. Toque su tipo de unidad abajo.",
+  "No le entendí. Toque el número de baños abajo.",
+  "No le entendí. Diga sí o no, o toque una respuesta.",
+];
+
+const REVIEW_AND_TEST_ES = [
+  // REVIEW_VOICE_QUESTION_ES + DETECTOR_TEST_PROMPT_ES.
+  "Diga sí para confirmar este borrador, o no para editarlo.",
+  "Presione ahora el botón de prueba del detector",
+];
+
+const FILMING_CUES_ES = [
+  // ASSISTANT_FILMING_SCRIPTS_ES, raw spoken form per room type.
+  "Grabando. Primero, abra el grifo de la cocina y muestre el flujo y el desagüe.",
+  "Ahora muestre el fregadero, las encimeras y los enchufes.",
+  "Abra la puerta de entrada y pruebe su cerradura.",
+  "Por último, muestre el detector de humo o monóxido de carbono y su luz indicadora.",
+  "Grabando. Primero, abra el grifo del baño y muestre el flujo y el desagüe.",
+  "Ahora muestre el inodoro, el lavabo y las superficies.",
+  "Muestre el ventilador funcionando.",
+  "Grabando. Primero, recorra la habitación mostrando paredes y pisos.",
+  "Ahora muestre las ventanas, las cerraduras y el equipo de calefacción o aire.",
+  "Muestre las lámparas y los enchufes.",
+  "Grabando. Primero, recorra la sala mostrando paredes y pisos.",
+  "Grabando. Primero, recorra todo el pasillo mostrando la ruta de salida.",
+  "Ahora muestre la puerta de salida y cualquier salida secundaria o ventana de escape.",
+  "Muestre la iluminación del pasaje.",
+  "Por último, muestre el detector de humo o monóxido de carbono.",
+];
+
+/** Every static Spanish spoken string, deduplicated, in stable generation order. */
+export const VOICE_CLIP_TEXTS_ES = [...new Set([...TOUR_STATIC_ES, ...SETUP_QUESTIONS_ES, ...ROOM_CHECKS_ES, ...FILMING_CUES_ES, ...REPROMPTS_ES, ...REVIEW_AND_TEST_ES])];
 
 /** Normalize exactly like the client lookup: trim only, never reword. */
 export function normalizeVoiceText(text) {

@@ -9,11 +9,14 @@ import {
   createInitialInspectionRecord,
   type MoveInReadyInspection,
 } from "../../../src/features/walkthrough/inspection-store";
-import { VOICE_ROOM_CHECKS } from "../../../src/features/walkthrough/voice-checks";
+import { VOICE_ROOM_CHECKS, VOICE_ROOM_CHECKS_ES } from "../../../src/features/walkthrough/voice-checks";
 import {
   deriveTourNode,
   guidedReviewQueue,
+  filmRoomScript,
+  nameReadbackScript,
   reviewVoiceAction,
+  roomLabelEs,
   tourNodeKey,
   filmRoomShots,
   tourProgress,
@@ -85,6 +88,26 @@ describe("deriveTourNode", () => {
     };
     expect(deriveTourNode(baseInput({ record: answered, capturedRoomIds: [roomId] })))
       .toEqual({ kind: "film-room", roomId: record.roomIds[1] });
+  });
+
+  it("asks the strobe question in bedroom only when visual alarms are required", () => {
+    const record = withSetup(createInitialInspectionRecord("tour-session-strobe"));
+    const answered: MoveInReadyInspection["voiceChecks"] = {};
+    for (const roomId of ["kitchen", "bathroom", "bedroom"] as const) {
+      const parsed = parseRoomId(roomId);
+      answered[roomId] = (parsed ? VOICE_ROOM_CHECKS[parsed.type] : []).map((question) => ({
+        question,
+        answer: "yes" as const,
+        recordedAt: "2026-11-01T00:00:00.000Z",
+      }));
+    }
+    const captured = ["kitchen", "bathroom", "bedroom"] as MoveInReadyInspection["roomIds"];
+    const flagged = { ...record, voiceChecks: answered, participantVisualAlarmsRequired: true };
+    expect(deriveTourNode(baseInput({ record: flagged, capturedRoomIds: captured })))
+      .toEqual({ kind: "room-check", roomId: "bedroom", index: 2 });
+    const unflagged = { ...flagged, participantVisualAlarmsRequired: false };
+    expect(deriveTourNode(baseInput({ record: unflagged, capturedRoomIds: captured })))
+      .toEqual({ kind: "film-room", roomId: "living-room" });
   });
 
   it("holds on analyze until the batch settles", () => {
@@ -245,6 +268,46 @@ describe("deriveTourNode", () => {
     expect(reviewVoiceAction("")).toBeNull();
   });
 
+  it("narrates the Spanish tour when the record opts into Spanish", () => {
+    const record = { ...withSetup(createInitialInspectionRecord("tour-session-es-1")), tourLanguage: "es" as const };
+    const context = { record, capturedRoomCount: 0, batchActive: false, reviewPosition: null };
+    expect(tourScriptForNode({ kind: "welcome" }, context, "es")).toContain("Toque Comenzar");
+    expect(tourScriptForNode({ kind: "consent" }, context, "es")).toContain("unidad simulada");
+    expect(tourScriptForNode({ kind: "analyze" }, context, "es")).toContain("Enviando sus clips");
+    expect(tourScriptForNode({ kind: "finish" }, context, "es")).toContain("Vaya a la firma");
+    expect(tourScriptForNode({ kind: "ask-unit" }, context, "es")).toBe("");
+    expect(filmRoomScript("kitchen", 1, 4, "es")).toContain("Cocina");
+    expect(filmRoomScript("kitchen", 1, 4, "es").length).toBeLessThan(200);
+    expect(roomLabelEs("bedroom-2")).toBe("Habitación 2");
+    expect(roomLabelEs("bathroom")).toBe("Baño");
+    expect(nameReadbackScript("Rae", "es")).toContain("Diga sí");
+    const shots = filmRoomShots("kitchen", "es").join(" ").toLowerCase();
+    expect(shots).toContain("grifo");
+    // English defaults are untouched by the language parameter.
+    expect(tourScriptForNode({ kind: "welcome" }, context)).toContain("Tap Start");
+    expect(filmRoomScript("kitchen", 1, 4)).toContain("Kitchen");
+  });
+
+  it("tracks Spanish room-check answers against the Spanish questions", () => {
+    const record = { ...withSetup(createInitialInspectionRecord("tour-session-es-2")), tourLanguage: "es" as const };
+    const roomId = record.roomIds[0]!;
+    const parsed = parseRoomId(roomId)!;
+    expect(deriveTourNode(baseInput({ record, capturedRoomIds: [roomId] })))
+      .toEqual({ kind: "room-check", roomId, index: 0 });
+    const answered = {
+      ...record,
+      voiceChecks: {
+        [roomId]: VOICE_ROOM_CHECKS_ES[parsed.type].map((question) => ({
+          question,
+          answer: "yes" as const,
+          recordedAt: "2026-11-01T00:00:00.000Z",
+        })),
+      },
+    };
+    expect(deriveTourNode(baseInput({ record: answered, capturedRoomIds: [roomId] })))
+      .toEqual({ kind: "film-room", roomId: record.roomIds[1] });
+  });
+
   it("tells the evaluator to answer review items by voice", () => {
     const record = withSetup(createInitialInspectionRecord("tour-session-11"));
     record.proposals["demo-water-supply"] = {
@@ -271,5 +334,36 @@ describe("deriveTourNode", () => {
       { record, capturedRoomCount: 4, batchActive: false, reviewPosition: { index: 1, total: 3 } },
     );
     expect(script).toContain("Say yes to confirm");
+  });
+
+  it("narrates review items in Spanish when the tour language is Spanish", () => {
+    const record = withSetup(createInitialInspectionRecord("tour-session-12"));
+    record.proposals["demo-water-supply"] = {
+      elementId: "demo-water-supply",
+      modelSuggestion: "A",
+      confidence: 85,
+      observation: "Sink and faucet look intact.",
+      state: "draft-proposal",
+      evidence: [],
+      analysisIdentity: {
+        sessionId: "tour-session-12",
+        roomId: "kitchen",
+        schemaVersion: 5,
+        videoId: "video-1",
+        videoRevision: 1,
+        expectedSourceHash: "a".repeat(64),
+        analysisId: "analysis-1",
+        attempt: 1,
+        catalogVersion: "0.3.0-demo.3",
+      },
+    };
+    const script = tourScriptForNode(
+      { kind: "review-item", elementId: "demo-water-supply" },
+      { record, capturedRoomCount: 4, batchActive: false, reviewPosition: { index: 1, total: 3 } },
+      "es",
+    );
+    expect(script).toContain("Punto 1 de 3");
+    expect(script).toContain("La IA sugiere Aprobado");
+    expect(script).toContain("Diga sí para confirmar");
   });
 });

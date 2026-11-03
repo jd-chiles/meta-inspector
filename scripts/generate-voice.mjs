@@ -5,7 +5,8 @@
  * so reruns only synthesize changed or missing clips. Dynamic prompts (room
  * position, live proofs, review excerpts) stay live with a server-side cache.
  *
- * Usage: FISH_API_KEY=... FISH_VOICE_ID=... node scripts/generate-voice.mjs [--force]
+ * Usage: FISH_API_KEY=... FISH_VOICE_ID=... node scripts/generate-voice.mjs [--force] [--lang en|es]
+ * Spanish clips (--lang es) use FISH_VOICE_ID_ES and land in public/voice/es/.
  * Requires owner approval: every synthesized clip is a billed provider call.
  */
 import { createHash } from "node:crypto";
@@ -13,11 +14,13 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { VOICE_CLIP_TEXTS, normalizeVoiceText, voiceClipFile, voiceClipId } from "./voice-inventory.mjs";
+import { VOICE_CLIP_TEXTS, VOICE_CLIP_TEXTS_ES, normalizeVoiceText, voiceClipFile, voiceClipId } from "./voice-inventory.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const VOICE_DIR = join(ROOT, "public", "voice");
-const MANIFEST_PATH = join(VOICE_DIR, "manifest.json");
+
+function langDir(lang) {
+  return lang === "es" ? join(ROOT, "public", "voice", "es") : join(ROOT, "public", "voice");
+}
 const FISH_TTS_URL = "https://api.fish.audio/v1/tts";
 const MAX_CLIP_BYTES = 5 * 1024 * 1024;
 
@@ -70,13 +73,23 @@ async function synthesize(text, { apiKey, voiceId, model }) {
 
 async function main() {
   const force = process.argv.includes("--force");
-  const apiKey = (process.env.FISH_API_KEY ?? "").trim();
-  const voiceId = (process.env.FISH_VOICE_ID ?? "").trim();
-  const model = (process.env.FISH_MODEL ?? "").trim() || "s2.1-pro-free";
-  if (!apiKey || !voiceId) {
-    console.error("Set FISH_API_KEY and FISH_VOICE_ID to generate voice clips.");
+  const langFlag = process.argv.indexOf("--lang");
+  const lang = langFlag >= 0 ? (process.argv[langFlag + 1] ?? "") : "en";
+  if (lang !== "en" && lang !== "es") {
+    console.error('Unknown --lang. Use "--lang en" or "--lang es".');
     process.exit(1);
   }
+  const texts = lang === "es" ? VOICE_CLIP_TEXTS_ES : VOICE_CLIP_TEXTS;
+  const voiceEnv = lang === "es" ? "FISH_VOICE_ID_ES" : "FISH_VOICE_ID";
+  const apiKey = (process.env.FISH_API_KEY ?? "").trim();
+  const voiceId = (process.env[voiceEnv] ?? "").trim();
+  const model = (process.env.FISH_MODEL ?? "").trim() || "s2.1-pro-free";
+  if (!apiKey || !voiceId) {
+    console.error(`Set FISH_API_KEY and ${voiceEnv} to generate voice clips.`);
+    process.exit(1);
+  }
+  const VOICE_DIR = langDir(lang);
+  const MANIFEST_PATH = join(VOICE_DIR, "manifest.json");
   await mkdir(VOICE_DIR, { recursive: true });
   // The manifest pins a voice hash, never the raw id: it ships in public/.
   const voiceHash = sha256Hex(Buffer.from(voiceId, "utf8"));
@@ -98,7 +111,7 @@ async function main() {
   const clips = {};
   let synthesized = 0;
   let reused = 0;
-  for (const rawText of VOICE_CLIP_TEXTS) {
+  for (const rawText of texts) {
     const text = normalizeVoiceText(rawText);
     const id = voiceClipId(text);
     const file = voiceClipFile(text);
@@ -122,7 +135,7 @@ async function main() {
     console.log(`synthesized ${file} (${audio.byteLength} bytes): ${text.slice(0, 60)}…`);
   }
   await writeFile(MANIFEST_PATH, `${JSON.stringify({ version: 1, voiceHash, model, clips }, null, 2)}\n`);
-  console.log(`voice clips: ${synthesized} synthesized, ${reused} reused, ${VOICE_CLIP_TEXTS.length} total`);
+  console.log(`voice clips (${lang}): ${synthesized} synthesized, ${reused} reused, ${texts.length} total`);
 }
 
 await main();

@@ -25,6 +25,30 @@ generated still, hand-written fixture, or still-image API smoke for
 the clip. Details, variance scorecard, and the unmeasured authored
 scorecard are in [video-clip-gate.md](evaluation/video-clip-gate.md).
 
+## Sprint 4 accuracy scorecard (REQ-R4) — pending live run
+
+The single-clip protocol from [video-clip-gate.md](evaluation/video-clip-gate.md)
+(one clip ≤30 s showing faucet, fan, lock, and detector) has NOT been run
+against the live deployment for this sprint. The live run is deferred to the
+owner/integrator (`npm run test:live` is owner-gated spend; this sprint ran
+no live provider calls). No accuracy percentage appears in the app or this
+file until the run below is recorded.
+
+| Field | Value |
+|---|---|
+| Date | _(blank — live run deferred)_ |
+| Model ids (SAM + Muse) | _(blank — live run deferred)_ |
+| Clip id | _(blank — live run deferred)_ |
+| Faucet hit/miss | _(blank — live run deferred)_ |
+| Fan hit/miss | _(blank — live run deferred)_ |
+| Lock hit/miss | _(blank — live run deferred)_ |
+| Detector hit/miss | _(blank — live run deferred)_ |
+| Miss list | _(blank — live run deferred)_ |
+
+In-app Settings/About line (Profile → More settings & privacy → About this
+checklist): "Demo checklist — not a verified Form 1083 mapping. Known AI
+misses are listed in the demo notes."
+
 ## Remaining preview/release evidence
 
 - Production on 2026-11-02: `metainspect:mvp13` (revision `metainspect-app--0000015`, Healthy, 100% traffic) behind the pilot passcode gate. This is a limited pilot deployment, not a public launch.

@@ -38,25 +38,35 @@ import {
 
 import {
   EVALUATOR_ATTESTATION_TEXT,
+  PARTICIPANT_ATTESTATION_TEXT,
   MOVE_IN_READY_SCHEMA_VERSION,
   LEGACY_DEFAULT_ROOM_IDS,
   MOVE_IN_READY_ELEMENTS,
   MOVE_IN_READY_ELEMENT_IDS,
+  buildInspectionLocation,
   createUnreviewedEvaluatorDecisions,
+  dequeueAnalysisQueue,
   deriveFinalInspectionResult,
+  enqueueAnalysisQueue,
+  hasDeficientDecisions,
   isMoveInReadyElementId,
   isMoveInReadyRoomId,
   normalizeFundingType,
   parseRoomId,
+  pruneAnalysisQueue,
   roomContributesToElement,
   roomLabel,
   roomsForUnit,
+  startReinspectionDecisions,
+  unreviewedDecisionPreservingSnapshot,
   validateModelDeficiencySuggestion,
   validateEvaluatorDecision,
   validateEvaluatorSignoff,
+  validateParticipantSignoff,
   type EvaluatorDecision,
   type EvaluatorDecisionSet,
   type EvaluatorSignoff,
+  type ParticipantSignoff,
   type EvidenceReference,
   type ModelElementProposal,
   type ModelDeficiencySuggestion,
@@ -66,15 +76,21 @@ import {
   type MoveInReadyUnitType,
   type VideoAnalysisIdentity,
 } from "../../domain/move-in-ready";
-import { MOVE_IN_READY_ELEMENT_CRITERIA } from "../../domain/element-criteria";
+import { checklistItemsForElement } from "../../domain/element-criteria";
 import { WALKTHROUGH_CLIENT_HEADER, WALKTHROUGH_CLIENT_ID } from "../../domain/walkthrough-client";
 import {
   buildHmisReadyJson,
   buildMoveInReadyPdf,
   exportFilename,
   type ExportStill,
+  type FixListLanguage,
   type MoveInReadyExportKind,
 } from "../../export/move-in-ready-pdf";
+import { buildLahsa1083Json } from "../../export/lahsa-1083";
+import {
+  buildCaseNoteText,
+  CASE_NOTE_DRAFT_LABEL,
+} from "../../export/case-note";
 import {
   createInitialInspectionRecord,
   createInspectionStore,
@@ -84,8 +100,16 @@ import {
   type MoveInReadyInspection,
   type PendingAnalysisIntent,
   type StoredRoomClipIdentity,
+  type TourLanguage,
 } from "./inspection-store";
 import WalkthroughVideoCapture from "./video-capture";
+import BuildingPrescreen from "./building-prescreen";
+import {
+  buildDetectorTestReference,
+  DETECTOR_TEST_STILL_PREFIX,
+  firstFreeEvidenceTimestampMs,
+} from "./detector-test";
+import type { CapturedDetectorStill } from "./detector-test-capture";
 import { rankDeficiencies, reinspectionChecklist } from "./fix-list";
 import {
   findVerifiedEvidenceStill,
@@ -117,6 +141,7 @@ import { createPendingCancelTracker } from "./pending-cancel";
 import { canShareExportFiles } from "./export-share";
 import { FetchTimeoutError, MAP_TIMEOUT_MS, SEGMENT_TIMEOUT_MS, fetchWithTimeout } from "./fetch-timeout";
 import { isAnalysisCurrent } from "./analysis-identity";
+import { MAX_CONCURRENT_BATCH_ROOMS, createRoomBatchQueue, runRoomBatch, shouldAutoEnqueueOnSave } from "./batch-scheduler";
 import {
   buildConfirmDraft,
   completeFireSafetyAssessmentFromDraft,
@@ -138,7 +163,7 @@ import {
 import { cancelSpeech, readVoiceEnabled, speakText, writeVoiceEnabled } from "./voice-guide";
 import VoicePrompt from "./voice-prompt";
 import GuidedTourView from "./guided-tour-view";
-import { SETUP_VOICE_QUESTIONS, VOICE_ROOM_CHECKS } from "./voice-checks";
+import { SETUP_VOICE_QUESTIONS, checksForRoom } from "./voice-checks";
 import { parseBathCount, parseUnitType, parseYesNo } from "./voice-parse";
 import styles from "./move-in-ready-flow.module.css";
 
@@ -146,9 +171,42 @@ export type AnalysisMode = "live" | "fixture" | "unconfigured";
 type Step = "home" | "capture" | "review" | "signoff" | "profile" | "guided";
 type ProfileSection = "unit" | "evaluator" | "agency";
 type AnalysisStatus = "idle" | "segmenting" | "mapping" | "complete" | "error";
+type FlowExportKind = MoveInReadyExportKind | "hmis-json" | "lahsa-1083-json" | "case-note";
+
+/**
+ * Ask the polish route to refine case-note wording. Any failure —
+ * disabled flag, offline, timeout, bad response — returns the template
+ * unchanged, so the download never depends on the network or AI.
+ */
+async function requestCaseNotePolish(template: string): Promise<{ text: string; polished: boolean }> {
+  try {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 35_000);
+    try {
+      const response = await fetch("/api/exports/polish-case-note", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: template }),
+        signal: controller.signal,
+      });
+      if (!response.ok) return { text: template, polished: false };
+      const payload = (await response.json()) as { text?: unknown; polished?: unknown };
+      if (typeof payload.text !== "string" || !payload.text.trim()) {
+        return { text: template, polished: false };
+      }
+      return { text: payload.text, polished: payload.polished === true };
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  } catch {
+    return { text: template, polished: false };
+  }
+}
 
 export interface MoveInReadyFlowProps {
   analysisMode: AnalysisMode;
+  /** Server-computed: true when FISH_VOICE_ID_ES is configured (REQ-R2). */
+  esVoiceConfigured: boolean;
 }
 
 function form1083AdministrativeBlocker(record: MoveInReadyInspection): string | null {
@@ -167,6 +225,19 @@ function form1083AdministrativeBlocker(record: MoveInReadyInspection): string | 
     return "Add the required leadership-signature date in Profile before signing.";
   }
   return null;
+}
+
+/**
+ * A record is signed for re-inspection (REQ-L1) when both the evaluator and
+ * the participant (REQ-F1) sign-offs exist.
+ */
+function isSignedForReinspection(record: MoveInReadyInspection): boolean {
+  return record.signoff != null && record.participantSignoff != null;
+}
+
+/** Home eligibility for "Re-inspect deficiencies" (REQ-L1): a signed record with any D decision. */
+function canReinspect(record: MoveInReadyInspection): boolean {
+  return isSignedForReinspection(record) && hasDeficientDecisions(record.decisions);
 }
 
 export interface VideoIdentityFields {
@@ -277,7 +348,7 @@ function clipConsentKey(record: MoveInReadyInspection | null, roomId: MoveInRead
   ]);
 }
 
-export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) {
+export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: MoveInReadyFlowProps) {
   const [sessionId, setSessionId] = useState("");
   const [record, setRecord] = useState<MoveInReadyInspection | null>(null);
   const recordRef = useRef<MoveInReadyInspection | null>(null);
@@ -319,18 +390,43 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>("idle");
   const [analysisElapsedSeconds, setAnalysisElapsedSeconds] = useState(0);
   const analysisStartedAtRef = useRef<number | null>(null);
-  const pendingCancelRef = useRef(createPendingCancelTracker());
+  const pendingCancelRef = useRef(new Map<MoveInReadyRoomId, ReturnType<typeof createPendingCancelTracker>>());
+  function pendingCancelFor(roomId: MoveInReadyRoomId): ReturnType<typeof createPendingCancelTracker> {
+    let tracker = pendingCancelRef.current.get(roomId);
+    if (!tracker) {
+      tracker = createPendingCancelTracker();
+      pendingCancelRef.current.set(roomId, tracker);
+    }
+    return tracker;
+  }
+  // Render mirrors for long-lived batch-pool closures (the pool outlives its launching render).
+  const onlineRef = useRef(online);
+  onlineRef.current = online;
+  const stepRef = useRef(step);
+  stepRef.current = step;
   const [analysisError, setAnalysisError] = useState("");
   const [analysisNotice, setAnalysisNotice] = useState("");
   const [batchAttested, setBatchAttested] = useState(false);
   const [batchSendConsent, setBatchSendConsent] = useState(false);
+  const batchAttestedRef = useRef(batchAttested);
+  batchAttestedRef.current = batchAttested;
+  const batchSendConsentRef = useRef(batchSendConsent);
+  batchSendConsentRef.current = batchSendConsent;
   const [batchActive, setBatchActive] = useState(false);
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number; roomLabel: string; startedAt: number } | null>(null);
   const [batchTick, setBatchTick] = useState(0);
   const [batchFailedRooms, setBatchFailedRooms] = useState<string[]>([]);
-  const batchQueueRef = useRef<MoveInReadyRoomId[]>([]);
+  const batchQueueRef = useRef(createRoomBatchQueue<MoveInReadyRoomId>());
   const batchTotalRef = useRef(0);
-  const batchRunningRef = useRef(false);
+  const batchSettledRef = useRef(0);
+  const batchStartedAtRef = useRef(0);
+  const batchCancelRef = useRef(false);
+  const batchStopReasonRef = useRef<"offline" | "consent" | null>(null);
+  const batchSessionRef = useRef(0);
+  const batchRunRef = useRef<Promise<{ proved: MoveInReadyRoomId[]; failed: MoveInReadyRoomId[] }> | null>(null);
+  const batchRoomsInFlightRef = useRef<Set<MoveInReadyRoomId>>(new Set());
+  /** Failed-room labels for the current run; batchFailedRooms state mirrors it for render. */
+  const batchFailedRef = useRef<string[]>([]);
   const [walkthroughAttested, setWalkthroughAttested] = useState(false);
   const [walkthroughSendConsent, setWalkthroughSendConsent] = useState(false);
   const batchAutoStartedRef = useRef(false);
@@ -354,12 +450,21 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   const [evidenceViews, setEvidenceViews] = useState<EvidenceView[]>([]);
   const [signoffName, setSignoffName] = useState("");
   const [signoffAttested, setSignoffAttested] = useState(false);
+  const [participantName, setParticipantName] = useState("");
+  const [participantSignature, setParticipantSignature] = useState("");
+  const [participantAttested, setParticipantAttested] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [locationError, setLocationError] = useState("");
+  const [queueWakeTick, setQueueWakeTick] = useState(0);
+  const queueRunnerKeyRef = useRef("");
   const [exportError, setExportError] = useState("");
   const [exportNotice, setExportNotice] = useState("");
   const [exporting, setExporting] = useState(false);
   const [canExportShare] = useState(canShareExportFiles);
-  const abortRef = useRef<AbortController | null>(null);
-  const analysisGenerationRef = useRef(0);
+  const analysisControllersRef = useRef<Partial<Record<MoveInReadyRoomId, AbortController>>>({});
+  const analysisGenerationRef = useRef<Partial<Record<MoveInReadyRoomId, number>>>({});
+  /** Rooms with a live pipeline (one pipeline per room; callers release on settle). */
+  const analysisInFlightRef = useRef<Set<MoveInReadyRoomId>>(new Set());
   const analysisAttemptsRef = useRef<Partial<Record<MoveInReadyRoomId, number>>>({});
   const clipChangeGenerationRef = useRef<Partial<Record<MoveInReadyRoomId, number>>>({});
   const objectUrlsRef = useRef<string[]>([]);
@@ -417,25 +522,51 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       ...current,
       decisions: { ...current.decisions, [elementId]: { status: "needs-human-check", note: note.slice(0, 300) } },
       signoff: null,
+      participantSignoff: null,
     }));
   }, [updateRecord]);
 
   const invalidateActiveAnalysis = useCallback((message?: string) => {
-    analysisGenerationRef.current += 1;
-    abortRef.current?.abort();
-    abortRef.current = null;
+    for (const roomId of Object.keys(analysisGenerationRef.current) as MoveInReadyRoomId[]) {
+      analysisGenerationRef.current[roomId] = (analysisGenerationRef.current[roomId] ?? 0) + 1;
+    }
+    for (const controller of Object.values(analysisControllersRef.current)) {
+      controller?.abort();
+    }
+    analysisControllersRef.current = {};
+    analysisInFlightRef.current.clear();
     if (analysisStatus === "segmenting" || analysisStatus === "mapping") {
       setAnalysisStatus("idle");
       setAnalysisNotice(message ?? "Analysis stopped because the selected clip or room changed.");
     }
   }, [analysisStatus]);
 
-  function analysisIsCurrent(generation: number, controller: AbortController, expectedSessionId: string, roomId: MoveInReadyRoomId, videoId: string, videoRevision: number, videoHash: string, schemaVersion: number, catalogVersion: string): boolean {
+  /**
+   * Room-scoped invalidation (Sprint 0 REQ-S2/REQ-S5): replacing or
+   * removing one room's clip, or leaving one room selected, aborts only
+   * that room's pipeline so a sibling room's batch pipeline keeps its
+   * guards and result. The shared status line resets only when no other
+   * room still has a live pipeline.
+   */
+  const invalidateRoomAnalysis = useCallback((roomId: MoveInReadyRoomId, message?: string) => {
+    analysisGenerationRef.current[roomId] = (analysisGenerationRef.current[roomId] ?? 0) + 1;
+    analysisControllersRef.current[roomId]?.abort();
+    delete analysisControllersRef.current[roomId];
+    analysisInFlightRef.current.delete(roomId);
+    if (analysisInFlightRef.current.size === 0 &&
+        (analysisStatus === "segmenting" || analysisStatus === "mapping")) {
+      setAnalysisStatus("idle");
+      setAnalysisNotice(message ?? "Analysis stopped because the selected clip or room changed.");
+    }
+  }, [analysisStatus]);
+
+  function analysisIsCurrent(generation: number, controller: AbortController, expectedSessionId: string, roomId: MoveInReadyRoomId, videoId: string, videoRevision: number, videoHash: string, schemaVersion: number, catalogVersion: string, requireSelectedRoom = true): boolean {
     const current = recordRef.current;
     return isAnalysisCurrent({
       aborted: controller.signal.aborted,
       generation,
-      currentGeneration: analysisGenerationRef.current,
+      currentGeneration: analysisGenerationRef.current[roomId] ?? 0,
+      requireSelectedRoom,
       record: current ? {
         sessionId: current.sessionId,
         selectedRoomId: current.selectedRoomId,
@@ -455,13 +586,16 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     });
   }
 
-  // Release a server-held mapping lease when the tab closes mid-analysis.
-  // The keepalive cancel is idempotent; lease expiry remains the fallback.
+  // Release server-held mapping leases when the tab closes mid-analysis.
+  // Each room tracks its own lease; the keepalive cancel is idempotent and
+  // lease expiry remains the fallback.
   useEffect(() => {
-    const tracker = pendingCancelRef.current;
+    const trackers = pendingCancelRef.current;
     const onPageHide = () => {
-      const pending = tracker.consume();
-      if (pending) void cancelPendingVideoMapping(pending.identity, pending.token);
+      for (const tracker of trackers.values()) {
+        const pending = tracker.consume();
+        if (pending) void cancelPendingVideoMapping(pending.identity, pending.token);
+      }
     };
     window.addEventListener("pagehide", onPageHide);
     return () => window.removeEventListener("pagehide", onPageHide);
@@ -529,14 +663,23 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       setBooting(false);
     }
     const updateOnline = () => setOnline(navigator.onLine);
+    // REQ-L2: a returning tab re-evaluates the persisted analysis queue even
+    // when no online/offline transition fired while it was hidden.
+    const wakeQueueRunner = () => {
+      if (document.visibilityState === "visible") setQueueWakeTick((tick) => tick + 1);
+    };
     updateOnline();
     window.addEventListener("online", updateOnline);
     window.addEventListener("offline", updateOnline);
+    document.addEventListener("visibilitychange", wakeQueueRunner);
     return () => {
       active = false;
       window.removeEventListener("online", updateOnline);
       window.removeEventListener("offline", updateOnline);
-      abortRef.current?.abort();
+      document.removeEventListener("visibilitychange", wakeQueueRunner);
+      for (const controller of Object.values(analysisControllersRef.current)) {
+        controller?.abort();
+      }
       inspectionStore.close();
       videoStore.close();
       objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
@@ -824,7 +967,16 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     !form1083Blocker &&
     (finalization?.status === "signoff-required" || finalization?.status === "complete"),
   );
+  // Dual attestation (REQ-F1): the participant signs once rooms, decisions,
+  // and Form 1083 details are complete — in either order relative to the
+  // evaluator. Exports require both signatures.
+  const canParticipantSign = Boolean(
+    currentRecord?.fundingType === "lahsa" &&
+    !form1083Blocker &&
+    (finalization?.status === "signoff-required" || finalization?.status === "complete"),
+  );
   const completedResult = currentRecord?.fundingType === "lahsa" && finalization?.status === "complete" && !form1083Blocker ? finalization.result : null;
+  const participantSigned = currentRecord?.participantSignoff?.attested === true;
   const canCapture = isCaptureSetupComplete(currentRecord);
   const tourAnalysisComplete = useMemo(() => {
     if (!currentRecord) return false;
@@ -956,74 +1108,105 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   }, [step, booting, refreshInspectionList]);
 
   // Batch AI analysis driver: one explicit user action runs the same guarded
-  // per-room analyzeRoom() for every filmed room, sequentially. Each room
-  // still passes the full consent/identity guards; success is proven by a
-  // persisted proposal bound to the room's current clip, not by status text.
+  // per-room analyzeRoomFor() for every queued room, up to
+  // MAX_CONCURRENT_BATCH_ROOMS at once (Sprint 0 REQ-S2). Each room still
+  // passes the full consent/identity guards; success is proven by a
+  // persisted proposal bound to the room's current clip, not by status
+  // text. The pool runs on the capture and guided steps; leaving them
+  // pauses launching (finished rooms kept, queue preserved) until return.
   useEffect(() => {
-    if (!batchActive || step !== "capture") return;
-    if (batchRunningRef.current) return;
-    if (analysisStatus === "segmenting" || analysisStatus === "mapping") return;
-    if (!online) {
-      batchQueueRef.current = [];
-      setBatchActive(false);
-      setBatchProgress(null);
-      setAnalysisNotice("Batch AI analysis stopped: the connection dropped. Reconnect and run it again; finished rooms are kept.");
+    if (!batchActive) return;
+    if (step !== "capture" && step !== "guided") return;
+    if (!online && !batchStopReasonRef.current) {
+      batchStopReasonRef.current = "offline";
+      batchCancelRef.current = true;
+      invalidateActiveAnalysis("Batch AI analysis stopped: the connection dropped. Reconnect and run it again; finished rooms are kept.");
       return;
     }
-    const queue = batchQueueRef.current;
-    if (queue.length === 0) {
-      const failed = batchFailedRooms;
-      setBatchActive(false);
-      setBatchProgress(null);
-      if (failed.length === 0) {
-        setAnalysisNotice("AI finished every filmed room. Confirm each requirement below.");
-        changeStep("review");
-      } else {
-        setAnalysisNotice(`AI finished with ${failed.length} room${failed.length === 1 ? "" : "s"} needing attention: ${failed.join(", ")}. Run batch analysis again to retry only those rooms.`);
+    if (batchRunRef.current) return;
+    const session = batchSessionRef.current;
+    const activeLabels = new Map<MoveInReadyRoomId, string>();
+    let lastSettledLabel = "";
+    const updateProgress = () => {
+      setBatchProgress({
+        done: batchSettledRef.current,
+        total: Math.max(batchTotalRef.current, batchSettledRef.current),
+        roomLabel: [...activeLabels.values()].join(" + ") || lastSettledLabel,
+        startedAt: batchStartedAtRef.current,
+      });
+    };
+    const runRoom = async (roomId: MoveInReadyRoomId): Promise<boolean> => {
+      if (!batchAttestedRef.current || !batchSendConsentRef.current) {
+        batchStopReasonRef.current = "consent";
+        batchCancelRef.current = true;
+        return false;
       }
-      return;
-    }
-    const roomId = queue[0];
-    if (roomId === undefined || !isMoveInReadyRoomId(roomId)) {
-      batchQueueRef.current = queue.slice(1);
-      return;
-    }
-    if (selectedRoomId !== roomId) {
-      selectRoom(roomId);
-      return;
-    }
-    const key = clipConsentKey(recordRef.current, roomId);
-    if (!key) {
-      batchQueueRef.current = queue.slice(1);
-      setBatchFailedRooms((previous) => [...previous, roomLabel(roomId)]);
-      return;
-    }
-    if (mockUnitAttestationKey !== key || sendVideoConsentKey !== key) {
-      if (!batchAttested || !batchSendConsent) {
-        batchQueueRef.current = [];
-        setBatchActive(false);
-        setBatchProgress(null);
+      if (roomHasCurrentProposal(roomId)) return true;
+      if (!clipConsentKey(recordRef.current, roomId)) return false;
+      const identity = recordRef.current?.clipIdentities[roomId] ?? null;
+      const expectedVideoId = identity?.videoId ?? "";
+      batchRoomsInFlightRef.current.add(roomId);
+      activeLabels.set(roomId, roomLabel(roomId));
+      updateProgress();
+      try {
+        await analyzeRoomFor(roomId, { fromBatch: true });
+      } finally {
+        batchRoomsInFlightRef.current.delete(roomId);
+        analysisInFlightRef.current.delete(roomId);
+        activeLabels.delete(roomId);
+        lastSettledLabel = roomLabel(roomId);
+      }
+      const latest = recordRef.current;
+      return Boolean(latest && expectedVideoId &&
+        Object.values(latest.proposals).some((proposal) =>
+          Boolean(proposal) && proposal!.analysisIdentity.roomId === roomId && proposal!.analysisIdentity.videoId === expectedVideoId));
+    };
+    const pool = runRoomBatch({
+      queue: batchQueueRef.current,
+      maxConcurrent: MAX_CONCURRENT_BATCH_ROOMS,
+      shouldStop: () => batchCancelRef.current || !onlineRef.current ||
+        (stepRef.current !== "capture" && stepRef.current !== "guided"),
+      runRoom,
+      onRoomSettled: (roomId, proved) => {
+        if (session !== batchSessionRef.current) return;
+        batchSettledRef.current += 1;
+        lastSettledLabel = roomLabel(roomId);
+        updateProgress();
+        if (!proved) {
+          batchFailedRef.current.push(roomLabel(roomId));
+          setBatchFailedRooms((previous) => [...previous, roomLabel(roomId)]);
+        }
+      },
+    });
+    batchRunRef.current = pool;
+    void pool.then(() => {
+      if (batchRunRef.current === pool) batchRunRef.current = null;
+      if (session !== batchSessionRef.current) return;
+      if (batchQueueRef.current.size > 0 && !batchCancelRef.current && !batchStopReasonRef.current) return;
+      const failed = [...batchFailedRef.current];
+      batchQueueRef.current.clear();
+      batchTotalRef.current = 0;
+      batchSettledRef.current = 0;
+      setBatchActive(false);
+      setBatchProgress(null);
+      const reason = batchStopReasonRef.current;
+      if (reason === "offline") return;
+      if (reason === "consent") {
         setAnalysisNotice("Batch AI analysis stopped because its consent was withdrawn. No further room was sent.");
         return;
       }
-      setMockUnitAttestationKey(key);
-      setSendVideoConsentKey(key);
-      return;
-    }
-    const total = batchTotalRef.current;
-    const identity = recordRef.current?.clipIdentities[roomId] ?? null;
-    const expectedVideoId = identity?.videoId ?? "";
-    batchRunningRef.current = true;
-    setBatchProgress({ done: total - queue.length, total, roomLabel: roomLabel(roomId), startedAt: Date.now() });
-    void analyzeRoom().then(() => {
-      batchRunningRef.current = false;
-      const latest = recordRef.current;
-      const proved = Boolean(latest && expectedVideoId &&
-        Object.values(latest.proposals).some((proposal) =>
-          Boolean(proposal) && proposal!.analysisIdentity.roomId === roomId && proposal!.analysisIdentity.videoId === expectedVideoId));
-      batchQueueRef.current = batchQueueRef.current.slice(1);
-      if (!proved) setBatchFailedRooms((previous) => [...previous, roomLabel(roomId)]);
-      setBatchProgress({ done: total - batchQueueRef.current.length, total, roomLabel: roomLabel(roomId), startedAt: Date.now() });
+      if (failed.length === 0) {
+        setAnalysisNotice("AI finished every filmed room. Confirm each requirement below.");
+        // Auto-started batches overlap filming (REQ-S5/REQ-L2): only take
+        // the evaluator to the report once every room is filmed, so a
+        // finished partial batch never yanks capture out from under them.
+        const latest = recordRef.current;
+        const filmingComplete = Boolean(latest) && latest!.roomIds.length > 0 &&
+          latest!.roomIds.every((roomId) => Boolean(latest!.clipIdentities[roomId]));
+        if (stepRef.current === "capture" && filmingComplete) changeStep("review");
+      } else {
+        setAnalysisNotice(`AI finished with ${failed.length} room${failed.length === 1 ? "" : "s"} needing attention: ${failed.join(", ")}. Run batch analysis again to retry only those rooms.`);
+      }
     });
   });
 
@@ -1073,6 +1256,39 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     startBatchAnalysis();
   });
 
+  // Offline analysis queue runner (REQ-L2): clip saves persist room ids on
+  // the record; when the browser is back online this starts the batch once
+  // per queue state. It runs only under an existing consent basis — the
+  // hands-free walkthrough consent or the manual batch disclosure — and the
+  // batch driver still enforces its per-room consent/identity guards.
+  // Mirrors REQ-S5's failure guard: a finished failed batch never
+  // auto-restarts — retry stays an explicit manual action.
+  // Concurrency stays with the batch driver — Sprint 0 raises it to 2 rooms;
+  // this sprint only triggers it and never reimplements the scheduler.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    void queueWakeTick;
+    if (!online || analysisMode !== "live") return;
+    if (batchActive) return;
+    if (analysisStatus === "segmenting" || analysisStatus === "mapping") return;
+    if (batchFailedRooms.length > 0) return;
+    const walkthroughConsented = walkthroughAttested && walkthroughSendConsent;
+    if (!walkthroughConsented && !(batchAttested && batchSendConsent)) return;
+    const current = recordRef.current;
+    if (!current || current.fundingType !== "lahsa" || !current.pseudonym.trim()) return;
+    const queued = (current.analysisQueue ?? []).filter((roomId) =>
+      clips[roomId] && clips[roomId]?.mime !== "video/quicktime" && !roomHasCurrentProposal(roomId));
+    if (queued.length === 0) return;
+    const key = `${current.sessionId}:${queued.join(",")}`;
+    if (queueRunnerKeyRef.current === key) return;
+    queueRunnerKeyRef.current = key;
+    if (walkthroughConsented) {
+      setBatchAttested(true);
+      setBatchSendConsent(true);
+    }
+    startBatchAnalysis();
+  });
+
   // Speak each new guidance node aloud while the assistant is open.
   useEffect(() => {
     if (!assistantOpen || !voiceOn) return;
@@ -1114,6 +1330,41 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     });
   }, [clips, selectedRoomId, step]);
 
+  const roomHasCurrentProposal = useCallback((roomId: MoveInReadyRoomId): boolean => {
+    const current = recordRef.current;
+    const identity = current?.clipIdentities[roomId];
+    if (!current || !identity) return false;
+    return Object.values(current.proposals).some((proposal) =>
+      Boolean(proposal) &&
+      proposal!.analysisIdentity.roomId === roomId &&
+      proposal!.analysisIdentity.videoId === identity.videoId &&
+      proposal!.analysisIdentity.videoRevision === identity.videoRevision);
+  }, []);
+
+  /**
+   * Initialize one batch run over the rooms already placed in
+   * batchQueueRef (Sprint 0 REQ-S2/REQ-S5). The driver effect launches
+   * the pool; bumping the session retires any stale pool callbacks.
+   */
+  const beginBatchRun = useCallback((total: number, clearMessages: boolean) => {
+    batchTotalRef.current = total;
+    batchSettledRef.current = 0;
+    batchStartedAtRef.current = Date.now();
+    batchFailedRef.current = [];
+    batchCancelRef.current = false;
+    batchStopReasonRef.current = null;
+    batchRoomsInFlightRef.current.clear();
+    batchRunRef.current = null;
+    batchSessionRef.current += 1;
+    setBatchFailedRooms([]);
+    setBatchProgress({ done: 0, total, roomLabel: "", startedAt: batchStartedAtRef.current });
+    if (clearMessages) {
+      setAnalysisError("");
+      setAnalysisNotice("");
+    }
+    setBatchActive(true);
+  }, []);
+
   const handleClipChange = useCallback(async (clip: StoredVideoClip | null, roomIdValue: string) => {
     if (!isMoveInReadyRoomId(roomIdValue)) return;
     const roomId = roomIdValue;
@@ -1130,11 +1381,12 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       });
       const hadPromptProgress = (activeRecord.completedPromptIdsByRoom[roomId] ?? []).length > 0;
       if (!oldIdentity && !hadPromptProgress) return;
-      if (oldIdentity) invalidateActiveAnalysis("The room clip was removed. Any decisions based on it were cleared.");
+      if (oldIdentity) invalidateRoomAnalysis(roomId, "The room clip was removed. Any decisions based on it were cleared.");
       const invalidated = oldIdentity ? invalidateRoomEvidence(activeRecord, roomId, null) : activeRecord;
       const next = {
         ...invalidated,
         completedPromptIdsByRoom: { ...invalidated.completedPromptIdsByRoom, [roomId]: [] },
+        analysisQueue: dequeueAnalysisQueue(invalidated.analysisQueue ?? [], roomId),
       };
       persist(next);
       setMockUnitAttestationKey(null);
@@ -1156,7 +1408,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
         setClips((previous) => ({ ...previous, [roomId]: latestStored }));
         return;
       }
-      invalidateActiveAnalysis("A room clip changed. Prior proposals and decisions tied to that clip were cleared.");
+      invalidateRoomAnalysis(roomId, "A room clip changed. Prior proposals and decisions tied to that clip were cleared.");
       const videoId = makeId("video");
       const videoRevision = (existing?.videoRevision ?? 0) + 1;
       const evidence: EvidenceReference[] = [];
@@ -1198,6 +1450,9 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       const invalidated = invalidateRoomEvidence(current, roomId, identity);
       persist({
         ...invalidated,
+        // REQ-L2: every clip save enqueues the room (saved clips always need
+        // analysis; the queue runner gates the actual run on connectivity).
+        analysisQueue: enqueueAnalysisQueue(invalidated.analysisQueue ?? [], roomId),
         ...(existing ? {
           completedPromptIdsByRoom: { ...invalidated.completedPromptIdsByRoom, [roomId]: [] },
         } : {}),
@@ -1210,10 +1465,40 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       setAnalysisExpanded(false);
       refreshStorageWarning();
       setAnalysisStatus("idle");
+      // Analyze on save (Sprint 0 REQ-S5): with tour consent, batch
+      // consent, LAHSA funding, live mode, and a connection, enqueue
+      // this room immediately so filming overlaps analysis. Skipped
+      // while a manual analysis runs, while unresolved batch failures
+      // await explicit review, and for MOV clips the server rejects.
+      // Offline at save time: do nothing (Sprint 3 persists the queue).
+      const saved = recordRef.current;
+      if (shouldAutoEnqueueOnSave({
+        walkthroughAttested,
+        walkthroughSendConsent,
+        batchAttested,
+        batchSendConsent,
+        analysisMode,
+        online,
+        manualPipelineInFlight: analysisStatus === "segmenting" || analysisStatus === "mapping",
+        hasUnresolvedBatchFailures: batchFailedRooms.length > 0,
+        mime: latestStored.mime,
+        sessionMatches: saved != null && saved.sessionId === clip.sessionId,
+        fundingType: saved?.fundingType ?? "",
+        hasCurrentProposal: roomHasCurrentProposal(roomId),
+        queuedInBatch: batchQueueRef.current.has(roomId),
+        analysisInFlight: analysisInFlightRef.current.has(roomId),
+      })) {
+        if (!batchActive) {
+          batchQueueRef.current = createRoomBatchQueue([roomId]);
+          beginBatchRun(1, false);
+        } else if (batchQueueRef.current.enqueue(roomId)) {
+          batchTotalRef.current += 1;
+        }
+      }
     } catch (error) {
       setAnalysisError(safeClientError(error, "This browser could not securely identify the video bytes. The clip is saved locally, but live analysis is unavailable."));
     }
-  }, [invalidateActiveAnalysis, persist, refreshStorageWarning]);
+  }, [invalidateRoomAnalysis, persist, refreshStorageWarning, roomHasCurrentProposal, beginBatchRun, walkthroughAttested, walkthroughSendConsent, batchAttested, batchSendConsent, batchActive, batchFailedRooms, online, analysisMode, analysisStatus]);
 
   function scrollMainToTop(behavior: ScrollBehavior = "auto"): void {
     window.requestAnimationFrame(() => {
@@ -1240,7 +1525,13 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
 
   function selectRoom(roomId: string): void {
     if (!isMoveInReadyRoomId(roomId)) return;
-    invalidateActiveAnalysis("Analysis was cancelled because the selected room changed.");
+    // Only a manual pipeline for the previously selected room is bound
+    // to the selection; background batch pipelines keep analyzing.
+    const manualInFlight = analysisInFlightRef.current.has(selectedRoomId) &&
+      !batchRoomsInFlightRef.current.has(selectedRoomId);
+    if (manualInFlight) {
+      invalidateRoomAnalysis(selectedRoomId, "Analysis was cancelled because the selected room changed.");
+    }
     setSelectedRoomId(roomId);
     setClipDetailsExpanded(false);
     setAnalysisExpanded(false);
@@ -1250,42 +1541,39 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     setAnalysisError("");
   }
 
-  function roomHasCurrentProposal(roomId: MoveInReadyRoomId): boolean {
-    const current = recordRef.current;
-    const identity = current?.clipIdentities[roomId];
-    if (!current || !identity) return false;
-    return Object.values(current.proposals).some((proposal) =>
-      Boolean(proposal) &&
-      proposal!.analysisIdentity.roomId === roomId &&
-      proposal!.analysisIdentity.videoId === identity.videoId &&
-      proposal!.analysisIdentity.videoRevision === identity.videoRevision);
-  }
-
   function startBatchAnalysis(): void {
     if (batchActive || analysisStatus === "segmenting" || analysisStatus === "mapping") return;
     const current = recordRef.current;
     if (!current) return;
+    const queued = batchQueueRef.current.snapshot();
+    // Manual Analyze covers only rooms not yet analyzed, queued, or in
+    // flight (Sprint 0 REQ-S5): analyze-on-save may own some already.
     const rooms = current.roomIds
-      .filter((roomId) => clips[roomId] && clips[roomId]?.mime !== "video/quicktime" && !roomHasCurrentProposal(roomId));
+      .filter((roomId) => clips[roomId] && clips[roomId]?.mime !== "video/quicktime" &&
+        !roomHasCurrentProposal(roomId) && !queued.includes(roomId) &&
+        !analysisInFlightRef.current.has(roomId));
     if (rooms.length === 0) return;
     // Any batch start consumes the walkthrough auto-start: a finished batch
     // must never auto-restart itself, no matter which surface started it.
     batchAutoStartedRef.current = true;
-    batchQueueRef.current = [...rooms];
-    batchTotalRef.current = rooms.length;
-    setBatchFailedRooms([]);
-    setBatchProgress({ done: 0, total: rooms.length, roomLabel: "", startedAt: Date.now() });
-    setAnalysisError("");
-    setAnalysisNotice("");
-    setBatchActive(true);
+    batchQueueRef.current = createRoomBatchQueue(rooms);
+    beginBatchRun(rooms.length, true);
   }
 
   function cancelBatchAnalysis(): void {
     if (!batchActive) return;
-    batchQueueRef.current = [];
+    batchQueueRef.current.clear();
+    batchCancelRef.current = true;
+    batchSessionRef.current += 1;
+    const inFlightLabels = [...batchRoomsInFlightRef.current].map((roomId) => roomLabel(roomId));
+    if (inFlightLabels.length > 0) {
+      batchFailedRef.current.push(...inFlightLabels);
+      setBatchFailedRooms((previous) => [...previous, ...inFlightLabels]);
+    }
     setBatchActive(false);
     setBatchProgress(null);
-    invalidateActiveAnalysis("Batch AI analysis was cancelled. Finished rooms keep their drafts.");
+    invalidateActiveAnalysis();
+    setAnalysisNotice("Batch AI analysis was cancelled. Finished rooms keep their drafts.");
   }
 
   function handleGuideAction(action: GuideAction): void {
@@ -1434,14 +1722,26 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     }
   }
 
-  async function analyzeRoom(): Promise<void> {
-    if (analysisStatus === "segmenting" || analysisStatus === "mapping") return;
-    const generation = ++analysisGenerationRef.current;
-    abortRef.current?.abort();
+  async function analyzeRoomFor(targetRoomId: MoveInReadyRoomId, options: { fromBatch?: boolean } = {}): Promise<void> {
+    const { fromBatch = false } = options;
+    // Batch pipelines bind the full media identity but not the UI
+    // selection, so two rooms analyze at once (Sprint 0 REQ-S2).
+    const requireSelectedRoom = !fromBatch;
+    if (!fromBatch && (analysisStatus === "segmenting" || analysisStatus === "mapping")) return;
+    if (!fromBatch && batchActive) {
+      setAnalysisError("Batch AI analysis is running. Wait for it to finish or cancel the batch before a manual run.");
+      setAnalysisStatus("error");
+      return;
+    }
+    if (analysisInFlightRef.current.has(targetRoomId)) return;
+    const roomId = targetRoomId;
+    const generation = (analysisGenerationRef.current[roomId] ?? 0) + 1;
+    analysisGenerationRef.current[roomId] = generation;
+    analysisControllersRef.current[roomId]?.abort();
+    analysisInFlightRef.current.add(roomId);
     const controller = new AbortController();
     const current = recordRef.current;
     if (!current) return;
-    const roomId = selectedRoomId;
     if (clips[roomId]?.mime === "video/quicktime") {
       setAnalysisError("Meta's current video upload API accepts MP4 only. This MOV stays on this device for manual review; choose or record an MP4 for live analysis.");
       setAnalysisStatus("error");
@@ -1450,17 +1750,20 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     const expectedSessionId = current.sessionId;
     let intentIdentity = current.clipIdentities[roomId] ?? null;
     const consentIsCurrent = () => {
+      // Two batch rooms cannot share the single-room consent keys, so
+      // batch pipelines re-check the run-level batch consent instead.
+      if (fromBatch) return batchAttestedRef.current && batchSendConsentRef.current;
       const key = clipConsentKey(recordRef.current, roomId);
       return Boolean(key && mockUnitAttestationKey === key && sendVideoConsentKey === key);
     };
     const intentIsCurrent = () => {
       const latest = recordRef.current;
       return !controller.signal.aborted &&
-        generation === analysisGenerationRef.current &&
+        generation === (analysisGenerationRef.current[roomId] ?? 0) &&
         latest?.sessionId === expectedSessionId &&
         latest.schemaVersion === MOVE_IN_READY_SCHEMA_VERSION &&
         latest.catalogVersion === CATALOG_VERSION &&
-        latest.selectedRoomId === roomId &&
+        (requireSelectedRoom ? latest.selectedRoomId === roomId : true) &&
         intentIdentity !== null &&
         intentIdentity.schemaVersion === latest.schemaVersion &&
         intentIdentity.catalogVersion === latest.catalogVersion &&
@@ -1479,11 +1782,19 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       setAnalysisStatus("error");
       return;
     }
-    const currentConsentKey = clipConsentKey(current, roomId);
-    if (!currentConsentKey || mockUnitAttestationKey !== currentConsentKey || sendVideoConsentKey !== currentConsentKey) {
-      setAnalysisError("Confirm this staged mock-unit clip and its temporary server/Meta processing notice before sending it.");
-      setAnalysisStatus("error");
-      return;
+    if (fromBatch) {
+      if (!batchAttestedRef.current || !batchSendConsentRef.current) {
+        setAnalysisError("Batch AI analysis stopped because its consent was withdrawn. No further room was sent.");
+        setAnalysisStatus("error");
+        return;
+      }
+    } else {
+      const currentConsentKey = clipConsentKey(current, roomId);
+      if (!currentConsentKey || mockUnitAttestationKey !== currentConsentKey || sendVideoConsentKey !== currentConsentKey) {
+        setAnalysisError("Confirm this staged mock-unit clip and its temporary server/Meta processing notice before sending it.");
+        setAnalysisStatus("error");
+        return;
+      }
     }
     if (!online) {
       await queueAnalysisForReconnect();
@@ -1495,7 +1806,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       setAnalysisStatus("error");
       return;
     }
-    abortRef.current = controller;
+    analysisControllersRef.current[roomId] = controller;
     setAnalysisError("");
     setAnalysisNotice("");
     setAnalysisStatus("segmenting");
@@ -1550,7 +1861,10 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       if (!intentIsCurrent()) return;
       setAnalysisError(safeClientError(error, "Could not open this room’s saved clip."));
       setAnalysisStatus("error");
-      if (generation === analysisGenerationRef.current) abortRef.current = null;
+      if (generation === (analysisGenerationRef.current[roomId] ?? 0) &&
+          analysisControllersRef.current[roomId] === controller) {
+        delete analysisControllersRef.current[roomId];
+      }
       return;
     }
     if (!clip || !identity || !intentIsCurrent() || clip.sourceSha256 !== identity.videoHash ||
@@ -1570,7 +1884,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     let candidateTokenToRelease: string | null = null;
     let mappingCompleted = false;
     let segmentationRequested = false;
-    if (!intentIsCurrent() || !analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion)) return;
+    if (!intentIsCurrent() || !analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
     const latestRecord = recordRef.current;
     if (!latestRecord) return;
     persist(clearRoomAnalysisState(latestRecord, roomId));
@@ -1580,9 +1894,9 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       segmentForm.set("room", roomId);
       segmentForm.set("video", new File([clip.video], clip.fileName, { type: clip.mime }));
       appendIdentity(segmentForm, requestIdentity);
-      if (!intentIsCurrent() || !analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion)) return;
+      if (!intentIsCurrent() || !analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
       segmentationRequested = true;
-      pendingCancelRef.current.set(requestIdentity, null);
+      pendingCancelFor(roomId).set(requestIdentity, null);
       const segmentResponse = await fetchWithTimeout("/api/video/segment?stage=segment", {
         method: "POST",
         headers: { [WALKTHROUGH_CLIENT_HEADER]: WALKTHROUGH_CLIENT_ID },
@@ -1594,8 +1908,8 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       if (!segmentResponse.ok) throw new Error(readSafeApiError(segmentJson, segmentResponse.status));
       const segmented = parseSegmentResponse(segmentJson, requestIdentity, roomId);
       candidateTokenToRelease = segmented.candidateToken;
-      pendingCancelRef.current.set(requestIdentity, segmented.candidateToken ?? null);
-      if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion)) return;
+      pendingCancelFor(roomId).set(requestIdentity, segmented.candidateToken ?? null);
+      if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
 
       setAnalysisStatus("mapping");
       const uniqueTimes = [...new Set(segmented.candidates.map((candidate) => candidate.evidence.timestampMs))];
@@ -1611,14 +1925,14 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
           { maxDurationSeconds: 30 },
         );
         extracted.push(...batch);
-        if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion)) return;
+        if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
       }
-      if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion)) return;
+      if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
       const stillByTime = new Map<number, { blob: Blob; hash: string; width: number; height: number }>();
       for (const still of extracted) {
         const timestampMs = Math.round(still.timestampSeconds * 1000);
         const hash = await sha256Blob(still.blob);
-        if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion)) return;
+        if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
         stillByTime.set(timestampMs, {
           blob: still.blob,
           hash,
@@ -1626,7 +1940,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
           height: still.height,
         });
       }
-      if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion)) return;
+      if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
       const sourceStills = new Map<number, StoredVideoClip["stills"][number]>();
       const sourceReferences = new Map<number, EvidenceReference>();
       for (const [timestampMs, item] of stillByTime) {
@@ -1661,14 +1975,14 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
         [...sourceStills.values()],
       );
       if (!stillsSaved) throw new Error("The room clip changed before its source stills could be saved. Reload the clip and try again.");
-      if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion)) return;
+      if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
       const updatedClip = await store.get(expectedSessionId, roomId);
-      if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion)) return;
+      if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
       if (!updatedClip || updatedClip.sourceSha256 !== identity.videoHash) throw new Error("The source clip changed before its review stills could be reopened.");
       setClips((previous) => ({ ...previous, [roomId]: updatedClip }));
       let extractedIdentity = { ...identity, evidence: [...sourceReferences.values()] };
       const latestRecord = recordRef.current;
-      if (!latestRecord || !analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion)) return;
+      if (!latestRecord || !analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
       persist({
         ...latestRecord,
         updatedAt: new Date().toISOString(),
@@ -1720,7 +2034,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
         videoRevision: analysisIdentity.videoRevision,
         roomId: analysisIdentity.roomId,
       });
-      if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion)) return;
+      if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
       const proposals = mapProposalsToEvidence(mapped, segmented.candidates, analysisIdentity);
       const verifiedByStillId = new Map<string, VerifiedMappedEvidence>();
       for (const proposal of mapped.proposals) {
@@ -1738,9 +2052,9 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
           verifiedItems.map((item): StoredVideoStill => item.still),
         );
         if (!stillsSaved) throw new Error("The room clip changed before verified server review stills could be saved.");
-        if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion)) return;
+        if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
         const updatedClip = await store.get(expectedSessionId, roomId);
-        if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion)) return;
+        if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
         if (!updatedClip || updatedClip.sourceSha256 !== identity.videoHash) throw new Error("The source clip changed before verified server stills could be reopened.");
         setClips((previous) => ({ ...previous, [roomId]: updatedClip }));
         const serverEvidenceById = new Map(verifiedItems.map((item) => [item.reference.stillId, { ...item.reference, frameIndex: null }]));
@@ -1770,14 +2084,15 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
         setAnalysisError(`The server did not answer within ${Math.round(error.timeoutMs / 60000)} minutes. Keep this app open on Wi-Fi and run it again — finished rooms are kept and this room is marked for retry.`);
         return;
       }
-      if (controller.signal.aborted || generation !== analysisGenerationRef.current) return;
+      if (controller.signal.aborted || generation !== (analysisGenerationRef.current[roomId] ?? 0)) return;
       setAnalysisStatus("error");
       setAnalysisError(safeClientError(error, "Live room analysis did not complete. No sample result was substituted."));
     } finally {
-      if (generation === analysisGenerationRef.current) {
-        abortRef.current = null;
+      if (generation === (analysisGenerationRef.current[roomId] ?? 0) &&
+          analysisControllersRef.current[roomId] === controller) {
+        delete analysisControllersRef.current[roomId];
       }
-      pendingCancelRef.current.clear();
+      pendingCancelFor(roomId).clear();
       if (segmentationRequested && !mappingCompleted) {
         void cancelPendingVideoMapping(requestIdentity, candidateTokenToRelease);
       }
@@ -1825,6 +2140,9 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     if (signoffChanged) {
       setSignoffName("");
       setSignoffAttested(false);
+      setParticipantName("");
+      setParticipantSignature("");
+      setParticipantAttested(false);
     }
     updateRecord((current) => {
       const identityChanged = key === "evaluatorName" && current.evaluatorName !== value;
@@ -1833,8 +2151,8 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
         ...current,
         [key]: value,
         ...(landlordMarkedNotInformed ? { landlordDiscussionDate: "" } : {}),
-        ...(signoffChanged ? { signoff: null } : {}),
-        ...(identityChanged ? { decisions: createUnreviewedEvaluatorDecisions(), signoff: null } : {}),
+        ...(signoffChanged ? { signoff: null, participantSignoff: null } : {}),
+        ...(identityChanged ? { decisions: createUnreviewedEvaluatorDecisions(), signoff: null, participantSignoff: null } : {}),
       };
     });
   }
@@ -1856,13 +2174,18 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     }));
     setSignoffName("");
     setSignoffAttested(false);
+    setParticipantName("");
+    setParticipantSignature("");
+    setParticipantAttested(false);
     updateRecord((latest) => ({
       ...latest,
       unitType,
       bathCount,
       roomIds,
       selectedRoomId: roomIds.includes(latest.selectedRoomId) ? latest.selectedRoomId : (roomIds[0] ?? "kitchen"),
+      analysisQueue: pruneAnalysisQueue(latest.analysisQueue ?? [], roomIds),
       signoff: null,
+      participantSignoff: null,
     }));
   }
 
@@ -1882,7 +2205,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       setVoiceTurn(null);
       return;
     }
-    const questions = VOICE_ROOM_CHECKS[parsed.type];
+    const questions = checksForRoom(current, roomId);
     const answers = current.voiceChecks[roomId] ?? [];
     const nextIndex = questions.findIndex((question) => !answers.some((entry) => entry.question === question));
     setVoiceTranscript(null);
@@ -1893,6 +2216,96 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     recordVoiceCheck(roomId, question, answer);
     advanceVoiceTurn(roomId);
   }
+
+  /**
+   * Guided-tour narration language (REQ-R2). A presentation preference, not
+   * inspection content: switching never clears decisions or sign-off (unlike
+   * setProfileField, which resets sign-off for content changes).
+   */
+  function setTourLanguage(language: TourLanguage): void {
+    if (!esVoiceConfigured && language === "es") return;
+    updateRecord((current) => current.tourLanguage === language ? current : { ...current, tourLanguage: language });
+  }
+
+  /**
+   * Persist a live detector-test still as evidence on the room's current
+   * clip (REQ-R3). Mirrors the analysis still-save path: bytes land in the
+   * clip store first (atomic on source match), then the evidence reference
+   * joins the clip identity, then clips state refreshes from the store so
+   * the review evidence picker resolves it. Decisions, proposals, and
+   * sign-off are untouched; every failure returns a message, never throws.
+   */
+  const attachDetectorStill = useCallback(async (
+    roomId: MoveInReadyRoomId,
+    still: CapturedDetectorStill,
+  ): Promise<{ ok: true } | { ok: false; message: string }> => {
+    const current = recordRef.current;
+    const identity = current?.clipIdentities[roomId];
+    if (!current || !identity) {
+      return { ok: false, message: "Film this room before capturing a detector still." };
+    }
+    if (identity.evidence.length >= MAX_ROOM_EVIDENCE_STILLS) {
+      return { ok: false, message: "This room already has the maximum number of saved stills." };
+    }
+    const store = videoStoreRef.current;
+    try {
+      const clip = await store?.get(current.sessionId, roomId);
+      if (!clip || clip.sourceSha256 !== identity.videoHash || clip.capturedAt !== identity.capturedAt ||
+          clip.sizeBytes !== identity.sizeBytes || await sha256Blob(clip.video) !== identity.videoHash) {
+        return { ok: false, message: "The room clip changed. Save the clip again, then capture the still." };
+      }
+      const stillHash = await sha256Blob(still.blob);
+      const usedMs = [
+        ...identity.evidence.map((reference) => reference.timestampMs),
+        ...clip.stills.map((item) => Math.round(item.timestampSeconds * 1000)),
+      ];
+      const timestampMs = firstFreeEvidenceTimestampMs(usedMs, clip.durationSeconds);
+      if (timestampMs === null) {
+        return { ok: false, message: "No room-clip timestamp is available for this still." };
+      }
+      const saved = await store?.addStillsIfSourceMatches(current.sessionId, roomId, identity.videoHash, identity.capturedAt, [{
+        timestampSeconds: timestampMs / 1000,
+        blob: still.blob,
+        width: still.width,
+        height: still.height,
+      }]);
+      if (!saved) {
+        return { ok: false, message: "The room clip changed before the still could be saved." };
+      }
+      const updatedClip = await store?.get(current.sessionId, roomId);
+      if (!updatedClip || updatedClip.sourceSha256 !== identity.videoHash) {
+        return { ok: false, message: "The room clip changed before the still could be reopened." };
+      }
+      const reference = buildDetectorTestReference({
+        schemaVersion: identity.schemaVersion,
+        catalogVersion: identity.catalogVersion,
+        videoId: identity.videoId,
+        videoRevision: identity.videoRevision,
+        roomId,
+      }, timestampMs, stillHash);
+      const latest = recordRef.current;
+      const latestIdentity = latest?.clipIdentities[roomId];
+      if (!latest || latest.sessionId !== current.sessionId || !latestIdentity || latestIdentity.videoId !== identity.videoId) {
+        return { ok: false, message: "The room clip changed. Review the room, then capture the still again." };
+      }
+      if (latestIdentity.evidence.some((item) => item.stillId === reference.stillId)) {
+        setClips((previous) => ({ ...previous, [roomId]: updatedClip }));
+        return { ok: true };
+      }
+      setClips((previous) => ({ ...previous, [roomId]: updatedClip }));
+      updateRecord((record) => {
+        const target = record.clipIdentities[roomId];
+        if (!target || target.videoId !== identity.videoId) return record;
+        return {
+          ...record,
+          clipIdentities: { ...record.clipIdentities, [roomId]: { ...target, evidence: [...target.evidence, reference] } },
+        };
+      });
+      return { ok: true };
+    } catch {
+      return { ok: false, message: "The still could not be saved on this device." };
+    }
+  }, [updateRecord]);
 
   function voiceCheckNoteForElement(elementId: MoveInReadyElementId, current: MoveInReadyInspection): string | null {
     const element = MOVE_IN_READY_ELEMENTS.find((item) => item.id === elementId);
@@ -1919,6 +2332,9 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     if (included && selectedRoomId === roomId) setSelectedRoomId(next[0] ?? "kitchen");
     setSignoffName("");
     setSignoffAttested(false);
+    setParticipantName("");
+    setParticipantSignature("");
+    setParticipantAttested(false);
     updateRecord((latest) => {
       const checks = { ...latest.voiceChecks };
       for (const id of latest.roomIds) if (!next.includes(id)) delete checks[id];
@@ -1927,7 +2343,9 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
         roomIds: next,
         selectedRoomId: next.includes(latest.selectedRoomId) ? latest.selectedRoomId : (next[0] ?? "kitchen"),
         voiceChecks: checks,
+        analysisQueue: pruneAnalysisQueue(latest.analysisQueue ?? [], next),
         signoff: null,
+        participantSignoff: null,
       };
     });
   }
@@ -1958,7 +2376,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     }
     let candidate: EvaluatorDecision;
     if (choice === "unreviewed") {
-      candidate = { status: "unreviewed" };
+      candidate = unreviewedDecisionPreservingSnapshot(current.decisions[elementId]);
     } else if (choice === "needs-human-check") {
       candidate = {
         status: "needs-human-check",
@@ -2002,6 +2420,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       ...latest,
       decisions: { ...latest.decisions, [elementId]: parsed.value },
       signoff: null,
+      participantSignoff: null,
     }));
     setReviewError("");
     const savedOk = true;
@@ -2192,6 +2611,80 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     setExportNotice("Evaluator sign-off saved to this device. No result has been sent to LAHSA or HMIS.");
   }
 
+  function saveParticipantSignoff(): void {
+    const current = recordRef.current;
+    if (!current) return;
+    if (current.fundingType !== "lahsa") {
+      setExportError(current.fundingType === "hud"
+        ? "HQS is required for HUD-funded units. Form 1083 sign-off is disabled."
+        : "Choose LAHSA / Form 1083 funding in Profile before signing.");
+      return;
+    }
+    const participantSignoff: ParticipantSignoff = {
+      participantName: participantName.trim(),
+      typedSignature: participantSignature.trim(),
+      attested: participantAttested,
+      signedAt: new Date().toISOString(),
+    };
+    const parsed = validateParticipantSignoff(participantSignoff);
+    if (!parsed.ok) {
+      setExportError(decisionMessage(parsed.errors));
+      return;
+    }
+    const formBlocker = form1083AdministrativeBlocker(current);
+    if (formBlocker) {
+      setExportError(formBlocker);
+      return;
+    }
+    const result = deriveFinalInspectionResult({
+      fundingType: current.fundingType,
+      capturedRoomIds: current.roomIds.filter((roomId) => Boolean(clips[roomId])),
+      expectedRoomIds: current.roomIds,
+      evaluatorDecisions: current.decisions,
+      signoff: current.signoff,
+    });
+    if (result.status !== "complete" && result.status !== "signoff-required") {
+      setExportError(result.blockers[0] ?? "Complete all evaluator decisions before participant sign-off.");
+      return;
+    }
+    updateRecord((latest) => ({ ...latest, participantSignoff: parsed.value }));
+    setExportError("");
+    setExportNotice("Participant sign-off saved to this device. No result has been sent to LAHSA or HMIS.");
+  }
+
+  /**
+   * Optional GPS attestation (REQ-L3). Explicit tap only — never
+   * auto-prompted — and never blocking: denial, timeout, or an unavailable
+   * API records nothing and leaves signing and exports untouched.
+   */
+  function requestInspectionLocation(): void {
+    if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
+      setLocationError("Location not recorded");
+      return;
+    }
+    setLocating(true);
+    setLocationError("");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocating(false);
+        updateRecord((current) => ({
+          ...current,
+          inspectionLocation: buildInspectionLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            accuracyM: position.coords.accuracy,
+            capturedAt: new Date().toISOString(),
+          }),
+        }));
+      },
+      () => {
+        setLocating(false);
+        setLocationError("Location not recorded");
+      },
+      { timeout: 10_000 },
+    );
+  }
+
   async function collectExportStills(current: MoveInReadyInspection): Promise<ExportStill[]> {
     const store = videoStoreRef.current;
     if (!store) throw new Error("Local video storage is unavailable.");
@@ -2259,7 +2752,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     }
   }
 
-  async function buildExportFile(kind: MoveInReadyExportKind | "hmis-json"): Promise<{ body: Uint8Array; filename: string; mime: string }> {
+  async function buildExportFile(kind: FlowExportKind, fixListLanguage: FixListLanguage = "en"): Promise<{ body: Uint8Array; filename: string; mime: string; polished: boolean }> {
     const current = recordRef.current;
     if (current && current.fundingType !== "lahsa") {
       throw new Error(current.fundingType === "hud"
@@ -2277,6 +2770,9 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     if (!current?.signoff || currentFinalization?.status !== "complete" || form1083AdministrativeBlocker(current)) {
       throw new Error(current ? form1083AdministrativeBlocker(current) ?? "Capture every room video, complete every evaluator decision, and save your attestation before creating exports." : "Capture every room video, complete every evaluator decision, and save your attestation before creating exports.");
     }
+    if (!current?.participantSignoff) {
+      throw new Error("Participant sign-off is required before export. The participant signs in the Sign-Off step.");
+    }
     {
       const stills = await collectExportStills(current);
       await assertExportSnapshotCurrent(current, capturedRoomIds);
@@ -2288,6 +2784,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
         expectedRoomIds: current.roomIds,
         decisions: current.decisions,
         signoff: current.signoff,
+        participantSignoff: current.participantSignoff,
         evaluatorAgencyName: current.evaluatorAgencyName,
         landlordDiscussion: current.landlordDiscussion === "" ? undefined : current.landlordDiscussion,
         landlordDiscussionDate: current.landlordDiscussionDate || undefined,
@@ -2298,31 +2795,76 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
         stills,
       };
       const dateName = new Date().toISOString();
+      const visualAlarmsRequired = current.participantVisualAlarmsRequired === true;
+      if (kind === "lahsa-1083-json") {
+        const json = buildLahsa1083Json({
+          sessionId: current.sessionId,
+          fundingType: current.fundingType,
+          decisions: current.decisions,
+          signoff: current.signoff,
+          participantSignoff: current.participantSignoff,
+          participantVisualAlarmsRequired: visualAlarmsRequired,
+          inspectionLocation: current.inspectionLocation,
+          generatedAt: dateName,
+        });
+        await assertExportSnapshotCurrent(current, capturedRoomIds);
+        return {
+          body: new TextEncoder().encode(JSON.stringify(json, null, 2)),
+          filename: exportFilename("hmis-ready", current.sessionId, dateName).replace("hmis-ready", "lahsa-1083-json").replace(/\.pdf$/, ".json"),
+          mime: "application/json",
+          polished: false,
+        };
+      }
+      if (kind === "case-note") {
+        const template = buildCaseNoteText({
+          fundingType: current.fundingType,
+          pseudonym: current.pseudonym,
+          decisions: current.decisions,
+          signoff: current.signoff,
+          participantSignoff: current.participantSignoff,
+          participantVisualAlarmsRequired: visualAlarmsRequired,
+          generatedAt: dateName,
+        });
+        const { text, polished } = await requestCaseNotePolish(template);
+        await assertExportSnapshotCurrent(current, capturedRoomIds);
+        return {
+          body: new TextEncoder().encode(text),
+          filename: exportFilename("hmis-ready", current.sessionId, dateName).replace("hmis-ready", "case-note").replace(/\.pdf$/, ".txt"),
+          mime: "text/plain",
+          polished,
+        };
+      }
       const body = kind === "hmis-json"
         ? new TextEncoder().encode(JSON.stringify(await buildHmisReadyJson(exportInput), null, 2))
-        : await buildMoveInReadyPdf(exportInput, kind);
+        : await buildMoveInReadyPdf(exportInput, kind, kind === "landlord-fix-list" ? fixListLanguage : "en");
       await assertExportSnapshotCurrent(current, capturedRoomIds);
       const filename = kind === "hmis-json"
         ? exportFilename("hmis-ready", current.sessionId, dateName).replace(/\.pdf$/, ".json")
-        : exportFilename(kind, current.sessionId, dateName);
+        : exportFilename(kind, current.sessionId, dateName, fixListLanguage);
       const mime = kind === "hmis-json" ? "application/json" : "application/pdf";
-      return { body, filename, mime };
+      return { body, filename, mime, polished: false };
     }
   }
 
-  async function downloadExport(kind: MoveInReadyExportKind | "hmis-json"): Promise<void> {
+  async function downloadExport(kind: FlowExportKind, fixListLanguage: FixListLanguage = "en"): Promise<void> {
     setExporting(true);
     setExportError("");
     setExportNotice("");
     try {
-      const { body, filename, mime } = await buildExportFile(kind);
+      const { body, filename, mime, polished } = await buildExportFile(kind, fixListLanguage);
       const url = URL.createObjectURL(new Blob([body], { type: mime }));
       const anchor = document.createElement("a");
       anchor.href = url;
       anchor.download = filename;
       anchor.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
-      setExportNotice(`${filename} downloaded. Handle it through your existing manual process.`);
+      if (kind === "case-note") {
+        setExportNotice(polished
+          ? `${filename} downloaded (polished wording). ${CASE_NOTE_DRAFT_LABEL}`
+          : `${filename} downloaded. ${CASE_NOTE_DRAFT_LABEL}`);
+      } else {
+        setExportNotice(`${filename} downloaded. Handle it through your existing manual process.`);
+      }
     } catch (error) {
       setExportError(safeClientError(error, "The local export could not be created."));
     } finally {
@@ -2335,7 +2877,8 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     setExportError("");
     setExportNotice("");
     try {
-      const kinds = ["client-file", "landlord-fix-list", "hmis-ready", "hmis-json"] as const;
+      const kinds: FlowExportKind[] = ["client-file", "landlord-fix-list", "hmis-ready", "hmis-json"];
+      if (recordRef.current?.participantSignoff) kinds.push("case-note");
       const files: File[] = [];
       for (const kind of kinds) {
         const { body, filename, mime } = await buildExportFile(kind);
@@ -2370,9 +2913,15 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     setBatchFailedRooms([]);
     setWalkthroughAttested(false);
     setWalkthroughSendConsent(false);
-    batchQueueRef.current = [];
+    batchQueueRef.current = createRoomBatchQueue<MoveInReadyRoomId>();
     batchTotalRef.current = 0;
-    batchRunningRef.current = false;
+    batchSettledRef.current = 0;
+    batchFailedRef.current = [];
+    batchCancelRef.current = false;
+    batchStopReasonRef.current = null;
+    batchRunRef.current = null;
+    batchSessionRef.current += 1;
+    batchRoomsInFlightRef.current.clear();
     batchAutoStartedRef.current = false;
     setAnalysisExpanded(false);
     setClipDetailsExpanded(false);
@@ -2385,6 +2934,12 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     setReviewNoteDraft("");
     setSignoffName("");
     setSignoffAttested(false);
+    setParticipantName("");
+    setParticipantSignature("");
+    setParticipantAttested(false);
+    setLocating(false);
+    setLocationError("");
+    queueRunnerKeyRef.current = "";
     setExportError("");
     setExportNotice("");
     setProfileSection("unit");
@@ -2421,6 +2976,52 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       await activateInspection(target);
     } catch (error) {
       setStorageWarning(safeClientError(error, "That saved inspection could not be opened."));
+    }
+  }
+
+  /**
+   * Start a deficiency re-inspection (REQ-L1) for a signed record: every D
+   * decision is snapshotted into `priorDeficiency` and reset to unreviewed,
+   * both sign-offs reset, and the guided tour then queues only those
+   * elements. deriveFinalInspectionResult is unchanged: any standing D still
+   * blocks completion.
+   */
+  async function startReinspection(sessionIdValue: string): Promise<void> {
+    if (!isSafeSessionId(sessionIdValue)) return;
+    invalidateActiveAnalysis("Started a deficiency re-inspection.");
+    try {
+      const current = recordRef.current;
+      if (current) await inspectionStoreRef.current?.put({ ...current, updatedAt: new Date().toISOString() });
+      const target = await inspectionStoreRef.current?.get(sessionIdValue);
+      if (!target) {
+        setStorageWarning("That saved inspection is no longer on this device.");
+        await refreshInspectionList();
+        return;
+      }
+      if (!isSignedForReinspection(target)) {
+        setStorageWarning("Re-inspection needs a signed inspection. Sign it first, then re-inspect its deficiencies.");
+        await refreshInspectionList();
+        return;
+      }
+      const { decisions, reinspectionCount } = startReinspectionDecisions(target.decisions);
+      if (reinspectionCount === 0) {
+        setStorageWarning("That inspection has no deficiencies to re-inspect.");
+        await refreshInspectionList();
+        return;
+      }
+      const next: MoveInReadyInspection = {
+        ...target,
+        updatedAt: new Date().toISOString(),
+        decisions,
+        signoff: null,
+        participantSignoff: null,
+      };
+      await inspectionStoreRef.current?.put(next);
+      await activateInspection(next);
+      changeStep("guided");
+      setAnalysisNotice(`Re-inspection started: ${reinspectionCount} deficient item${reinspectionCount === 1 ? "" : "s"} reset for review. Prior findings are kept as Before stills.`);
+    } catch (error) {
+      setStorageWarning(safeClientError(error, "That re-inspection could not be started."));
     }
   }
 
@@ -2593,6 +3194,16 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                                 <small>{item.fundingType === "lahsa" ? "LAHSA" : item.fundingType === "hud" ? "HUD" : "No funding"} · {clipCount}/4 clips · {decidedCount}/11 decided{item.signoff ? " · Signed" : ""} · {updated}</small>
                               </span>
                             </button>
+                            {canReinspect(item) && (
+                              <button
+                                type="button"
+                                className={styles.secondaryButton}
+                                aria-label={`Re-inspect deficiencies for ${item.pseudonym.trim() || "Untitled inspection"}`}
+                                onClick={() => void startReinspection(item.sessionId)}
+                              >
+                                Re-inspect deficiencies
+                              </button>
+                            )}
                             <button
                               type="button"
                               className={styles.iconButton}
@@ -2679,6 +3290,17 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                 </div>
                 {!canCapture && <p className={styles.helpText}>Finish unit setup first — Continue above takes you there.</p>}
               </section>
+
+              <section className={styles.card} aria-labelledby="home-prescreen-heading">
+                <div className={styles.cardTitleRow}>
+                  <div>
+                    <h2 id="home-prescreen-heading">Building pre-screen</h2>
+                    <p className={styles.cardLead}>Illustrative in this demo — live records are not connected.</p>
+                  </div>
+                  <ShieldCheck size={21} aria-hidden="true" />
+                </div>
+                <BuildingPrescreen />
+              </section>
             </section>
           </>
         )}
@@ -2701,6 +3323,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   batchActive,
                   batchProgress,
                   batchFailedRooms,
+                  analysisQueue: record.analysisQueue ?? [],
                   analysisComplete: tourAnalysisComplete,
                   setEvaluatorName: (name) => setProfileField("evaluatorName", name),
                   setUnitType: (unit) => setUnitDescription(
@@ -2720,6 +3343,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   onClipChange: (clip, roomId) => handleClipChange(clip, roomId),
                   onRecordingStateChange: setRecordingInProgress,
                   answerVoiceCheck,
+                  attachDetectorStill,
                   grantBatchConsent,
                   startBatchAnalysis,
                   cancelBatchAnalysis,
@@ -2839,7 +3463,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                           </label>
                           <label className={styles.checkLabel}>
                             <input type="checkbox" checked={walkthroughSendConsent} onChange={(event) => setWalkthroughSendConsent(event.currentTarget.checked)} />
-                            <span>I understand each filmed clip will be sent for live processing by Meta once every room is filmed.</span>
+                            <span>I understand each filmed clip will be sent for live processing by Meta.</span>
                           </label>
                         </div>
                       )}
@@ -2857,7 +3481,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                             </label>
                             <label className={styles.checkLabel}>
                               <input type="checkbox" checked={batchSendConsent} disabled={batchActive} onChange={(event) => setBatchSendConsent(event.currentTarget.checked)} />
-                              <span>I understand the filmed clips will be sent one room at a time for live processing by Meta.</span>
+                              <span>I understand the filmed clips will be sent up to two rooms at a time for live processing by Meta.</span>
                             </label>
                             {batchFailedRooms.length > 0 && !batchActive && <p className={styles.inlineError} role="alert">Needs attention: {batchFailedRooms.join(", ")}.</p>}
                             <div className={styles.buttonRow}>
@@ -2885,6 +3509,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                     roomId={selectedRoomId}
                     capturedRoomCount={capturedRoomCount}
                     capturedRoomIds={capturedRoomIds}
+                    queuedRoomIds={record.analysisQueue ?? []}
                     onRecordingStateChange={setRecordingInProgress}
                     overlayCue={recordingInProgress ? filmingScriptForRoom(selectedRoomId)[recordingCueIndex] ?? null : null}
                     completedPromptIds={record.completedPromptIdsByRoom[selectedRoomId] ?? []}
@@ -2903,7 +3528,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                       }));
                     }}
                     onRoomChange={(roomId) => selectRoom(roomId)}
-                    disabled={!canCapture || analysisStatus === "segmenting" || analysisStatus === "mapping"}
+                    disabled={!canCapture || (!batchActive && (analysisStatus === "segmenting" || analysisStatus === "mapping"))}
                     onClipChange={(clip, roomId) => handleClipChange(clip, roomId)}
                     detailsExpanded={clipDetailsExpanded}
                     onDetailsExpandedChange={setClipDetailsExpanded}
@@ -2922,7 +3547,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                       <div className={styles.analysisDetails}>
                         {analysisMode === "fixture" && <div className={`${styles.callout} ${styles.calloutWarning}`} role="status">Sample mode is active. This video flow will not invent a sample result or fall back when live analysis is unavailable.</div>}
                         {analysisMode === "unconfigured" && <div className={`${styles.callout} ${styles.calloutDanger}`} role="status">Live Meta analysis is off on this server. Configure APP_ANALYSIS_MODE=live and restart the server to enable it.</div>}
-                        {analysisMode === "live" && <div className={`${styles.callout} ${styles.calloutWarning}`} role="status">Live mode is enabled, but the provider connection has not been tested. A request is sent only after you confirm the staged-unit and processing notices.</div>}
+                        {analysisMode === "live" && <div className={`${styles.callout} ${styles.calloutWarning}`} role="status">Live mode is enabled, but the provider connection has not been tested. A request is sent only for consented analysis: confirm the per-room notices below, or walkthrough and batch consent to analyze each saved clip automatically.</div>}
                         {clips[selectedRoomId]?.mime === "video/quicktime" && <div className={`${styles.callout} ${styles.calloutWarning}`} role="status">Meta&apos;s current video upload API accepts MP4 only. This MOV stays on this device for manual review; choose or record an MP4 for live analysis.</div>}
                         <div className={`${styles.callout} ${styles.calloutWarning}`}><p>Sending a room transmits its clip to this server and Meta for temporary SAM processing. Candidate stills and one-per-second source samples go to Meta Muse; if Meta Muse is unavailable and a Baseten key is configured, Baseten Muse Spark Open may receive those stills as a fallback. Check every observation yourself. Provider terms determine retention; local deletion does not delete provider copies.</p></div>
                         <label className={styles.checkLabel}>
@@ -2951,12 +3576,12 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                         </label>
                         {analysisError && <p className={styles.inlineError} role="alert">{analysisError}</p>}
                         <div className={styles.buttonRow}>
-                          <button className={`${styles.button} ${styles.wideButton}`} type="button" onClick={() => void analyzeRoom()} disabled={analysisMode !== "live" || !clips[selectedRoomId] || clips[selectedRoomId]?.mime === "video/quicktime" || !mockUnitAttested || !sendVideoConsent || analysisStatus === "segmenting" || analysisStatus === "mapping" || (!online && Boolean(pendingForSelectedRoom))}>
-                            {analysisStatus === "segmenting" || analysisStatus === "mapping" ? <><LoaderCircle className={styles.spinner} size={17} aria-hidden="true" /> {analysisStatus === "segmenting" ? "Segmenting room video…" : "Mapping source stills…"} <span aria-hidden="true">{formatTimestamp(analysisElapsedSeconds)}</span></> : pendingForSelectedRoom ? online ? <><RefreshCw size={17} aria-hidden="true" /> Retry analysis</> : <><CloudOff size={17} aria-hidden="true" /> Analysis queued</> : analysisStatus === "complete" ? <><RefreshCw size={17} aria-hidden="true" /> Analyze this room again</> : online ? <><Video size={17} aria-hidden="true" /> Analyze this room</> : <><CloudOff size={17} aria-hidden="true" /> Queue analysis for when connected</>}
+                          <button className={`${styles.button} ${styles.wideButton}`} type="button" onClick={() => { const roomId = selectedRoomId; void analyzeRoomFor(roomId).finally(() => { analysisInFlightRef.current.delete(roomId); }); }} disabled={batchActive || analysisMode !== "live" || !clips[selectedRoomId] || clips[selectedRoomId]?.mime === "video/quicktime" || !mockUnitAttested || !sendVideoConsent || analysisStatus === "segmenting" || analysisStatus === "mapping" || (!online && Boolean(pendingForSelectedRoom))}>
+                            {(analysisStatus === "segmenting" || analysisStatus === "mapping") && !batchActive ? <><LoaderCircle className={styles.spinner} size={17} aria-hidden="true" /> {analysisStatus === "segmenting" ? "Segmenting room video…" : "Mapping source stills…"} <span aria-hidden="true">{formatTimestamp(analysisElapsedSeconds)}</span></> : pendingForSelectedRoom ? online ? <><RefreshCw size={17} aria-hidden="true" /> Retry analysis</> : <><CloudOff size={17} aria-hidden="true" /> Analysis queued</> : analysisStatus === "complete" ? <><RefreshCw size={17} aria-hidden="true" /> Analyze this room again</> : online ? <><Video size={17} aria-hidden="true" /> Analyze this room</> : <><CloudOff size={17} aria-hidden="true" /> Queue analysis for when connected</>}
                           </button>
-                          {(analysisStatus === "segmenting" || analysisStatus === "mapping") && <button className={styles.secondaryButton} type="button" onClick={() => invalidateActiveAnalysis("Analysis was cancelled. No result was saved.")}>Cancel</button>}
+                          {(analysisStatus === "segmenting" || analysisStatus === "mapping") && !batchActive && <button className={styles.secondaryButton} type="button" onClick={() => invalidateActiveAnalysis("Analysis was cancelled. No result was saved.")}>Cancel</button>}
                         </div>
-                        <p className={styles.privacyText}>Each explicit run makes one segmentation stage and one mapping stage. No automatic paid retries. Local clips are not uploaded until you choose Analyze.</p>
+                        <p className={styles.privacyText}>Each explicit run makes one segmentation stage and one mapping stage. No automatic paid retries. A clip is uploaded only for analysis you authorized: your Analyze tap, or automatically on save when walkthrough and batch consent are confirmed.</p>
                         {analysisStatus === "error" && analysisError && <p className={styles.statusText} role="status">No sample result was substituted.</p>}
                       </div>
                     </details>
@@ -2964,7 +3589,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   {clips[selectedRoomId] && canCapture && (() => {
                     const parsed = parseRoomId(selectedRoomId);
                     if (!parsed) return null;
-                    const questions = VOICE_ROOM_CHECKS[parsed.type];
+                    const questions = checksForRoom(record, selectedRoomId);
                     const answers = record.voiceChecks[selectedRoomId] ?? [];
                     const turn = voiceTurn?.roomId === selectedRoomId ? voiceTurn : null;
                     const turnQuestion = turn ? questions[turn.index] : undefined;
@@ -3057,7 +3682,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   <button className={styles.button} type="button" onClick={() => {
                     const nextNote = reviewNoteDraft.trim();
                     if (nextNote !== record.inspectionNote) {
-                      updateRecord((current) => ({ ...current, inspectionNote: nextNote, signoff: null }));
+                      updateRecord((current) => ({ ...current, inspectionNote: nextNote, signoff: null, participantSignoff: null }));
                       setSignoffAttested(false);
                       setSignoffName("");
                     }
@@ -3200,6 +3825,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   const manualChecks = catalogElement?.manualChecks ?? [];
                   const decision = record.decisions[element.id];
                   const proposal = record.proposals[element.id];
+                  const priorDeficiency = decision.status === "unreviewed" ? decision.priorDeficiency : undefined;
                   const evidence = selectedEvidenceForView(element.id);
                   const proposalEvidenceView = proposal?.evidence
                     .map((proposalReference) => evidence.find(({ reference }) => evidenceReferenceBaseKey(reference) === evidenceReferenceBaseKey(proposalReference)))
@@ -3243,6 +3869,34 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                           <figcaption>{roomLabel(visibleEvidenceView.reference.roomId)} · {formatTimestamp(visibleEvidenceView.reference.timestampMs / 1000)}<small>{proposalEvidenceView ? "AI-linked still" : "Available still · not linked to draft"}</small></figcaption>
                         </figure> : <p className={styles.proposalNoEvidence}>No verified source still linked to this draft.</p>}
                       </section>
+                      {priorDeficiency && (
+                        <section className={styles.proposalSummary} aria-label={`${element.label} prior deficiency from the earlier inspection`} data-testid={`before-deficiency-${element.id}`}>
+                          <div className={styles.proposalSummaryCopy}>
+                            <p className={styles.draftLabel}>Before · prior inspection, decided {new Date(priorDeficiency.decidedAt).toLocaleDateString()}</p>
+                            <p><strong>Prior issue:</strong> {priorDeficiency.issueDescription}</p>
+                            <p><strong>Prior correction:</strong> {priorDeficiency.correction}</p>
+                            <p className={styles.helpText}>Complete by {priorDeficiency.completionDate} · reinspect {priorDeficiency.reinspectionDate}</p>
+                            {(() => {
+                              const beforeViews = priorDeficiency.evidenceStillIds
+                                .map((stillId) => evidenceViews.find((view) => view.reference.stillId === stillId))
+                                .filter((view): view is EvidenceView => Boolean(view));
+                              if (beforeViews.length === 0) {
+                                return <p className={styles.helpText}>Prior stills are no longer on this device.</p>;
+                              }
+                              return (
+                                <div className={styles.evidenceGrid} aria-label={`${element.label} before stills`}>
+                                  {beforeViews.slice(0, 5).map((view) => (
+                                    <figure className={styles.evidenceFigure} key={view.reference.stillId}>
+                                      <Image src={view.src} width={160} height={120} unoptimized alt={`Before still for ${element.label}, ${roomLabel(view.reference.roomId)} at ${formatTimestamp(view.reference.timestampMs / 1000)}`} />
+                                      <figcaption>Before · {roomLabel(view.reference.roomId)} · {formatTimestamp(view.reference.timestampMs / 1000)}</figcaption>
+                                    </figure>
+                                  ))}
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        </section>
+                      )}
                       <div className={styles.elementBody}>
                         <section className={styles.criteriaPanel} aria-label={`${element.label} required in-person checks`}>
                           <p className={styles.draftLabel}>Required in-person checks</p>
@@ -3295,7 +3949,8 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                               <legend>Attach source stills to your decision</legend>
                               {evidence.slice(0, MAX_ROOM_EVIDENCE_STILLS * element.roomIds.length).map(({ reference, src }) => {
                                 const modelEvidence = proposal?.evidence.find((item) => item.stillId === reference.stillId);
-                                const accessibleEvidenceLabel = `${roomLabel(reference.roomId)} source still at ${formatTimestamp(reference.timestampMs / 1000)} (${reference.timestampMs} ms)${modelEvidence ? `, SAM frame index ${modelEvidence.frameIndex}` : ""}`;
+                                const liveCaptureNote = reference.stillId.startsWith(DETECTOR_TEST_STILL_PREFIX) ? ", live detector-test capture" : "";
+                                const accessibleEvidenceLabel = `${roomLabel(reference.roomId)} source still at ${formatTimestamp(reference.timestampMs / 1000)} (${reference.timestampMs} ms)${modelEvidence ? `, SAM frame index ${modelEvidence.frameIndex}` : ""}${liveCaptureNote}`;
                                 return <label className={styles.evidenceOption} key={reference.stillId}>
                                   <input type="checkbox" aria-label={accessibleEvidenceLabel} checked={draft.evidenceStillIds.includes(reference.stillId)} onChange={(event) => { const checked = event.currentTarget.checked; updateDecisionDraft(element.id, (current) => ({ ...current, evidenceStillIds: updateChecked(current.evidenceStillIds, reference.stillId, checked, 5) })); }} />
                                   <Image src={src} width={96} height={72} unoptimized alt="" />
@@ -3324,14 +3979,14 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                               </button>
                             )}
                             <button type="button" className={`${styles.button} ${styles.reviewInlineSaveButton}`} onClick={() => saveDecision(element.id)}>Save evaluator decision</button>
-                            {decision.status !== "unreviewed" && <button type="button" className={styles.textButton} onClick={() => { updateRecord((current) => ({ ...current, decisions: { ...current.decisions, [element.id]: { status: "unreviewed" } }, signoff: null })); setDrafts((current) => ({ ...current, [element.id]: createDecisionDraft({ status: "unreviewed" }) })); }}>Clear decision</button>}
+                            {decision.status !== "unreviewed" && <button type="button" className={styles.textButton} onClick={() => { updateRecord((current) => ({ ...current, decisions: { ...current.decisions, [element.id]: { status: "unreviewed" } }, signoff: null, participantSignoff: null })); setDrafts((current) => ({ ...current, [element.id]: createDecisionDraft({ status: "unreviewed" }) })); }}>Clear decision</button>}
                           </div>
                         </div>
                         <details className={styles.reviewSupplement}>
                           <summary>Form 1083 reference criteria</summary>
                           <section className={styles.criteriaPanel} aria-label={`${element.label} Form 1083 reference criteria`}>
                             <ul className={styles.criteriaList}>
-                              {MOVE_IN_READY_ELEMENT_CRITERIA[element.id].checklistItems.map((item) => <li key={item}>{item}</li>)}
+                              {checklistItemsForElement(record, element.id).map((item) => <li key={item}>{item}</li>)}
                             </ul>
                             <p className={styles.criteriaNote}>Reference checklist only. Complete the physical check; this guide records no finding.</p>
                           </section>
@@ -3416,7 +4071,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
               <div className={`${styles.card} ${styles.signoffCard}`}>
                 <div className={styles.cardTitleRow}><div><h2>Evaluator sign-off</h2><p className={styles.cardLead}>Your assessment and attestation.</p></div><ShieldCheck size={21} aria-hidden="true" /></div>
                 <p className={styles.supportingText}>Evaluator: <strong>{record.evaluatorName || "Not entered"}</strong></p>
-                {record.signoff ? <div className={`${styles.callout} ${styles.calloutSuccess}`} role="status"><p>Signed by {record.signoff.typedSignature} on {new Date(record.signoff.signedAt).toLocaleString()}.</p><button className={styles.textButton} type="button" onClick={() => { updateRecord((current) => ({ ...current, signoff: null })); setSignoffAttested(false); setSignoffName(""); }}>Revoke sign-off</button></div> : <>
+                {record.signoff ? <div className={`${styles.callout} ${styles.calloutSuccess}`} role="status"><p>Signed by {record.signoff.typedSignature} on {new Date(record.signoff.signedAt).toLocaleString()}.</p><button className={styles.textButton} type="button" onClick={() => { updateRecord((current) => ({ ...current, signoff: null, participantSignoff: null })); setSignoffAttested(false); setSignoffName(""); setParticipantName(""); setParticipantSignature(""); setParticipantAttested(false); }}>Revoke sign-off</button></div> : <>
                   {canSignOff ? <>
                     <div className={styles.field}>
                       <label htmlFor="typed-signature">Type your name to sign</label>
@@ -3437,27 +4092,73 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   </div>}
                   <div className={styles.buttonRow}><button className={styles.button} type="button" onClick={saveSignoff} disabled={!canSignOff}>Sign inspection</button></div>
                 </>}
+                <div className={styles.buttonRow}>
+                  <button className={styles.secondaryButton} type="button" data-testid="add-location" disabled={locating} onClick={requestInspectionLocation}>
+                    {record.inspectionLocation ? "Update location" : "Add location"}
+                  </button>
+                  <span className={styles.statusText} role="status" data-testid="inspection-location-status">
+                    {locating
+                      ? "Locating…"
+                      : record.inspectionLocation
+                        ? `Location recorded: ${record.inspectionLocation.lat}, ${record.inspectionLocation.lng} (approx. 100 m)`
+                        : locationError
+                          ? locationError
+                          : "Location optional — never blocks signing."}
+                  </span>
+                </div>
                 {exportError && <p className={styles.inlineError} role="alert">{exportError}</p>}
                 {exportNotice && <p className={styles.statusText} role="status">{exportNotice}</p>}
+              </div>
+
+              <div className={`${styles.card} ${styles.signoffCard}`}>
+                <div className={styles.cardTitleRow}><div><h2>Participant sign-off</h2><p className={styles.cardLead}>The participant confirms the walkthrough findings.</p></div><ShieldCheck size={21} aria-hidden="true" /></div>
+                {record.participantSignoff ? <div className={`${styles.callout} ${styles.calloutSuccess}`} role="status"><p>Signed by {record.participantSignoff.typedSignature} on {new Date(record.participantSignoff.signedAt).toLocaleString()}.</p><button className={styles.textButton} type="button" onClick={() => { updateRecord((current) => ({ ...current, participantSignoff: null })); setParticipantAttested(false); setParticipantName(""); setParticipantSignature(""); }}>Revoke participant sign-off</button></div> : <>
+                  {canParticipantSign ? <>
+                    <div className={styles.field}>
+                      <label htmlFor="participant-name">Participant name</label>
+                      <input id="participant-name" className={styles.formInput} value={participantName} maxLength={120} onChange={(event) => setParticipantName(event.currentTarget.value)} placeholder="Participant name" />
+                    </div>
+                    <div className={styles.field}>
+                      <label htmlFor="participant-signature">Type participant name to sign</label>
+                      <input id="participant-signature" className={styles.formInput} value={participantSignature} maxLength={120} onChange={(event) => setParticipantSignature(event.currentTarget.value)} placeholder="Participant name" />
+                      <p className={styles.helpText}>Must match the participant name above. Only the name and typed signature are stored.</p>
+                    </div>
+                    <label className={styles.checkLabel}>
+                      <input type="checkbox" checked={participantAttested} onChange={(event) => setParticipantAttested(event.currentTarget.checked)} />
+                      <span>{PARTICIPANT_ATTESTATION_TEXT}</span>
+                    </label>
+                  </> : <div className={`${styles.callout} ${styles.calloutWarning} ${styles.signoffGate}`} role="status">
+                    <p>{form1083Blocker
+                      ? "Complete the required Profile details before participant sign-off."
+                      : "Capture every room video and finish the 11 evaluator decisions before participant sign-off."}</p>
+                    <button className={styles.textButton} type="button" onClick={() => form1083Blocker ? openProfileForRequiredDetails() : changeStep("review")}>
+                      {form1083Blocker ? "Fix Profile details" : "Continue review"}
+                    </button>
+                  </div>}
+                  <div className={styles.buttonRow}><button className={styles.button} type="button" onClick={saveParticipantSignoff} disabled={!canParticipantSign}>Sign as participant</button></div>
+                </>}
               </div>
 
               <div className={`${styles.card} ${styles.exportCard}`}>
                 <div className={styles.cardTitleRow}><div><h2>Export options</h2><p className={styles.cardLead}>Local files for the existing manual workflow.</p></div><FolderOpen size={21} aria-hidden="true" /></div>
                 <div className={styles.exportGrid}>
-                  <ExportButton title="Client-file export" detail="PDF · decisions, signature, and source stills" icon={<FileText size={19} aria-hidden="true" />} disabled={!completedResult || !record.signoff || exporting} busy={exporting} compact onClick={() => void downloadExport("client-file")} />
-                  <ExportButton title="Landlord fix-list" detail="PDF · evaluator-confirmed deficiencies and dates" icon={<FolderOpen size={19} aria-hidden="true" />} disabled={!completedResult || !record.signoff || exporting} busy={exporting} compact onClick={() => void downloadExport("landlord-fix-list")} />
-                  {canExportShare && <ExportButton title="Share export packet" detail="All four files · message or email to yourself" icon={<Share2 size={19} aria-hidden="true" />} disabled={!completedResult || !record.signoff || exporting} busy={exporting} compact onClick={() => void shareExports()} />}
+                  <ExportButton title="Client-file export" detail="PDF · decisions, signatures, and source stills" icon={<FileText size={19} aria-hidden="true" />} disabled={!completedResult || !record.signoff || !record.participantSignoff || exporting} busy={exporting} compact onClick={() => void downloadExport("client-file")} />
+                  <ExportButton title="Landlord fix-list" detail="Fix list (EN) · PDF · evaluator-confirmed deficiencies and dates" icon={<FolderOpen size={19} aria-hidden="true" />} disabled={!completedResult || !record.signoff || !record.participantSignoff || exporting} busy={exporting} compact onClick={() => void downloadExport("landlord-fix-list", "en")} />
+                  {canExportShare && <ExportButton title="Share export packet" detail={participantSigned ? "All five files · message or email to yourself" : "All four files · message or email to yourself"} icon={<Share2 size={19} aria-hidden="true" />} disabled={!completedResult || !record.signoff || !record.participantSignoff || exporting} busy={exporting} compact onClick={() => void shareExports()} />}
                   <div className={`${styles.exportItem} ${styles.exportItemCompact}`}>
                     <FileText className={styles.exportIcon} size={19} aria-hidden="true" />
                     <div className={styles.exportCopy}><strong>HMIS-ready Form 1083</strong><span>Local PDF or structured JSON draft</span></div>
                     <div className={styles.exportActionsInline}>
-                      <button className={styles.exportFormatButton} type="button" disabled={!completedResult || !record.signoff || exporting} onClick={() => void downloadExport("hmis-ready")}>PDF</button>
-                      <button className={styles.exportFormatButton} type="button" disabled={!completedResult || !record.signoff || exporting} onClick={() => void downloadExport("hmis-json")}>JSON</button>
+                      <button className={styles.exportFormatButton} type="button" disabled={!completedResult || !record.signoff || !record.participantSignoff || exporting} onClick={() => void downloadExport("hmis-ready")}>PDF</button>
+                      <button className={styles.exportFormatButton} type="button" disabled={!completedResult || !record.signoff || !record.participantSignoff || exporting} onClick={() => void downloadExport("hmis-json")}>JSON</button>
+                      <button className={styles.exportFormatButton} type="button" disabled={!completedResult || !record.signoff || !participantSigned || exporting} onClick={() => void downloadExport("lahsa-1083-json")}>LAHSA JSON</button>
                     </div>
                   </div>
+                  <ExportButton title="Fix list (ES)" detail="PDF · español · deficiencias confirmadas por el evaluador y fechas" icon={<FolderOpen size={19} aria-hidden="true" />} disabled={!completedResult || !record.signoff || !record.participantSignoff || exporting} busy={exporting} compact onClick={() => void downloadExport("landlord-fix-list", "es")} />
+                  <ExportButton title="Case note" detail={CASE_NOTE_DRAFT_LABEL} icon={<StickyNote size={19} aria-hidden="true" />} disabled={!completedResult || !record.signoff || !participantSigned || exporting} busy={exporting} compact onClick={() => void downloadExport("case-note")} />
                 </div>
                 {exporting && <p className={styles.statusText} role="status"><LoaderCircle className={styles.spinner} size={16} aria-hidden="true" /> Preparing local export…</p>}
-                {(!completedResult || !record.signoff) && <p className={styles.helpText}>Exports unlock after every room clip, 11 evaluator decisions, required Form 1083 details, sign-off, and attestation.</p>}
+                {(!completedResult || !record.signoff || !record.participantSignoff) && <p className={styles.helpText}>Exports unlock after every room clip, 11 evaluator decisions, required Form 1083 details, both signatures, and attestation.</p>}
                 <details className={styles.exportPrivacy}><summary>Handling notes</summary><p className={styles.privacyText}>Downloads stay on this device unless you share them. Local deletion does not remove downloaded exports or provider-side processing. This app does not submit to HMIS or confirm acceptance by LAHSA.</p></details>
               </div>
               </>}
@@ -3518,6 +4219,37 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                     <div className={styles.field}><label htmlFor="profile-unit-type">Unit type</label><select id="profile-unit-type" className={styles.formSelect} value={record.unitType} onChange={(event) => { const next = event.currentTarget.value as MoveInReadyUnitType | ""; if (next !== "") setUnitDescription(next, record.bathCount, record.roomIds.includes("hallway")); }}><option value="">Choose unit type</option><option value="studio">Studio</option><option value="1-bedroom">1 bedroom</option><option value="2-bedroom">2 bedroom</option><option value="3-bedroom">3 bedroom</option><option value="4-bedroom">4 bedroom</option></select></div>
                     <div className={styles.field}><label htmlFor="profile-baths">Bathrooms</label><select id="profile-baths" className={styles.formSelect} value={String(record.bathCount)} disabled={record.unitType === ""} onChange={(event) => { if (record.unitType !== "") setUnitDescription(record.unitType, Number(event.currentTarget.value), record.roomIds.includes("hallway")); }}><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></div>
                   </div>
+                  <fieldset className={styles.field} style={{ border: "none", padding: 0, margin: "12px 0 0" }}>
+                    <legend>Guided tour language</legend>
+                    <div role="radiogroup" aria-label="Guided tour language">
+                      <label className={styles.checkLabel} style={{ marginBottom: 4 }}>
+                        <input
+                          type="radio"
+                          name="tour-language"
+                          value="en"
+                          data-testid="tour-language-en"
+                          checked={record.tourLanguage !== "es"}
+                          onChange={() => setTourLanguage("en")}
+                        />
+                        <span>English</span>
+                      </label>
+                      <label className={styles.checkLabel} style={{ marginBottom: 4 }}>
+                        <input
+                          type="radio"
+                          name="tour-language"
+                          value="es"
+                          data-testid="tour-language-es"
+                          checked={record.tourLanguage === "es"}
+                          disabled={!esVoiceConfigured}
+                          onChange={() => setTourLanguage("es")}
+                        />
+                        <span>Español — recorrido guiado</span>
+                      </label>
+                    </div>
+                    {!esVoiceConfigured
+                      ? <p className={styles.helpText}>Spanish voice not configured.</p>
+                      : <p className={styles.helpText}>Tour narration and questions only. Review, sign-off, and exports stay in English.</p>}
+                  </fieldset>
                   {setupVoiceStep === null ? (
                     <button className={styles.secondaryButton} type="button" onClick={() => { setSetupVoiceTranscript(null); setSetupVoiceStep("unit"); }}>
                       <Mic size={16} aria-hidden="true" /> Describe by voice
@@ -3569,6 +4301,8 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                       ))}
                     </fieldset>
                   )}
+                  <label className={`${styles.checkLabel} ${styles.profileLeadershipCheck}`}><input type="checkbox" checked={record.participantVisualAlarmsRequired} onChange={(event) => updateRecord((current) => ({ ...current, participantVisualAlarmsRequired: event.currentTarget.checked }))} /><span>Participant needs visual (strobe) alarms</span></label>
+                  <p className={styles.helpText}>Adds a strobe-alarm check to the bedroom and hallway, and to the Fire Safety criteria.</p>
                   {record.fundingType === "hud" && <div className={`${styles.callout} ${styles.calloutWarning} ${styles.profileNotice}`} role="status"><strong>HQS inspection required.</strong> This HUD-funded unit cannot continue through the LAHSA Form 1083 walkthrough.</div>}
                   <div className={styles.profilePanelActions}>
                     <span>{profileSectionReady.unit ? "Unit and funding details are ready." : "Enter a pseudonym, funding type, and unit type."}</span>
@@ -3655,6 +4389,13 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   <button className={styles.dangerButton} type="button" onClick={() => void clearSession()}><Trash2 size={17} aria-hidden="true" /> Clear this walkthrough from this device</button>
                 </div>
               </details>
+              <details className={`${styles.settingsDisclosure} ${styles.settingsSubDisclosure}`} data-testid="profile-about-disclosure">
+                <summary><span><strong>About this checklist</strong><small>Demo scope · AI limits</small></span><ChevronDown size={19} aria-hidden="true" /></summary>
+                <div className={styles.settingsDisclosureContent}>
+                  <p className={styles.supportingText} data-testid="about-checklist-line">Demo checklist — not a verified Form 1083 mapping. Known AI misses are listed in the demo notes.</p>
+                  <p className={styles.helpText}>The staged-video evaluation and its miss list are recorded in the demo notes. No accuracy percentage is shown until a recorded run produces one.</p>
+                </div>
+              </details>
                 </div>
               </details>
             </div>
@@ -3705,6 +4446,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
         node={assistantNode}
         voiceOn={voiceOn}
         recording={recordingInProgress}
+        tourLanguage={record?.tourLanguage === "es" ? "es" : "en"}
         recordingCue={recordingInProgress ? filmingScriptForRoom(selectedRoomId)[recordingCueIndex] ?? null : null}
         onAction={handleAssistantAction}
         onVoiceToggle={() => {
@@ -3993,7 +4735,9 @@ function replaceRoomProposals(
     },
     decisions,
     pendingAnalysisIntent: current.pendingAnalysisIntent?.roomId === roomId ? null : current.pendingAnalysisIntent,
+    analysisQueue: dequeueAnalysisQueue(current.analysisQueue ?? [], roomId),
     signoff: null,
+    participantSignoff: null,
   };
 }
 
@@ -4017,6 +4761,7 @@ function clearRoomAnalysisState(current: MoveInReadyInspection, roomId: MoveInRe
     decisions,
     pendingAnalysisIntent: current.pendingAnalysisIntent?.roomId === roomId ? null : current.pendingAnalysisIntent,
     signoff: null,
+    participantSignoff: null,
   };
 }
 
@@ -4047,6 +4792,7 @@ function invalidateElementEvidence(
     proposals,
     decisions,
     signoff: null,
+    participantSignoff: null,
   };
 }
 
@@ -4075,6 +4821,7 @@ function invalidateRoomEvidence(
     decisions,
     pendingAnalysisIntent: current.pendingAnalysisIntent?.roomId === roomId ? null : current.pendingAnalysisIntent,
     signoff: null,
+    participantSignoff: null,
   };
 }
 

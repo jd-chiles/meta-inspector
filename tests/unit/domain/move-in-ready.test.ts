@@ -15,6 +15,8 @@ import {
   validateEvidenceReference,
   validateEvaluatorDecision,
   validateEvaluatorSignoff,
+  validateParticipantSignoff,
+  PARTICIPANT_ATTESTATION_TEXT,
   validateVideoAnalysisIdentity,
   validateModelProposalSet,
   type EvidenceReference,
@@ -559,6 +561,26 @@ describe("Move-in Ready inspection domain", () => {
     ).toBe(false);
     expect(validateEvaluatorSignoff({ ...SIGNOFF, attested: false }).ok).toBe(false);
     expect(validateEvaluatorSignoff({ ...SIGNOFF, signedAt: "yesterday" }).ok).toBe(false);
+  });
+
+  it("requires a participant co-signature that matches the participant and explicit attestation", () => {
+    expect(PARTICIPANT_ATTESTATION_TEXT).toBe(
+      "I walked through this unit with the evaluator. The findings above match what I saw.",
+    );
+    const participant = {
+      participantName: "Pat Rivera",
+      typedSignature: "Pat Rivera",
+      attested: true,
+      signedAt: TIMESTAMP,
+    };
+    expect(validateParticipantSignoff(participant).ok).toBe(true);
+    expect(
+      validateParticipantSignoff({ ...participant, typedSignature: "Someone Else" }).ok,
+    ).toBe(false);
+    expect(validateParticipantSignoff({ ...participant, attested: false }).ok).toBe(false);
+    expect(validateParticipantSignoff({ ...participant, signedAt: "yesterday" }).ok).toBe(false);
+    expect(validateParticipantSignoff({ ...participant, participantName: "" }).ok).toBe(false);
+    expect(validateParticipantSignoff({ ...participant, ssn: "000-00-0000" }).ok).toBe(false);
   });
 
   it("does not derive an inspection outcome from model proposals or unreviewed elements", () => {

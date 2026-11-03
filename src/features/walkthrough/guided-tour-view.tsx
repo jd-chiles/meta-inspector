@@ -29,18 +29,29 @@ import {
 import type { MoveInReadyInspection } from "./inspection-store";
 import type { StoredVideoClip } from "./video-store";
 import { fixListTier, reinspectionChecklist } from "./fix-list";
-import { SETUP_VOICE_QUESTIONS, TOUR_REPROMPTS, VOICE_ROOM_CHECKS } from "./voice-checks";
+import {
+  SETUP_VOICE_QUESTIONS,
+  SETUP_VOICE_QUESTIONS_ES,
+  TOUR_REPROMPTS,
+  TOUR_REPROMPTS_ES,
+  checksForRoom,
+} from "./voice-checks";
 import { filmingScriptForRoom } from "./assistant-script";
-import { parseRoomId } from "../../domain/move-in-ready";
+import { ANALYSIS_WINDOW_NOTE } from "../../domain/video-format";
 import { parseBathCount, parseUnitType, parseYesNo } from "./voice-parse";
 import { speakPrompt } from "./voice-conversation";
 import VoicePrompt, { type VoicePromptPhase } from "./voice-prompt";
 import WalkthroughVideoCapture from "./video-capture";
+import DetectorTestCapture, { type CapturedDetectorStill } from "./detector-test-capture";
+import { DETECTOR_TEST_STILL_PREFIX, isDetectorPresenceQuestion, isDetectorTestRoom } from "./detector-test";
 import {
   deriveTourNode,
   elementLabel,
   filmRoomShots,
   guidedReviewQueue,
+  nameReadbackScript,
+  REVIEW_VOICE_QUESTION,
+  REVIEW_VOICE_QUESTION_ES,
   reviewVoiceAction,
   tourNodeKey,
   tourProgress,
@@ -64,6 +75,8 @@ export interface GuidedTourBindings {
   batchActive: boolean;
   batchProgress: { done: number; total: number; roomLabel: string; startedAt: number } | null;
   batchFailedRooms: readonly string[];
+  /** Persisted offline analysis queue (REQ-L2): room ids awaiting analysis. */
+  analysisQueue: readonly MoveInReadyRoomId[];
   analysisComplete: boolean;
   setEvaluatorName: (name: string) => void;
   setUnitType: (unit: MoveInReadyUnitType) => void;
@@ -74,6 +87,8 @@ export interface GuidedTourBindings {
   onClipChange: (clip: StoredVideoClip | null, roomId: string) => void;
   onRecordingStateChange: (recording: boolean) => void;
   answerVoiceCheck: (roomId: MoveInReadyRoomId, question: string, answer: "yes" | "no" | "skipped") => void;
+  /** Persist a live detector-test still as room evidence (REQ-R3). Never blocks the tour. */
+  attachDetectorStill: (roomId: MoveInReadyRoomId, still: CapturedDetectorStill) => Promise<{ ok: true } | { ok: false; message: string }>;
   grantBatchConsent: () => void;
   startBatchAnalysis: () => void;
   cancelBatchAnalysis: () => void;
@@ -121,8 +136,15 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
   const [voicePhase, setVoicePhase] = useState<VoicePromptPhase | null>(null);
   const [speechNonce, setSpeechNonce] = useState(0);
   const [nameDraft, setNameDraft] = useState("");
+  const [detectorSkipped, setDetectorSkipped] = useState<ReadonlySet<MoveInReadyRoomId>>(new Set());
+  const [detectorSaving, setDetectorSaving] = useState(false);
+  const [detectorError, setDetectorError] = useState<string | null>(null);
   const speechControllerRef = useRef<AbortController | null>(null);
   const topRef = useRef<HTMLDivElement>(null);
+
+  const lang = bindings.record.tourLanguage === "es" ? "es" : "en";
+  const setupQuestions = lang === "es" ? SETUP_VOICE_QUESTIONS_ES : SETUP_VOICE_QUESTIONS;
+  const reprompts = lang === "es" ? TOUR_REPROMPTS_ES : TOUR_REPROMPTS;
 
   const node: GuidedTourNode = useMemo(() => deriveTourNode({
     started,
@@ -153,7 +175,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
     capturedRoomCount: bindings.capturedRoomCount,
     batchActive: bindings.batchActive,
     reviewPosition,
-  });
+  }, lang);
 
   const sections = useMemo(
     () => tourProgress(bindings.record, bindings.capturedRoomCount, analysisSettled),
@@ -173,12 +195,13 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
   useEffect(() => {
     stopSpeech();
     setVoicePhase(null);
+    setDetectorError(null);
     topRef.current?.scrollIntoView({ block: "start" });
     if (!speakOn || script === "") return;
     const controller = new AbortController();
     speechControllerRef.current = controller;
     setTourSpeaking(true);
-    void speakPrompt(script, controller.signal).then(
+    void speakPrompt(script, controller.signal, { language: lang }).then(
       () => {
         if (speechControllerRef.current === controller) {
           speechControllerRef.current = null;
@@ -197,7 +220,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
       if (speechControllerRef.current === controller) speechControllerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeKey, speechNonce, speakOn]);
+  }, [nodeKey, speechNonce, speakOn, lang]);
 
   const sayNow = useCallback((text: string) => {
     if (!speakOn) return;
@@ -205,7 +228,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
     const controller = new AbortController();
     speechControllerRef.current = controller;
     setTourSpeaking(true);
-    void speakPrompt(text, controller.signal).then(
+    void speakPrompt(text, controller.signal, { language: lang }).then(
       () => {
         if (speechControllerRef.current === controller) {
           speechControllerRef.current = null;
@@ -219,7 +242,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
         }
       },
     );
-  }, [speakOn, stopSpeech]);
+  }, [speakOn, stopSpeech, lang]);
 
   // The camera follows the tour: entering a film node selects that room.
   useEffect(() => {
@@ -263,7 +286,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
   // checklist highlights the cue being spoken.
   useEffect(() => {
     if (node.kind !== "film-room" || !tourRecording || !speakOn) return;
-    const cues = filmingScriptForRoom(node.roomId);
+    const cues = filmingScriptForRoom(node.roomId, lang);
     const timers = cues.map((cue, index) =>
       window.setTimeout(() => { setShotIndex(index); sayNow(cue); }, 1500 + index * 8000));
     return () => {
@@ -272,7 +295,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
       stopSpeech();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeKey, tourRecording, speakOn]);
+  }, [nodeKey, tourRecording, speakOn, lang]);
 
   const skipElement = useCallback((elementId: MoveInReadyElementId) => {
     setSkipped((current) => new Set(current).add(elementId));
@@ -294,8 +317,8 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
       bindings.setUnitType(parsed);
       return;
     }
-    if (text.trim()) sayNow(TOUR_REPROMPTS.unitType);
-  }, [bindings, sayNow]);
+    if (text.trim()) sayNow(reprompts.unitType);
+  }, [bindings, sayNow, reprompts]);
 
   const handleBathsTranscript = useCallback((text: string) => {
     bindings.onVoiceTranscript(text);
@@ -305,8 +328,8 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
       setBathsConfirmed(true);
       return;
     }
-    if (text.trim()) sayNow(TOUR_REPROMPTS.baths);
-  }, [bindings, sayNow]);
+    if (text.trim()) sayNow(reprompts.baths);
+  }, [bindings, sayNow, reprompts]);
 
   const handleCheckTranscript = useCallback((roomId: MoveInReadyRoomId, question: string) => (text: string) => {
     bindings.onVoiceTranscript(text);
@@ -315,8 +338,8 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
       bindings.answerVoiceCheck(roomId, question, parsed);
       return;
     }
-    if (text.trim()) sayNow(TOUR_REPROMPTS.yesNo);
-  }, [bindings, sayNow]);
+    if (text.trim()) sayNow(reprompts.yesNo);
+  }, [bindings, sayNow, reprompts]);
 
   const handleReviewTranscript = useCallback((elementId: MoveInReadyElementId) => (text: string) => {
     bindings.onVoiceTranscript(text);
@@ -329,8 +352,8 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
       bindings.reviewProposalDraft(elementId);
       return;
     }
-    if (text.trim()) sayNow(TOUR_REPROMPTS.yesNo);
-  }, [bindings, sayNow]);
+    if (text.trim()) sayNow(reprompts.yesNo);
+  }, [bindings, sayNow, reprompts]);
 
   return (
     <div className={styles.tour} data-testid="guided-tour" data-node={nodeKey}>
@@ -396,8 +419,9 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
           <div className={flowStyles.card}>
             <p className={flowStyles.draftLabel}>One thing before confirmations</p>
             <VoicePrompt
-              question={SETUP_VOICE_QUESTIONS.evaluatorName}
+              question={setupQuestions.evaluatorName}
               autoSpeak={speakOn}
+              language={lang}
               transcript={bindings.voiceTranscript}
               onTranscript={(text) => {
                 bindings.onVoiceTranscript(text);
@@ -408,7 +432,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
                 // different name replaces the draft.
                 if (nameDraft.trim().length === 0) {
                   setNameDraft(clean);
-                  sayNow(`I heard ${clean}. Say yes to save it, or tap Save.`);
+                  sayNow(nameReadbackScript(clean, lang));
                   return;
                 }
                 const parsed = parseYesNo(clean);
@@ -416,10 +440,10 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
                   bindings.setEvaluatorName(nameDraft.trim().slice(0, 80));
                 } else if (parsed === "no") {
                   setNameDraft("");
-                  sayNow(SETUP_VOICE_QUESTIONS.evaluatorName);
+                  sayNow(setupQuestions.evaluatorName);
                 } else {
                   setNameDraft(clean);
-                  sayNow(`I heard ${clean}. Say yes to save it, or tap Save.`);
+                  sayNow(nameReadbackScript(clean, lang));
                 }
               }}
               onPhaseChange={setVoicePhase}
@@ -450,8 +474,9 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
         {node.kind === "ask-unit" && (
           <div className={flowStyles.card}>
             <VoicePrompt
-              question={SETUP_VOICE_QUESTIONS.unitTypeTour}
+              question={setupQuestions.unitTypeTour}
               autoSpeak={speakOn}
+              language={lang}
               transcript={bindings.voiceTranscript}
               onTranscript={handleUnitTranscript}
               onPhaseChange={setVoicePhase}
@@ -470,8 +495,9 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
         {node.kind === "ask-baths" && (
           <div className={flowStyles.card}>
             <VoicePrompt
-              question={SETUP_VOICE_QUESTIONS.baths}
+              question={setupQuestions.baths}
               autoSpeak={speakOn}
+              language={lang}
               transcript={bindings.voiceTranscript}
               onTranscript={handleBathsTranscript}
               onPhaseChange={setVoicePhase}
@@ -519,7 +545,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
             <div className={flowStyles.card} data-testid="tour-shot-list">
               <p className={flowStyles.draftLabel}>{roomLabel(node.roomId)} · shot list</p>
               <ol className={styles.shotList}>
-                {filmRoomShots(node.roomId).map((shot, index) => (
+                {filmRoomShots(node.roomId, lang).map((shot, index) => (
                   <li
                     key={`${node.roomId}:${index}`}
                     className={index === shotIndex ? styles.shotActive : undefined}
@@ -537,7 +563,8 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
               roomId={node.roomId}
               capturedRoomCount={bindings.capturedRoomCount}
               capturedRoomIds={bindings.capturedRoomIds}
-              overlayCue={tourRecording ? filmingScriptForRoom(node.roomId)[shotIndex] ?? null : null}
+              queuedRoomIds={bindings.analysisQueue}
+              overlayCue={tourRecording ? filmingScriptForRoom(node.roomId, lang)[shotIndex] ?? null : null}
               onRoomChange={(roomId) => bindings.selectRoom(roomId)}
               onRecordingStateChange={(recording) => {
                 bindings.onRecordingStateChange(recording);
@@ -565,26 +592,48 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
         )}
 
         {node.kind === "room-check" && (() => {
-          const parsed = parseRoomId(node.roomId);
-          const question = parsed ? VOICE_ROOM_CHECKS[parsed.type][node.index] : undefined;
+          const question = checksForRoom(bindings.record, node.roomId, lang)[node.index];
           if (!question) return null;
+          const showDetectorTest = isDetectorTestRoom(node.roomId) &&
+            isDetectorPresenceQuestion(question) &&
+            !detectorSkipped.has(node.roomId);
+          const detectorCaptured = (bindings.record.clipIdentities[node.roomId]?.evidence ?? [])
+            .some((reference) => reference.stillId.startsWith(DETECTOR_TEST_STILL_PREFIX));
           return (
             <div className={flowStyles.card}>
               <p className={flowStyles.draftLabel}>{roomLabel(node.roomId)} · in-person check</p>
               <VoicePrompt
-                key={`${node.roomId}:${node.index}`}
+                key={`${node.roomId}:${node.index}:${lang}`}
                 question={question}
                 autoSpeak={speakOn}
+                language={lang}
                 transcript={bindings.voiceTranscript}
                 onTranscript={handleCheckTranscript(node.roomId, question)}
                 onPhaseChange={setVoicePhase}
               >
                 <div className={flowStyles.voiceTapRow}>
-                  <button className={flowStyles.button} type="button" data-testid="tour-check-yes" onClick={() => bindings.answerVoiceCheck(node.roomId, question, "yes")}>Yes</button>
+                  <button className={flowStyles.button} type="button" data-testid="tour-check-yes" onClick={() => bindings.answerVoiceCheck(node.roomId, question, "yes")}>{lang === "es" ? "Sí" : "Yes"}</button>
                   <button className={flowStyles.button} type="button" data-testid="tour-check-no" onClick={() => bindings.answerVoiceCheck(node.roomId, question, "no")}>No</button>
-                  <button className={flowStyles.textButton} type="button" onClick={() => bindings.answerVoiceCheck(node.roomId, question, "skipped")}>Skip</button>
+                  <button className={flowStyles.textButton} type="button" onClick={() => bindings.answerVoiceCheck(node.roomId, question, "skipped")}>{lang === "es" ? "Omitir" : "Skip"}</button>
                 </div>
               </VoicePrompt>
+              {showDetectorTest && (
+                <DetectorTestCapture
+                  language={lang}
+                  saving={detectorSaving}
+                  saveError={detectorError}
+                  alreadyCaptured={detectorCaptured}
+                  onCapture={(still) => {
+                    setDetectorSaving(true);
+                    setDetectorError(null);
+                    void bindings.attachDetectorStill(node.roomId, still).then((result) => {
+                      setDetectorSaving(false);
+                      if (!result.ok) setDetectorError(result.message);
+                    });
+                  }}
+                  onSkip={() => setDetectorSkipped((current) => new Set(current).add(node.roomId))}
+                />
+              )}
             </div>
           );
         })()}
@@ -592,6 +641,15 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
         {node.kind === "analyze" && (
           <div className={flowStyles.card} data-testid="tour-analyze">
             <h2>AI analysis</h2>
+            <p className={flowStyles.helpText}>{ANALYSIS_WINDOW_NOTE}</p>
+            <p className={flowStyles.cardLead} role="status" data-testid="tour-analysis-queue-counts">
+              {bindings.analysisQueue.length === 0
+                ? "No rooms waiting for analysis."
+                : `${bindings.analysisQueue.length} room${bindings.analysisQueue.length === 1 ? "" : "s"} queued for analysis`}
+              {bindings.batchActive && bindings.batchProgress
+                ? ` · ${bindings.batchProgress.total - bindings.batchProgress.done} in progress`
+                : ""}
+            </p>
             {bindings.analysisMode !== "live" || !bindings.online ? (
               <>
                 <p className={flowStyles.cardLead}>
@@ -646,10 +704,17 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
           const proposal = bindings.record.proposals[node.elementId];
           const tier = fixListTier(node.elementId);
           if (!proposal) {
+            const draftlessDecision = bindings.record.decisions[node.elementId];
+            const draftlessPrior = draftlessDecision?.status === "unreviewed" ? draftlessDecision.priorDeficiency : undefined;
             return (
               <div className={flowStyles.card} data-testid="tour-review-card" data-noproposal="true">
                 <p className={flowStyles.draftLabel}>{tier.label}{reviewPosition ? ` · item ${reviewPosition.index} of ${reviewPosition.total}` : ""}</p>
                 <h2>{elementLabel(node.elementId)}</h2>
+                {draftlessPrior && (
+                  <p className={flowStyles.helpText} data-testid="tour-reinspection-tag">
+                    Re-inspection: a prior deficiency is on file — “{draftlessPrior.issueDescription}” Compare its Before stills in full review, then decide again.
+                  </p>
+                )}
                 <p className={flowStyles.helpText}>No AI draft — the footage had no reviewable evidence for this item. Decide it yourself below.</p>
                 <div className={styles.reviewActions}>
                   <button
@@ -676,10 +741,17 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
             );
           }
           const approved = proposal.modelSuggestion === "A";
+          const tourDecision = bindings.record.decisions[node.elementId];
+          const tourPrior = tourDecision?.status === "unreviewed" ? tourDecision.priorDeficiency : undefined;
           return (
             <div className={flowStyles.card} data-testid="tour-review-card">
               <p className={flowStyles.draftLabel}>{tier.label}{reviewPosition ? ` · item ${reviewPosition.index} of ${reviewPosition.total}` : ""}</p>
               <h2>{elementLabel(node.elementId)}</h2>
+              {tourPrior && (
+                <p className={flowStyles.helpText} data-testid="tour-reinspection-tag">
+                  Re-inspection: a prior deficiency is on file — “{tourPrior.issueDescription}” Compare its Before stills in full review, then decide again.
+                </p>
+              )}
               <p className={styles.suggestion} data-approved={approved}>
                 AI suggests: {approved ? "Approved" : "Deficient"} · confidence {proposal.confidence}%
                 {proposal.state === "needs-human-check" ? " · needs a human check" : ""}
@@ -690,8 +762,9 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
               )}
               <VoicePrompt
                 key={node.elementId}
-                question="Say yes to confirm this draft, or no to edit it."
+                question={lang === "es" ? REVIEW_VOICE_QUESTION_ES : REVIEW_VOICE_QUESTION}
                 autoSpeak={false}
+                language={lang}
                 transcript={bindings.voiceTranscript}
                 onTranscript={handleReviewTranscript(node.elementId)}
                 onPhaseChange={setVoicePhase}

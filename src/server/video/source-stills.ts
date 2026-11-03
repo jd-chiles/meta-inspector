@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { VIDEO_SAMPLE_TIMESTAMP_TOLERANCE_MS } from "../../domain/video-format";
+import { ANALYSIS_CLIP_CAP_SECONDS, VIDEO_SAMPLE_TIMESTAMP_TOLERANCE_MS } from "../../domain/video-format";
 import { VideoSegmentError } from "./errors";
 
 const MAX_EXTRACTED_FRAMES = 42;
@@ -77,6 +77,9 @@ export async function decodeSourceFrames(
       "-max_pixels", String(MAX_DECODED_PIXELS), "-i", inputPath,
       "-map", "0:v:0", "-an", "-sn", "-dn", "-vf", filter,
       "-fps_mode", "passthrough", "-frames:v", String(frameIndexes.length), "-q:v", "4",
+      // REQ-S3: analysis decodes only the first 30 s of the temporary copy.
+      // The caller's validated upload bytes are never modified.
+      "-t", String(ANALYSIS_CLIP_CAP_SECONDS),
       "-f", "image2", outputPattern,
     ];
     const decodedTimestampsMs = await runFfmpeg(

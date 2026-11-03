@@ -1,5 +1,53 @@
 # Change log
 
+## Sprint 5 — Observability (REQ-O1, REQ-O2) — November 3, 2026 (Muse Code)
+
+- REQ-O1: server-only Langfuse tracing (`src/server/observability/langfuse-trace.ts`, `langfuse@3.39.2`). One trace per analysis attempt shared by the segment and map stages via a deterministic trace id; spans per phase (`preflight-decode`, `sam-upload`, `sam-concept:*`, `select-candidates`, `frame-decode`, `validate-proposals`) plus a `muse-map` generation; best-effort flush per request. Configured only when both `LANGFUSE_SECRET_KEY` and `LANGFUSE_PUBLIC_KEY` are set (optional `LANGFUSE_BASEURL`); unset means zero overhead and no network calls, and tracing never throws into the pipeline. Payloads are metadata only — never media bytes, pseudonyms, names, keys, or provider bodies (Muse response text excepted as the debugging target). Imported only by server code (both video API routes); no client path reaches it.
+- REQ-O2: eval dataset `meta-inspect-walkthrough-v1` (`src/server/observability/eval-cases.ts`) with five validated reference-only seed cases (water-flow-accuracy, object-classification, evidence-grounding, uncertainty-abstention, false-positives) plus owner-run `scripts/langfuse-eval-push.mjs` (`--dry-run` verified; refuses invented hashes and missing keys; never in CI). Scoring runs in Langfuse against recorded traces.
+- Verification: 12 new unit tests, no network; segment suite unaffected. Full merged gates below.
+
+## Sprint 4 — Reach, honesty-gated (REQ-R1…R4) — November 3, 2026 (Muse Code)
+
+- REQ-R1: Home "Building pre-screen" card; blank shows the explainer, the literal `123 Demo St (example)` shows a labeled example under `Illustrative example — live records not connected.`, anything else answers `Live check not connected for this address.` No live LAHD path (dataset unverified, no env var); queries never persisted or sent.
+- REQ-R2: `tourLanguage` record field + Profile toggle (ES disabled with `Spanish voice not configured.` unless server-only `FISH_VOICE_ID_ES` is set); Spanish narration for tour setup/filming/checks/analyze/review/finish, sí/si/no + Spanish numbers in `voice-parse`, ES speak path (400/503 fail-closed), `VOICE_CLIP_TEXTS_ES` inventory + `generate-voice --lang es` into `public/voice/es/` (not yet generated — needs owner-approved billed synthesis). AI Guide popup stays English and says so. Review/sign-off/exports stay English.
+- REQ-R3: bedroom/living-room/hallway detector cards show `Press the detector's test button now` with tap-to-start `Capture still` (canvas snapshot, JPEG bounds, stored as `detector-test-` local evidence, visible in the Fire Safety picker) and `Skip still` (records nothing). Human chirp answer unchanged.
+- REQ-R4: Profile About line plus the `docs/DEMO.md` scorecard shell with BLANK run fields (live protocol run deferred, spend-gated). No accuracy percentage anywhere.
+- Integration: added strobe-exclusion assertions (EN+ES) and an ES review-item narration test.
+- Verification: fixture/unit only; full merged gates below.
+
+## Sprint 3 — Lifecycle (REQ-L1, REQ-L2, REQ-L3) — November 3, 2026 (Muse Code)
+
+- REQ-L1: signed records with any D decision show "Re-inspect deficiencies" on Home; starting snapshots each D deficiency into `priorDeficiency`, resets those decisions to unreviewed and both sign-offs, and the tour queues only those elements; review cards show Before stills (best-effort, honest missing-stills copy); `deriveFinalInspectionResult` unchanged. Saving while still unreviewed preserves the snapshot.
+- REQ-L2: persisted `analysisQueue` on the record (enqueue on save, dequeue on removal/analysis, prune on room removal); runner triggers the batch driver on online/`visibilitychange` under walkthrough/batch consent; per-room "Analysis queued" chips + tour queue counts. The runner mirrors REQ-S5's failure guard: a finished failed batch never auto-restarts; retry stays manual.
+- REQ-L3: sign-off "Add location" (tap-only, 10 s timeout) storing rounded `inspectionLocation`; denial shows "Location not recorded" and never blocks; consumed by REQ-E1 as `property_address.geolocation` (null when absent).
+- Tests: 25 unit + new L1 re-inspection and L2 offline-queue e2e specs. Full merged gates below.
+
+## Sprint 2 — Workflow outputs (REQ-E1, REQ-E2, REQ-E3) — November 3, 2026 (Muse Code)
+
+- REQ-E1: `src/export/lahsa-1083.ts` `buildLahsa1083Json` as export kind `lahsa-1083-json` ("LAHSA JSON" button): `inspection_id`, `inspection_timestamp`, boolean `checklist_criteria` plus nested `fire_safety` (`emergency_exit`, `unit_smoke_detectors`, `common_area_detectors`, `visual_alarms_required`, `visual_alarms_approved`), derived `overall_determination` ("APPROVED" only when every criterion is true, else "NOT APPROVED") with an internal consistency assertion, dual `signatures`, null-not-invented address/HMIS fields, and the rule-7 `mapping_notice`. Gates: complete A/D decisions (needs-human-check blocks), both signatures, LAHSA funding. `additional_standards` derives from aggregate Fire safety (interpretation — owner to confirm against the program spec). Built against the canonical Sprint 1 contracts (no placeholders remain).
+- REQ-E2: `case-note` export (`text/plain`, shareable): deterministic template delegating gating/determination to the LAHSA JSON builder, labeled "Case note draft — review before pasting into HMIS." Optional polish via `POST /api/exports/polish-case-note` only when `TEXT_POLISH_ENABLED=1`; every failure returns the template.
+- REQ-E3: `landlord-fix-list` gains `en`|`es` (`FIX_LIST_STRINGS` table, "Fix list (EN/ES)" actions, `-es` filename, plain-language header, per-D rows, agency from `evaluatorAgencyName`, hostile-text escaping test).
+- Verification: 42+ unit tests; full merged gates below.
+
+## Sprint 1 — Meta voice + form legitimacy (REQ-V1, REQ-F1, REQ-F2) — November 3, 2026 (Muse Code)
+
+- REQ-V1: ASR defaults to Muse Voice Transcribe (`POST {base}/asr/transcribe`, `muse-voice-transcribe-1.0`, cookbook multipart, mic clips to mono 24 kHz s16 WAV via server FFmpeg, 20 s timeout). `VOICE_ASR_PROVIDER=muse|fish` (default muse); any Muse failure falls back to Fish once with `providerUsed` surfaced as "Transcribed by backup provider" (silent fallback would violate rule 4). Empty transcript is silence. TTS stays Fish. No live Meta ASR call made (fixture only).
+- REQ-F1: dual attestation — `ParticipantSignoff` mirroring `EvaluatorSignoff` ("I walked through this unit with the evaluator. The findings above match what I saw."), record field, sign-off UI block, every signoff reset clears both (either order allowed), export gates + both signatures in all PDFs/JSON. Name + signature only (VAWA posture).
+- REQ-F2: `participantVisualAlarmsRequired` flag + Profile toggle; bedroom/hallway gain the strobe check via record-aware `checksForRoom`, Fire Safety criteria mention visual alarms. No new SAM concept.
+- Verification: unit + e2e dual-sign coverage; full merged gates below.
+
+## Sprint 0 — Analysis speed package (REQ-S1…S6) — November 3, 2026 (Muse Code)
+
+- REQ-S1: `SAM_MAX_CONCURRENT_CONCEPTS` (int, clamp 1–6, default 6; safe unset). 6-wide live acceptance UNVERIFIED (no live key); if a live run shows attributable 429/5xx at 6-wide, drop the default to 4 with a dated record. Never claim 6-wide without that record.
+- REQ-S2: batch driver on `runRoomBatch` (max 2 rooms, per-room generations/aborts/identity, cancel-everything, progress = settled/total, runs on capture + guided). Server guard isolates by full request identity (cap 2/session).
+- REQ-S3: analysis uses the first 30 s (`ANALYSIS_CLIP_CAP_SECONDS`, FFmpeg `-t 30` on the temp copy, original untouched, ≥30 s evidence dropped); segment responses and the tour state the window note.
+- REQ-S4: map payload 12 earliest sample stills / 4 MB. Supersedes the "at most 30 stills per room" note in `docs/DECISIONS.md` decision 9.
+- REQ-S5: analyze-on-save via the pure `shouldAutoEnqueueOnSave` gate (tour + batch consent, LAHSA, live, online, deduped; skips on manual-in-flight, unresolved failures, MOV; offline saves enqueue nothing immediate). Covered by a 15-case unit matrix.
+- REQ-S6: `VIDEO_PROMPTS` drops bathroom smoke/CO detectors and kitchen CO detector. Kitchen filming cues still mention detectors (voice-pinned; filming/analysis diverge there by design).
+- Staged-clip before/after timings UNVERIFIED (no live key; no numbers recorded).
+- Integration fixes on the merged tree: batch-finish auto-navigation waits for filming completeness (partial auto-batches no longer yank capture to review); L2 runner mirrors the S5 failure guard; no-restart e2e rewritten for auto-start + failure-guard semantics (1 auto + 3 retry = 4 segments, no restart on 4th save); Sign-Off e2e asserts export reachability via scroll (dual sign-off + new exports legitimately extend the screen); capture room-header actions wrap (queued chip overflowed 360px).
+- Merged verification (all fixture/mocked except the honest UNVERIFIED notes above; `test:live` never run): `verify-sdd.mjs` exit 0; `lint` 0 errors (2 pre-existing-kind warnings); `typecheck` clean; `test:unit` 54 files, 634 passed / 3 skipped; `build` success; `playwright --workers=1` 47/47 green (incl. new L1 re-inspection + L2 offline-queue specs). No native SDD approval/evidence claimed.
+
 ## Review friction removal + room skip + bathroom scope — November 2, 2026 (Muse Code)
 
 Owner: review forced a checkbox tap per requirement, AI-asked answers did

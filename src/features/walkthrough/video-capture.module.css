@@ -22,8 +22,9 @@
 .roomHeadingCopy { display: grid; min-width: 0; gap: 1px; }
 .roomHeadingCopy > span { color: var(--video-muted); font-size: 0.62rem; font-weight: 800; letter-spacing: 0.08em; }
 .roomHeadingCopy h3 { margin: 0; color: var(--video-ink); font-size: 1.04rem; font-weight: 800; line-height: 1.2; letter-spacing: -0.01em; }
-.roomHeaderActions { display: flex; flex: 0 0 auto; align-items: center; gap: 0.55rem; }
+.roomHeaderActions { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.55rem; }
 .roomSaved { flex: 0 0 auto; color: var(--video-muted); font-size: 0.68rem; font-weight: 700; }
+.roomQueued { flex: 0 0 auto; border-radius: 999px; padding: 0.15rem 0.5rem; background: #fdf3e3; color: #8a5a12; font-size: 0.66rem; font-weight: 800; box-shadow: inset 0 0 0 1px #ecd3a3; white-space: nowrap; }
 .roomPickerToggle { display: none; min-height: 2.15rem; align-items: center; justify-content: center; gap: 0.25rem; border: 1px solid #c7d5e4; border-radius: 0.55rem; padding: 0.35rem 0.55rem; background: #fff; color: #1e4e82; font: inherit; font-size: 0.68rem; font-weight: 800; cursor: pointer; touch-action: manipulation; }
 .roomPickerToggle:focus-visible { outline: 3px solid #6da4e4; outline-offset: 2px; }
 .roomPickerToggle:disabled { opacity: 0.55; cursor: not-allowed; }
@@ -51,6 +52,7 @@
 .roomStepCurrent .roomStepNumber { background: #245da8; color: #fff; }
 .roomStepSaved .roomStepNumber { background: #e5f4e9; color: #256240; }
 .roomStepName { min-width: 0; overflow: hidden; font-size: 0.67rem; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+.roomStepQueue { flex: 0 0 auto; border-radius: 999px; padding: 0.1rem 0.4rem; background: #fdf3e3; color: #8a5a12; font-size: 0.6rem; font-weight: 800; box-shadow: inset 0 0 0 1px #ecd3a3; }
 .roomStep:focus-visible { outline: 3px solid #6da4e4; outline-offset: 2px; }
 .roomStep:disabled { cursor: not-allowed; opacity: 0.65; }
 

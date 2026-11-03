@@ -4,7 +4,11 @@ import {
   MOVE_IN_READY_ELEMENTS,
   MOVE_IN_READY_ELEMENT_IDS,
 } from "../../../src/domain/move-in-ready";
-import { MOVE_IN_READY_ELEMENT_CRITERIA } from "../../../src/domain/element-criteria";
+import {
+  MOVE_IN_READY_ELEMENT_CRITERIA,
+  VISUAL_ALARMS_FIRE_SAFETY_CRITERION,
+  checklistItemsForElement,
+} from "../../../src/domain/element-criteria";
 
 describe("Move-in Ready video criteria reference", () => {
   it("provides displayable checklist criteria for each stable element", () => {
@@ -33,5 +37,19 @@ describe("Move-in Ready video criteria reference", () => {
       "11a · Unit: working smoke and carbon monoxide detectors on every occupied unit level; smoke detectors in a hallway adjacent to a bedroom where practicable; the Form 1083 alarm provision where applicable, without recording health details.",
       "11b · Public/common areas: sufficient smoke detectors, with at least one in each area, including shared laundry rooms, hallways, and stairwells.",
     ]);
+  });
+
+  it("mentions visual alarms in Fire Safety criteria only when the record flags them", () => {
+    const base = MOVE_IN_READY_ELEMENT_CRITERIA["demo-smoke-co"].checklistItems;
+    expect(checklistItemsForElement({ participantVisualAlarmsRequired: false }, "demo-smoke-co")).toEqual(base);
+    expect(checklistItemsForElement({}, "demo-smoke-co")).toEqual(base);
+    expect(checklistItemsForElement({ participantVisualAlarmsRequired: true }, "demo-smoke-co")).toEqual([
+      ...base,
+      VISUAL_ALARMS_FIRE_SAFETY_CRITERION,
+    ]);
+    expect(VISUAL_ALARMS_FIRE_SAFETY_CRITERION).toContain("strobe");
+    expect(checklistItemsForElement({ participantVisualAlarmsRequired: true }, "demo-item-05")).toEqual(
+      MOVE_IN_READY_ELEMENT_CRITERIA["demo-item-05"].checklistItems,
+    );
   });
 });
