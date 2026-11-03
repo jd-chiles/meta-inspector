@@ -19,7 +19,6 @@ export type FireSafetyDraftOutcome = "" | FireSafetyClauseOutcome;
 export interface DecisionDraft {
   choice: DecisionChoice;
   rationale: string;
-  manualCheckAcknowledged: boolean;
   issueDescription: string;
   correction: string;
   completionDate: string;
@@ -60,7 +59,6 @@ export function createDecisionDraft(decision: EvaluatorDecision): DecisionDraft 
   if (decision.status === "A" || decision.status === "D") return {
     choice: decision.status,
     rationale: decision.rationale,
-    manualCheckAcknowledged: Boolean(decision.inPersonCheckAcknowledgment),
     issueDescription: decision.status === "D" ? decision.deficiency.issueDescription : "",
     correction: decision.status === "D" ? decision.deficiency.correction : "",
     completionDate: decision.status === "D" ? decision.deficiency.completionDate : "",
@@ -71,14 +69,14 @@ export function createDecisionDraft(decision: EvaluatorDecision): DecisionDraft 
     evidenceStillIds: decision.evidence.map((reference) => reference.stillId),
     note: "",
   };
-  if (decision.status === "needs-human-check") return { choice: decision.status, rationale: "", manualCheckAcknowledged: false, issueDescription: "", correction: "", completionDate: "", reinspectionDate: "", fireSafetyUnitDetectors: fireSafetyAssessment?.unitDetectors ?? "", fireSafetyPublicAreaDetectors: fireSafetyAssessment?.publicAreaDetectors ?? "", planSuggestionReviewed: false, evidenceStillIds: [], note: decision.note };
-  return { choice: "unreviewed", rationale: "", manualCheckAcknowledged: false, issueDescription: "", correction: "", completionDate: "", reinspectionDate: "", fireSafetyUnitDetectors: "", fireSafetyPublicAreaDetectors: "", planSuggestionReviewed: false, evidenceStillIds: [], note: "" };
+  if (decision.status === "needs-human-check") return { choice: decision.status, rationale: "", issueDescription: "", correction: "", completionDate: "", reinspectionDate: "", fireSafetyUnitDetectors: fireSafetyAssessment?.unitDetectors ?? "", fireSafetyPublicAreaDetectors: fireSafetyAssessment?.publicAreaDetectors ?? "", planSuggestionReviewed: false, evidenceStillIds: [], note: decision.note };
+  return { choice: "unreviewed", rationale: "", issueDescription: "", correction: "", completionDate: "", reinspectionDate: "", fireSafetyUnitDetectors: "", fireSafetyPublicAreaDetectors: "", planSuggestionReviewed: false, evidenceStillIds: [], note: "" };
 }
 
 /**
- * Copy an unreviewed AI draft into editable draft fields. Never touches the
- * in-person acknowledgment or the plan-review confirmation: the evaluator
- * still performs both explicitly before any save.
+ * Copy an unreviewed AI draft into editable draft fields. Never clears the
+ * plan-review confirmation, which the evaluator still performs explicitly.
+ * Saving the decision records the in-person acknowledgment.
  */
 export function prefillDraftFromProposal(draft: DecisionDraft, proposal: ModelElementProposal): DecisionDraft {
   return {
@@ -138,7 +136,6 @@ export function buildConfirmDraft(
     draft: {
       ...prefilled,
       rationale,
-      manualCheckAcknowledged: true,
       planSuggestionReviewed: true,
       ...(elementId === "demo-smoke-co" ? {
         fireSafetyUnitDetectors: proposal.modelSuggestion,

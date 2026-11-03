@@ -62,13 +62,14 @@ export interface GuidedTourBindings {
   voiceTranscript: string | null;
   onVoiceTranscript: (text: string | null) => void;
   batchActive: boolean;
-  batchProgress: { done: number; total: number; roomLabel: string } | null;
+  batchProgress: { done: number; total: number; roomLabel: string; startedAt: number } | null;
   batchFailedRooms: readonly string[];
   analysisComplete: boolean;
   setEvaluatorName: (name: string) => void;
   setUnitType: (unit: MoveInReadyUnitType) => void;
   setBathCount: (count: number) => void;
   grantTourConsent: () => void;
+  skipRoom: (roomId: MoveInReadyRoomId) => void;
   selectRoom: (roomId: string) => void;
   onClipChange: (clip: StoredVideoClip | null, roomId: string) => void;
   onRecordingStateChange: (recording: boolean) => void;
@@ -552,6 +553,14 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
             >
               Open full capture screen
             </button>
+            <button
+              className={flowStyles.secondaryButton}
+              type="button"
+              data-testid="tour-skip-room"
+              onClick={() => bindings.skipRoom(node.roomId)}
+            >
+              Skip — not in this unit
+            </button>
           </div>
         )}
 
@@ -635,8 +644,37 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
 
         {node.kind === "review-item" && (() => {
           const proposal = bindings.record.proposals[node.elementId];
-          if (!proposal) return null;
           const tier = fixListTier(node.elementId);
+          if (!proposal) {
+            return (
+              <div className={flowStyles.card} data-testid="tour-review-card" data-noproposal="true">
+                <p className={flowStyles.draftLabel}>{tier.label}{reviewPosition ? ` · item ${reviewPosition.index} of ${reviewPosition.total}` : ""}</p>
+                <h2>{elementLabel(node.elementId)}</h2>
+                <p className={flowStyles.helpText}>No AI draft — the footage had no reviewable evidence for this item. Decide it yourself below.</p>
+                <div className={styles.reviewActions}>
+                  <button
+                    className={flowStyles.button}
+                    type="button"
+                    data-testid="tour-review-draft"
+                    onClick={() => bindings.reviewProposalDraft(node.elementId)}
+                  >
+                    Decide in detail form <ArrowRight size={17} aria-hidden="true" />
+                  </button>
+                  <button
+                    className={flowStyles.secondaryButton}
+                    type="button"
+                    data-testid="tour-needs-check"
+                    onClick={() => bindings.markNeedsCheck(node.elementId, `Inspector marked ${elementLabel(node.elementId)} for a human check during the guided tour.`)}
+                  >
+                    <CircleHelp size={16} aria-hidden="true" /> Needs human check
+                  </button>
+                  <button className={flowStyles.secondaryButton} type="button" data-testid="tour-skip" onClick={() => skipElement(node.elementId)}>
+                    Skip
+                  </button>
+                </div>
+              </div>
+            );
+          }
           const approved = proposal.modelSuggestion === "A";
           return (
             <div className={flowStyles.card} data-testid="tour-review-card">

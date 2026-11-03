@@ -17,6 +17,7 @@ import {
   Mic,
   RefreshCw,
   ShieldCheck,
+  Share2,
   Smartphone,
   Sparkles,
   StickyNote,
@@ -113,6 +114,8 @@ import {
 } from "./video-store";
 import { extractVideoStills, formatTimestamp, sha256Blob, type VideoStill } from "./video-utils";
 import { createPendingCancelTracker } from "./pending-cancel";
+import { canShareExportFiles } from "./export-share";
+import { FetchTimeoutError, MAP_TIMEOUT_MS, SEGMENT_TIMEOUT_MS, fetchWithTimeout } from "./fetch-timeout";
 import { isAnalysisCurrent } from "./analysis-identity";
 import {
   buildConfirmDraft,
@@ -240,6 +243,13 @@ const MAX_CANDIDATE_STILLS = 12;
 const MAX_ROOM_EVIDENCE_STILLS = 30;
 const MAX_STILLS_PER_DECODE = 12;
 
+/** m:ss elapsed for the batch working line. _tick resubscribes the render to the 1 s batch timer. */
+function formatBatchElapsed(elapsedMs: number, _tick: number): string {
+  void _tick;
+  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
+}
+
 function isCaptureSetupComplete(
   record: Pick<MoveInReadyInspection, "pseudonym" | "fundingType" | "unitType"> | null,
 ): boolean {
@@ -315,7 +325,8 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   const [batchAttested, setBatchAttested] = useState(false);
   const [batchSendConsent, setBatchSendConsent] = useState(false);
   const [batchActive, setBatchActive] = useState(false);
-  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number; roomLabel: string } | null>(null);
+  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number; roomLabel: string; startedAt: number } | null>(null);
+  const [batchTick, setBatchTick] = useState(0);
   const [batchFailedRooms, setBatchFailedRooms] = useState<string[]>([]);
   const batchQueueRef = useRef<MoveInReadyRoomId[]>([]);
   const batchTotalRef = useRef(0);
@@ -346,6 +357,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   const [exportError, setExportError] = useState("");
   const [exportNotice, setExportNotice] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [canExportShare] = useState(canShareExportFiles);
   const abortRef = useRef<AbortController | null>(null);
   const analysisGenerationRef = useRef(0);
   const analysisAttemptsRef = useRef<Partial<Record<MoveInReadyRoomId, number>>>({});
@@ -395,6 +407,10 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       pseudonym: current.pseudonym.trim() || `Demo Unit ${current.sessionId.replace(/[^a-z0-9]/gi, "").slice(-4).toUpperCase() || "A"}`,
     }));
   }, [updateRecord]);
+
+  const skipRoom = (roomId: MoveInReadyRoomId): void => {
+    if (recordRef.current?.roomIds.includes(roomId)) toggleInspectionRoom(roomId);
+  };
 
   const markNeedsCheck = useCallback((elementId: MoveInReadyElementId, note: string) => {
     updateRecord((current) => ({
@@ -998,7 +1014,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     const identity = recordRef.current?.clipIdentities[roomId] ?? null;
     const expectedVideoId = identity?.videoId ?? "";
     batchRunningRef.current = true;
-    setBatchProgress({ done: total - queue.length, total, roomLabel: roomLabel(roomId) });
+    setBatchProgress({ done: total - queue.length, total, roomLabel: roomLabel(roomId), startedAt: Date.now() });
     void analyzeRoom().then(() => {
       batchRunningRef.current = false;
       const latest = recordRef.current;
@@ -1007,9 +1023,34 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
           Boolean(proposal) && proposal!.analysisIdentity.roomId === roomId && proposal!.analysisIdentity.videoId === expectedVideoId));
       batchQueueRef.current = batchQueueRef.current.slice(1);
       if (!proved) setBatchFailedRooms((previous) => [...previous, roomLabel(roomId)]);
-      setBatchProgress({ done: total - batchQueueRef.current.length, total, roomLabel: roomLabel(roomId) });
+      setBatchProgress({ done: total - batchQueueRef.current.length, total, roomLabel: roomLabel(roomId), startedAt: Date.now() });
     });
   });
+
+  // Tick the batch elapsed timer and hold a screen wake lock while the
+  // batch runs: on phones a sleeping screen can stall the long uploads,
+  // and a frozen "Working" line reads as a hang.
+  useEffect(() => {
+    if (!batchActive) return;
+    const timer = window.setInterval(() => setBatchTick((tick) => tick + 1), 1000);
+    let lock: { release: () => Promise<void> } | null = null;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const holder = navigator as Navigator & { wakeLock?: { request: (kind: "screen") => Promise<{ release: () => Promise<void> }> } };
+        const requested = await holder.wakeLock?.request("screen");
+        if (cancelled) await requested?.release().catch(() => {});
+        else lock = requested ?? null;
+      } catch {
+        lock = null;
+      }
+    })();
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      lock?.release().catch(() => {});
+    };
+  }, [batchActive]);
 
   // Auto-run the AI batch once every room is filmed and the walkthrough
   // consent was confirmed upfront. One user decision covers the run; each
@@ -1233,7 +1274,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     batchQueueRef.current = [...rooms];
     batchTotalRef.current = rooms.length;
     setBatchFailedRooms([]);
-    setBatchProgress({ done: 0, total: rooms.length, roomLabel: "" });
+    setBatchProgress({ done: 0, total: rooms.length, roomLabel: "", startedAt: Date.now() });
     setAnalysisError("");
     setAnalysisNotice("");
     setBatchActive(true);
@@ -1542,13 +1583,13 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       if (!intentIsCurrent() || !analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion)) return;
       segmentationRequested = true;
       pendingCancelRef.current.set(requestIdentity, null);
-      const segmentResponse = await fetch("/api/video/segment?stage=segment", {
+      const segmentResponse = await fetchWithTimeout("/api/video/segment?stage=segment", {
         method: "POST",
         headers: { [WALKTHROUGH_CLIENT_HEADER]: WALKTHROUGH_CLIENT_ID },
         body: segmentForm,
         signal: controller.signal,
         cache: "no-store",
-      });
+      }, SEGMENT_TIMEOUT_MS);
       const segmentJson: unknown = await segmentResponse.json().catch(() => null);
       if (!segmentResponse.ok) throw new Error(readSafeApiError(segmentJson, segmentResponse.status));
       const segmented = parseSegmentResponse(segmentJson, requestIdentity, roomId);
@@ -1652,13 +1693,13 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       // original clip during segmentation. Only the signed identity returns
       // here, so the phone neither uploads the clip twice nor supplies pixels
       // that the server cannot tie back to that clip.
-      const mapResponse = await fetch("/api/video/segment?stage=map", {
+      const mapResponse = await fetchWithTimeout("/api/video/segment?stage=map", {
         method: "POST",
         headers: { [WALKTHROUGH_CLIENT_HEADER]: WALKTHROUGH_CLIENT_ID },
         body: mapForm,
         signal: controller.signal,
         cache: "no-store",
-      });
+      }, MAP_TIMEOUT_MS);
       const mapJson: unknown = await mapResponse.json().catch(() => null);
       if (!mapResponse.ok) throw new Error(readSafeApiError(mapJson, mapResponse.status));
       const analysisIdentity: VideoAnalysisIdentity = {
@@ -1724,6 +1765,11 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       const mapper = mapped.mappingModel === "muse-spark-open-baseten" ? "Baseten Muse Spark Open fallback" : "Meta Muse Spark";
       setAnalysisNotice(`SAM segmented ${segmented.candidates.length} moments. ${mapper} used one-frame-per-second context and returned unreviewed suggestions; check each actual still and complete the physical inspection yourself.`);
     } catch (error) {
+      if (error instanceof FetchTimeoutError) {
+        setAnalysisStatus("error");
+        setAnalysisError(`The server did not answer within ${Math.round(error.timeoutMs / 60000)} minutes. Keep this app open on Wi-Fi and run it again — finished rooms are kept and this room is marked for retry.`);
+        return;
+      }
       if (controller.signal.aborted || generation !== analysisGenerationRef.current) return;
       setAnalysisStatus("error");
       setAnalysisError(safeClientError(error, "Live room analysis did not complete. No sample result was substituted."));
@@ -1873,12 +1919,17 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     if (included && selectedRoomId === roomId) setSelectedRoomId(next[0] ?? "kitchen");
     setSignoffName("");
     setSignoffAttested(false);
-    updateRecord((latest) => ({
-      ...latest,
-      roomIds: next,
-      selectedRoomId: next.includes(latest.selectedRoomId) ? latest.selectedRoomId : (next[0] ?? "kitchen"),
-      signoff: null,
-    }));
+    updateRecord((latest) => {
+      const checks = { ...latest.voiceChecks };
+      for (const id of latest.roomIds) if (!next.includes(id)) delete checks[id];
+      return {
+        ...latest,
+        roomIds: next,
+        selectedRoomId: next.includes(latest.selectedRoomId) ? latest.selectedRoomId : (next[0] ?? "kitchen"),
+        voiceChecks: checks,
+        signoff: null,
+      };
+    });
   }
 
   function saveDecision(elementId: MoveInReadyElementId, draftOverride?: DecisionDraft): boolean {
@@ -1899,10 +1950,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       setReviewError("Add the evaluator’s name in Profile before recording a decision.");
       return false;
     }
-    if ((choice === "A" || choice === "D") && !draft.manualCheckAcknowledged) {
-      setReviewError("Complete the in-person check and acknowledge it before saving this decision.");
-      return false;
-    }
+
     if (choice === "D" && current.proposals[elementId]?.modelSuggestion === "D" &&
         current.proposals[elementId]?.deficiencySuggestion && !draft.planSuggestionReviewed) {
       setReviewError("Review the AI plan suggestion, then confirm it or replace its fields before saving your D decision.");
@@ -2014,7 +2062,13 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       return;
     }
     const proposal = current.proposals[elementId];
+    const voiceNote = voiceCheckNoteForElement(elementId, current);
     if (!proposal) {
+      if (voiceNote) {
+        updateDecisionDraft(elementId, (draft) => (
+          draft.rationale.trim() ? draft : { ...draft, rationale: voiceNote.slice(0, 1000) }
+        ));
+      }
       changeStep("review");
       openReviewElement(elementId);
       setReviewError("No AI draft for this requirement. Assess it in the detail form.");
@@ -2024,7 +2078,6 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       setReviewError("That room clip changed since analysis. Analyze it again, then review the new draft.");
       return;
     }
-    const voiceNote = voiceCheckNoteForElement(elementId, current);
     updateDecisionDraft(elementId, (draft) => {
       const prefilled = prefillDraftFromProposal(draft, proposal);
       if (!voiceNote || prefilled.rationale.includes(voiceNote)) return prefilled;
@@ -2062,6 +2115,12 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     }
     const proposal = current.proposals[elementId];
     if (!proposal) {
+      const voiceNote = voiceCheckNoteForElement(elementId, current);
+      if (voiceNote) {
+        updateDecisionDraft(elementId, (draft) => (
+          draft.rationale.trim() ? draft : { ...draft, rationale: voiceNote.slice(0, 1000) }
+        ));
+      }
       changeStep("review");
       openReviewElement(elementId);
       setReviewError("No AI draft for this requirement. Assess it in the detail form.");
@@ -2200,13 +2259,12 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
     }
   }
 
-  async function downloadExport(kind: MoveInReadyExportKind | "hmis-json"): Promise<void> {
+  async function buildExportFile(kind: MoveInReadyExportKind | "hmis-json"): Promise<{ body: Uint8Array; filename: string; mime: string }> {
     const current = recordRef.current;
     if (current && current.fundingType !== "lahsa") {
-      setExportError(current.fundingType === "hud"
+      throw new Error(current.fundingType === "hud"
         ? "HQS is required for HUD-funded units. Form 1083 exports are disabled."
         : "Choose LAHSA / Form 1083 funding in Profile before exporting.");
-      return;
     }
     const capturedRoomIds = (current?.roomIds ?? []).filter((roomId) => Boolean(clips[roomId]));
     const currentFinalization = current ? deriveFinalInspectionResult({
@@ -2217,13 +2275,9 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       signoff: current.signoff,
     }) : null;
     if (!current?.signoff || currentFinalization?.status !== "complete" || form1083AdministrativeBlocker(current)) {
-      setExportError(current ? form1083AdministrativeBlocker(current) ?? "Capture every room video, complete every evaluator decision, and save your attestation before creating exports." : "Capture every room video, complete every evaluator decision, and save your attestation before creating exports.");
-      return;
+      throw new Error(current ? form1083AdministrativeBlocker(current) ?? "Capture every room video, complete every evaluator decision, and save your attestation before creating exports." : "Capture every room video, complete every evaluator decision, and save your attestation before creating exports.");
     }
-    setExporting(true);
-    setExportError("");
-    setExportNotice("");
-    try {
+    {
       const stills = await collectExportStills(current);
       await assertExportSnapshotCurrent(current, capturedRoomIds);
       const exportInput = {
@@ -2252,6 +2306,16 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
         ? exportFilename("hmis-ready", current.sessionId, dateName).replace(/\.pdf$/, ".json")
         : exportFilename(kind, current.sessionId, dateName);
       const mime = kind === "hmis-json" ? "application/json" : "application/pdf";
+      return { body, filename, mime };
+    }
+  }
+
+  async function downloadExport(kind: MoveInReadyExportKind | "hmis-json"): Promise<void> {
+    setExporting(true);
+    setExportError("");
+    setExportNotice("");
+    try {
+      const { body, filename, mime } = await buildExportFile(kind);
       const url = URL.createObjectURL(new Blob([body], { type: mime }));
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -2261,6 +2325,27 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       setExportNotice(`${filename} downloaded. Handle it through your existing manual process.`);
     } catch (error) {
       setExportError(safeClientError(error, "The local export could not be created."));
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function shareExports(): Promise<void> {
+    setExporting(true);
+    setExportError("");
+    setExportNotice("");
+    try {
+      const kinds = ["client-file", "landlord-fix-list", "hmis-ready", "hmis-json"] as const;
+      const files: File[] = [];
+      for (const kind of kinds) {
+        const { body, filename, mime } = await buildExportFile(kind);
+        files.push(new File([body as BlobPart], filename, { type: mime }));
+      }
+      await navigator.share({ files, title: "Form 1083 walkthrough exports" });
+      setExportNotice("Export packet shared. Handle it through your existing manual process.");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      setExportError(safeClientError(error, "Sharing is not available on this device. Use the downloads."));
     } finally {
       setExporting(false);
     }
@@ -2630,6 +2715,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                     }
                   },
                   grantTourConsent,
+                  skipRoom,
                   selectRoom,
                   onClipChange: (clip, roomId) => handleClipChange(clip, roomId),
                   onRecordingStateChange: setRecordingInProgress,
@@ -2760,7 +2846,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                       {capturedRoomCount > 0 && (
                         <details className={styles.batchDisclosure} data-testid="batch-analysis-disclosure">
                           <summary>
-                            <span><strong>AI analyzes every filmed room</strong><small>{batchActive && batchProgress ? `Working: ${batchProgress.roomLabel} · ${batchProgress.done} of ${batchProgress.total}` : `${capturedRoomCount} clip${capturedRoomCount === 1 ? "" : "s"} ready · one tap`}</small></span>
+                            <span><strong>AI analyzes every filmed room</strong><small>{batchActive && batchProgress ? `Working: ${batchProgress.roomLabel} · ${batchProgress.done} of ${batchProgress.total} · ${formatBatchElapsed(Date.now() - batchProgress.startedAt, batchTick)} · ${analysisStatus === "mapping" ? "Mapping" : "Segmenting"}…` : `${capturedRoomCount} clip${capturedRoomCount === 1 ? "" : "s"} ready · one tap`}</small></span>
                           </summary>
                           <div className={styles.batchBody}>
                             {analysisMode !== "live" && <p className={styles.helpText} role="status">{analysisMode === "fixture" ? "Sample mode: batch analysis runs only against live Meta. No sample result will be substituted." : "Live Meta analysis is off on this server."}</p>}
@@ -3173,25 +3259,25 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                                 <legend>Form 1083 section 11a · Unit detectors</legend>
                                 <p className={styles.supportingText}>Check occupied levels, smoke-detector placement, and the applicable alarm provision.</p>
                                 <div className={styles.choiceRow} role="group" aria-label="Evaluator check for Form 1083 section 11a unit detectors">
-                                  <ChoiceButton label="A · Meets" choice="A" selected={draft.fireSafetyUnitDetectors} onClick={() => updateDecisionDraft(element.id, { fireSafetyUnitDetectors: "A", manualCheckAcknowledged: false })} />
-                                  <ChoiceButton label="D · Deficient" choice="D" selected={draft.fireSafetyUnitDetectors} onClick={() => updateDecisionDraft(element.id, { fireSafetyUnitDetectors: "D", manualCheckAcknowledged: false })} />
-                                  <ChoiceButton label="Needs check" choice="needs-human-check" selected={draft.fireSafetyUnitDetectors} onClick={() => updateDecisionDraft(element.id, { fireSafetyUnitDetectors: "needs-human-check", manualCheckAcknowledged: false })} />
+                                  <ChoiceButton label="A · Meets" choice="A" selected={draft.fireSafetyUnitDetectors} onClick={() => updateDecisionDraft(element.id, { fireSafetyUnitDetectors: "A" })} />
+                                  <ChoiceButton label="D · Deficient" choice="D" selected={draft.fireSafetyUnitDetectors} onClick={() => updateDecisionDraft(element.id, { fireSafetyUnitDetectors: "D" })} />
+                                  <ChoiceButton label="Needs check" choice="needs-human-check" selected={draft.fireSafetyUnitDetectors} onClick={() => updateDecisionDraft(element.id, { fireSafetyUnitDetectors: "needs-human-check" })} />
                                 </div>
                               </fieldset>
                               <fieldset className={styles.criteriaPanel}>
                                 <legend>Form 1083 section 11b · Public/common areas</legend>
                                 <p className={styles.supportingText}>Check each public or common area, including shared hallways and stairwells.</p>
                                 <div className={styles.choiceRow} role="group" aria-label="Evaluator check for Form 1083 section 11b public and common area detectors">
-                                  <ChoiceButton label="A · Meets" choice="A" selected={draft.fireSafetyPublicAreaDetectors} onClick={() => updateDecisionDraft(element.id, { fireSafetyPublicAreaDetectors: "A", manualCheckAcknowledged: false })} />
-                                  <ChoiceButton label="D · Deficient" choice="D" selected={draft.fireSafetyPublicAreaDetectors} onClick={() => updateDecisionDraft(element.id, { fireSafetyPublicAreaDetectors: "D", manualCheckAcknowledged: false })} />
-                                  <ChoiceButton label="Needs check" choice="needs-human-check" selected={draft.fireSafetyPublicAreaDetectors} onClick={() => updateDecisionDraft(element.id, { fireSafetyPublicAreaDetectors: "needs-human-check", manualCheckAcknowledged: false })} />
+                                  <ChoiceButton label="A · Meets" choice="A" selected={draft.fireSafetyPublicAreaDetectors} onClick={() => updateDecisionDraft(element.id, { fireSafetyPublicAreaDetectors: "A" })} />
+                                  <ChoiceButton label="D · Deficient" choice="D" selected={draft.fireSafetyPublicAreaDetectors} onClick={() => updateDecisionDraft(element.id, { fireSafetyPublicAreaDetectors: "D" })} />
+                                  <ChoiceButton label="Needs check" choice="needs-human-check" selected={draft.fireSafetyPublicAreaDetectors} onClick={() => updateDecisionDraft(element.id, { fireSafetyPublicAreaDetectors: "needs-human-check" })} />
                                 </div>
                               </fieldset>
                             </div>
                             <p className={styles.statusText}>Combined Fire Safety outcome: {effectiveChoice === "A" ? "A · Acceptable" : effectiveChoice === "D" ? "D · Deficient" : "Needs human check"}. Section 11a and 11b are recorded separately on Form 1083.</p>
                           </> : <div className={styles.choiceRow} role="group" aria-label={`Evaluator decision for ${element.label}`}>
-                            <ChoiceButton label="A · Acceptable" choice="A" selected={draft.choice} onClick={() => updateDecisionDraft(element.id, (current) => ({ ...current, choice: "A", manualCheckAcknowledged: current.choice === "A" ? current.manualCheckAcknowledged : false }))} />
-                            <ChoiceButton label="D · Deficient" choice="D" selected={draft.choice} onClick={() => updateDecisionDraft(element.id, (current) => ({ ...current, choice: "D", manualCheckAcknowledged: current.choice === "D" ? current.manualCheckAcknowledged : false }))} />
+                            <ChoiceButton label="A · Acceptable" choice="A" selected={draft.choice} onClick={() => updateDecisionDraft(element.id, { choice: "A" })} />
+                            <ChoiceButton label="D · Deficient" choice="D" selected={draft.choice} onClick={() => updateDecisionDraft(element.id, { choice: "D" })} />
                             <ChoiceButton label="Needs check" choice="needs-human-check" selected={draft.choice} onClick={() => updateDecisionDraft(element.id, { choice: "needs-human-check" })} />
                           </div>}
                           {effectiveChoice === "needs-human-check" && <div className={styles.field}>
@@ -3204,10 +3290,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                               <textarea id={`rationale-${element.id}`} className={styles.formTextarea} value={draft.rationale} maxLength={1000} onChange={(event) => { const rationale = event.currentTarget.value; updateDecisionDraft(element.id, { rationale }); }} placeholder="Describe what you assessed in person." />
                             </div>
                             {effectiveChoice === "D" && proposal?.modelSuggestion === "D" && proposal.deficiencySuggestion && <p className={styles.helpText}>Open the AI plan details below, then confirm or replace its suggested fields before saving.</p>}
-                            <label className={styles.checkLabel}>
-                              <input type="checkbox" aria-label="I completed every required in-person check for this element" checked={draft.manualCheckAcknowledged} onChange={(event) => updateDecisionDraft(element.id, { manualCheckAcknowledged: event.currentTarget.checked })} />
-                              <span>{isFireSafety ? "I personally completed both Form 1083 section 11 checks. AI suggestions and video stills do not replace these checks." : "I completed every required in-person check for this element. AI suggestions and video stills do not replace these checks."}</span>
-                            </label>
+                            <p className={styles.helpText}>{isFireSafety ? "Saving records that you personally completed both Form 1083 section 11 checks. AI suggestions and video stills do not replace these checks." : "Saving records your in-person check for this element. AI suggestions and video stills do not replace these checks."}</p>
                             {evidence.length > 0 && <fieldset className={styles.evidencePicker}>
                               <legend>Attach source stills to your decision</legend>
                               {evidence.slice(0, MAX_ROOM_EVIDENCE_STILLS * element.roomIds.length).map(({ reference, src }) => {
@@ -3363,6 +3446,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                 <div className={styles.exportGrid}>
                   <ExportButton title="Client-file export" detail="PDF · decisions, signature, and source stills" icon={<FileText size={19} aria-hidden="true" />} disabled={!completedResult || !record.signoff || exporting} busy={exporting} compact onClick={() => void downloadExport("client-file")} />
                   <ExportButton title="Landlord fix-list" detail="PDF · evaluator-confirmed deficiencies and dates" icon={<FolderOpen size={19} aria-hidden="true" />} disabled={!completedResult || !record.signoff || exporting} busy={exporting} compact onClick={() => void downloadExport("landlord-fix-list")} />
+                  {canExportShare && <ExportButton title="Share export packet" detail="All four files · message or email to yourself" icon={<Share2 size={19} aria-hidden="true" />} disabled={!completedResult || !record.signoff || exporting} busy={exporting} compact onClick={() => void shareExports()} />}
                   <div className={`${styles.exportItem} ${styles.exportItemCompact}`}>
                     <FileText className={styles.exportIcon} size={19} aria-hidden="true" />
                     <div className={styles.exportCopy}><strong>HMIS-ready Form 1083</strong><span>Local PDF or structured JSON draft</span></div>

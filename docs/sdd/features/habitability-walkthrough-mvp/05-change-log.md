@@ -1,5 +1,20 @@
 # Change log
 
+## Review friction removal + room skip + bathroom scope — November 2, 2026 (Muse Code)
+
+Owner: review forced a checkbox tap per requirement, AI-asked answers did
+not populate draft-less requirements, bathrooms wrongly asked for a smoke
+detector, and units missing a room had no path. Saving a decision is now
+the in-person acknowledgment (checkbox and its save gate removed; the
+decision record still stores evaluator name + timestamp). Opening any
+requirement without an AI draft quotes its rooms' spoken yes/no answers
+into the observation field, so nothing is re-typed. Each filming card has
+"Skip — not in this unit", reusing the room toggle (drops pending checks,
+invalidates running analysis, resets sign-off). Bathroom shot list and
+voice check are faucet/toilet/fan only. Covered by the tour spec: skip
+advances kitchen→bathroom; draft-less detail prefills Voice checks and
+saves to Approved with no checkbox.
+
 ## Single entrance enforced + instant repeat loads — November 2, 2026 (Muse Code)
 
 Owner found the AI Guide popup offered its own way into the flow

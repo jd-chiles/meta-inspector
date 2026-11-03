@@ -66,7 +66,6 @@ export const ASSISTANT_FILMING_SCRIPTS: Record<MoveInReadyRoomType, readonly str
     "Recording. First, run the bathroom faucet and show the flow and drainage.",
     "Now show the toilet, sink, and surfaces.",
     "Show the ventilation fan running.",
-    "Finally, show the smoke or carbon monoxide detector.",
   ],
   bedroom: [
     "Recording. First, walk the bedroom showing walls and floors.",

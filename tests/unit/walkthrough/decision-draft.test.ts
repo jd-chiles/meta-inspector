@@ -51,7 +51,6 @@ describe("buildConfirmDraft", () => {
     if (!result.ok) return;
     expect(result.draft.choice).toBe("A");
     expect(result.draft.rationale).toBe("The faucet runs clear with steady pressure.");
-    expect(result.draft.manualCheckAcknowledged).toBe(true);
     expect(result.draft.evidenceStillIds).toEqual(["still-1"]);
   });
 
@@ -88,7 +87,6 @@ describe("buildConfirmDraft", () => {
     expect(result.draft.issueDescription).toBe("Kitchen faucet");
     expect(result.draft.correction).toBe("Replace the faucet cartridge.");
     expect(result.draft.planSuggestionReviewed).toBe(true);
-    expect(result.draft.manualCheckAcknowledged).toBe(true);
   });
 
   it("sends a Deficient draft without a correction plan to the detail form", () => {

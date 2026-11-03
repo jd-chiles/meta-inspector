@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  MOVE_IN_READY_ELEMENT_IDS,
   parseRoomId,
   type EvaluatorDecision,
   type ModelElementProposal,
@@ -111,14 +112,14 @@ describe("deriveTourNode", () => {
       record: filmed,
       capturedRoomIds: [...record.roomIds],
       analysisSettled: true,
-    }))).toEqual({ kind: "finish" });
+    }))).toEqual({ kind: "review-item", elementId: "demo-smoke-co" });
   });
 
   it("defers ask-name until review and skips it when already known", () => {
     const record = withSetup(createInitialInspectionRecord("tour-session-7"));
     const noRooms = { ...record, roomIds: [] as MoveInReadyInspection["roomIds"] };
-    expect(deriveTourNode(baseInput({ record: noRooms })).kind)
-      .toBe("finish");
+    expect(deriveTourNode(baseInput({ record: noRooms })))
+      .toEqual({ kind: "review-item", elementId: "demo-smoke-co" });
     const unnamed = { ...noRooms, evaluatorName: "" };
     expect(deriveTourNode(baseInput({ record: unnamed })))
       .toEqual({ kind: "ask-name" });
@@ -157,7 +158,17 @@ describe("deriveTourNode", () => {
     };
     expect(deriveTourNode(baseInput({ record: withProposal, skippedElementIds: new Set(skippedOthers) })))
       .toEqual({ kind: "review-item", elementId: "demo-smoke-co" });
-    expect(guidedReviewQueue(withProposal, new Set(skippedOthers))).toEqual(["demo-smoke-co"]);
+    // Draft-less elements still get their question in risk order.
+    expect(guidedReviewQueue(withProposal, new Set(skippedOthers))).toEqual([
+      "demo-smoke-co",
+      "demo-item-06",
+      "demo-item-08",
+      "demo-item-09",
+      "demo-lighting-electric",
+      "demo-item-05",
+      "demo-item-10",
+      "demo-item-11",
+    ]);
     const smokeDecision: EvaluatorDecision = {
       status: "D",
       evaluatorName: "Rae Evaluator",
@@ -177,7 +188,9 @@ describe("deriveTourNode", () => {
       ...withProposal,
       decisions: { ...withProposal.decisions, "demo-smoke-co": smokeDecision },
     };
-    expect(deriveTourNode(baseInput({ record: decided, skippedElementIds: new Set(skippedOthers) })).kind)
+    expect(deriveTourNode(baseInput({ record: decided, skippedElementIds: new Set(skippedOthers) })))
+      .toEqual({ kind: "review-item", elementId: "demo-item-06" });
+    expect(deriveTourNode(baseInput({ record: decided, skippedElementIds: new Set(MOVE_IN_READY_ELEMENT_IDS) })).kind)
       .toBe("finish");
   });
 
@@ -209,9 +222,10 @@ describe("deriveTourNode", () => {
       expect(kitchenShots).toContain(shot);
     }
     const bathroomShots = filmRoomShots("bathroom").join(" ").toLowerCase();
-    for (const shot of ["faucet", "toilet", "fan", "detector"]) {
+    for (const shot of ["faucet", "toilet", "fan"]) {
       expect(bathroomShots).toContain(shot);
     }
+    expect(bathroomShots).not.toContain("detector");
   });
 
   it("tracks section progress from inspection data", () => {

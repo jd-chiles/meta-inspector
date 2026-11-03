@@ -1364,7 +1364,6 @@ test.describe("Move-in Ready mobile flow", () => {
         await expect(proposedStillCheckbox).toHaveCount(1);
         await proposedStillCheckbox.check();
         await waterSupply.getByLabel("Evaluator observation").fill("I checked the kitchen water supply in person.");
-        await waterSupply.getByRole("checkbox", { name: "I completed every required in-person check for this element" }).check();
         await page.getByRole("button", { name: "Save evaluator decision", exact: true }).click();
         await expect(waterSupplyRow).toContainText("Approved");
         expect(await readSavedWaterSupplyDecision(page)).toMatchObject({
@@ -1699,7 +1698,7 @@ test.describe("Move-in Ready mobile flow", () => {
         const waterSupply = page.getByTestId("review-element-demo-water-supply");
         await expect(waterSupply).toBeVisible();
         await expect(waterSupply).toContainText("Mock kitchen water supply proposal.");
-        await expect(waterSupply.getByRole("checkbox", { name: "I completed every required in-person check for this element" })).not.toBeChecked();
+        await expect(waterSupply.getByRole("checkbox", { name: /in-person check/ })).toHaveCount(0);
         expect(await readSavedWaterSupplyDecision(page)).toMatchObject({ status: "unreviewed" });
         await expect(page.getByRole("progressbar", { name: "Checklist progress" })).toHaveAttribute("aria-valuenow", "0");
       } finally {
@@ -1843,10 +1842,9 @@ test.describe("Move-in Ready mobile flow", () => {
     await expect(waterSupply.getByRole("img", { name: /Kitchen source frame/ })).toHaveCount(3);
     await waterSupply.getByRole("button", { name: "D · Deficient", exact: true }).click();
     await page.getByRole("button", { name: "Save evaluator decision", exact: true }).click();
-    await expect(page.getByRole("alert").filter({ hasText: "Complete the in-person check and acknowledge it before saving this decision." })).toBeVisible();
+    // Saving is the in-person acknowledgment, so the first save attempt
+    // goes straight to the still/plan completeness errors.
     await expect(waterSupply).toContainText("Not reviewed");
-    await waterSupply.getByRole("checkbox", { name: "I completed every required in-person check for this element" }).check();
-    await page.getByRole("button", { name: "Save evaluator decision", exact: true }).click();
     await expect(page.getByRole("alert").filter({ hasText: /source still|deficient area|correction|completion date/i })).toContainText(/source still|deficient area|correction|completion date/i);
     await page.getByRole("button", { name: "Back to checklist", exact: true }).click();
     await expect(waterSupplyRow).toContainText("Open");
@@ -1858,7 +1856,6 @@ test.describe("Move-in Ready mobile flow", () => {
     await waterSupply.getByLabel("Required correction").fill("Repair the faucet cartridge and verify that it shuts off.");
     await waterSupply.getByLabel("Completion date").fill("2026-11-02");
     await waterSupply.getByLabel("Reinspection date").fill("2026-11-05");
-    await waterSupply.getByRole("checkbox", { name: "I completed every required in-person check for this element" }).check();
     await page.getByRole("button", { name: "Save evaluator decision", exact: true }).click();
     await expect(waterSupplyRow).toContainText("Deficient");
 
@@ -1870,7 +1867,6 @@ test.describe("Move-in Ready mobile flow", () => {
       const activeElement = page.locator('[data-testid^="review-element-"]');
       await markCurrentElementAcceptable(activeElement);
       await page.getByLabel("Evaluator observation").fill("I assessed this item in person in the staged unit.");
-      await activeElement.getByRole("checkbox", { name: "I completed every required in-person check for this element" }).check();
       await page.getByRole("button", { name: "Save evaluator decision", exact: true }).click();
     }
     await expect(page.getByText("11 of 11 reviewed", { exact: true })).toBeVisible();
@@ -1911,7 +1907,6 @@ test.describe("Move-in Ready mobile flow", () => {
       await expect(activeElement).toBeVisible();
       await markCurrentElementAcceptable(activeElement);
       await page.getByLabel("Evaluator observation").fill("I assessed this item in person in the staged unit.");
-      await activeElement.getByRole("checkbox", { name: "I completed every required in-person check for this element" }).check();
       await page.getByRole("button", { name: "Save evaluator decision", exact: true }).click();
       await expect(page.getByText(`${index + 1} of 11 reviewed`, { exact: true })).toBeVisible();
     }

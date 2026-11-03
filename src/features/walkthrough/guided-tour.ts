@@ -105,11 +105,7 @@ export function deriveTourNode(input: GuidedTourInput): GuidedTourNode {
 
   if (!record.evaluatorName.trim()) return { kind: "ask-name" };
 
-  const reviewId = GUIDED_REVIEW_ORDER.find((elementId) => {
-    if (input.skippedElementIds.has(elementId)) return false;
-    if (!record.proposals[elementId]) return false;
-    return (record.decisions[elementId]?.status ?? "unreviewed") === "unreviewed";
-  });
+  const reviewId = guidedReviewQueue(record, input.skippedElementIds)[0];
   if (reviewId) return { kind: "review-item", elementId: reviewId };
 
   return { kind: "finish" };
@@ -244,7 +240,8 @@ export function guidedReviewQueue(
 ): MoveInReadyElementId[] {
   return GUIDED_REVIEW_ORDER.filter((elementId) => {
     if (skipped.has(elementId)) return false;
-    if (!record.proposals[elementId]) return false;
+    // Elements without an AI draft still get their question: the tour card
+    // offers the detail form or a human check instead of silently skipping.
     return (record.decisions[elementId]?.status ?? "unreviewed") === "unreviewed";
   });
 }
