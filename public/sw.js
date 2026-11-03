@@ -19,7 +19,7 @@
 
 /* global self, caches, fetch, Response, URL */
 
-var SHELL_CACHE = "habitability-walkthrough-shell-v5";
+var SHELL_CACHE = "habitability-walkthrough-shell-v6";
 var APP_CACHE_PREFIX = "habitability-walkthrough-";
 
 /** Core shell: required for an honest offline launch. */
@@ -148,15 +148,18 @@ self.addEventListener("fetch", function (event) {
   // API traffic is never cached and never served from cache.
   if (isApiRequest(url)) return;
 
-  // Navigations: serve the cached shell instantly and refresh it in the
-  // background. Progress restores from IndexedDB client-side, so waiting on
-  // the network buys nothing — and on a cold container it costs the user a
-  // 20–30 s blank tab. Only plain 200s are cached, keyed by final URL, so a
-  // passcode redirect can never strand an authenticated user on stale HTML.
+  // Navigations: network first, cached shell only as the offline
+  // fallback. Serving the cached shell first strands the user on a stale
+  // app after a deploy — old HTML boots old hashed bundles, so the page
+  // visibly flips between versions as the cache refreshes in the
+  // background. An online load must always get the newest document;
+  // progress restores from IndexedDB client-side either way. Only plain
+  // 200s are cached, keyed by final URL, so a passcode redirect can never
+  // strand an authenticated user on stale HTML.
   if (isNavigationRequest(request)) {
     event.respondWith(
-      caches.match(request).then(function (cached) {
-        var network = fetch(request).then(function (response) {
+      fetch(request).then(
+        function (response) {
           if (response && response.status === 200 && response.type === "basic") {
             var copy = response.clone();
             var key = response.url || request.url;
@@ -165,21 +168,17 @@ self.addEventListener("fetch", function (event) {
             }).then(function () {}, function () {});
           }
           return response;
-        });
-        event.waitUntil(network.then(function () {}, function () {}));
-        if (cached) return cached;
-        return network.then(
-          function (response) {
-            return response;
-          },
-          function () {
+        },
+        function () {
+          return caches.match(request).then(function (cached) {
+            if (cached) return cached;
             return new Response(offlineFallbackHtml(), {
               status: 503,
               headers: { "Content-Type": "text/html; charset=utf-8" },
             });
-          },
-        );
-      }),
+          });
+        },
+      ),
     );
     return;
   }
