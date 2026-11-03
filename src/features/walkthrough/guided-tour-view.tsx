@@ -57,6 +57,7 @@ import {
 import {
   deriveTourNode,
   elementLabel,
+  filmOutroCue,
   filmRoomShots,
   guidedReviewQueue,
   LANDLORD_VOICE_QUESTION,
@@ -328,9 +329,11 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
     const controller = new AbortController();
     speechControllerRef.current = controller;
     setTourSpeaking(true);
-    void speakSequentially(cues, controller.signal, {
+    // Cues, then the spoken-only outro telling the evaluator to end the
+    // video. The outro is not a shot card, so the highlight stays put.
+    void speakSequentially([...cues, filmOutroCue(lang)], controller.signal, {
       language: lang,
-      onCue: (index) => setShotIndex(index),
+      onCue: (index) => setShotIndex(Math.min(index, cues.length - 1)),
     }).finally(() => {
       if (speechControllerRef.current === controller) {
         speechControllerRef.current = null;

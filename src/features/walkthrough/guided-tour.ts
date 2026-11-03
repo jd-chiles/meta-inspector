@@ -239,10 +239,22 @@ export function roomLabelEs(roomId: MoveInReadyRoomId): string {
 export function filmRoomScript(roomId: MoveInReadyRoomId, position: number, total: number, language: "en" | "es" = "en"): string {
   if (language === "es") {
     const label = roomLabelEs(roomId);
-    return `Ahora filme ${label}, habitación ${position} de ${total}. Empiece a grabar; su lista de tomas está en pantalla. Le avisaré cuando se guarde.`;
+    return `Ahora filme ${label}, habitación ${position} de ${total}. Empiece a grabar; su lista de tomas está en pantalla. Termine el video cuando haya capturado cada toma.`;
   }
   const label = roomLabel(roomId);
-  return `Let's film the ${label}, room ${position} of ${total}. Start recording — your shot list is on screen. I will tell you when it is saved.`;
+  return `Let's film the ${label}, room ${position} of ${total}. Start recording — your shot list is on screen. End the video when you have captured every shot.`;
+}
+
+/**
+ * Spoken only, never a shot card: after the last filming cue, the guide
+ * closes the section by telling the evaluator to end the video. The intro
+ * above sets the same expectation up front — the app never promises a
+ * save announcement it cannot make.
+ */
+export function filmOutroCue(language: "en" | "es" = "en"): string {
+  return language === "es"
+    ? "Esa es la lista completa de tomas. Termine el video cuando haya capturado cada toma."
+    : "That's the full shot list — end the video when you have captured every shot.";
 }
 
 /** Static guided-tour scripts in Spanish (REQ-R2). Pinned against VOICE_CLIP_TEXTS_ES. */

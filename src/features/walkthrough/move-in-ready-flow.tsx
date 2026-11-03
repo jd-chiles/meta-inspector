@@ -158,6 +158,7 @@ import { deriveAssistantNode, filmingScriptForRoom, type AssistantAction as Guid
 import GuideVoiceBar from "./guide-voice-bar";
 import { cancelSpeech, readVoiceEnabled, speakCueSequence, speakText, writeVoiceEnabled } from "./voice-guide";
 import VoicePrompt from "./voice-prompt";
+import { filmOutroCue } from "./guided-tour";
 import GuidedTourView from "./guided-tour-view";
 import { SETUP_VOICE_QUESTIONS, checksForRoom } from "./voice-checks";
 import { parseBathCount, parseUnitType, parseYesNo } from "./voice-parse";
@@ -1323,7 +1324,11 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
         setRecordingCueIndex(-1);
       };
     }
-    const sequence = speakCueSequence(cues, (index) => setRecordingCueIndex(index));
+    // Spoken-only outro after the last cue tells the evaluator to end the
+    // video. It is not a shot, so the caption highlight clamps to the
+    // final shot instead of clearing.
+    const sequence = speakCueSequence([...cues, filmOutroCue()], (index) =>
+      setRecordingCueIndex(Math.min(index, cues.length - 1)));
     return () => {
       sequence.cancel();
       setRecordingCueIndex(-1);

@@ -29,6 +29,7 @@ function speakWithDeviceVoice(text: string): Promise<void> {
         return;
       }
       const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = DEVICE_SPEECH_RATE;
       const done = () => {
         window.clearInterval(keepalive);
         resolve();
@@ -47,7 +48,7 @@ function speakWithDeviceVoice(text: string): Promise<void> {
         }
       }, 3000);
       // Never hang the conversation on a stuck voice engine.
-      window.setTimeout(done, Math.min(30_000, 3000 + text.length * 120));
+      window.setTimeout(done, Math.min(45_000, 3000 + text.length * 175));
     } catch {
       resolve();
     }
@@ -109,13 +110,26 @@ export function primeAudio(): void {
 export const PLAYBACK_TIMEOUT_MESSAGE = "voice playback timed out";
 
 /** Hard cap for one clip: speech runs ~15 chars/s, floor 12s, cap 45s. */
+/**
+ * Narration pace for every voice surface: static clips, live synthesis, and
+ * the device fallback all speak ~30% slower than conversational so filming
+ * keeps up. Timeout budgets assume this rate (roughly 10 chars/second).
+ */
+export const SPEECH_PLAYBACK_RATE = 0.7;
+export const DEVICE_SPEECH_RATE = 0.75;
+
 export function playbackTimeoutMs(text: string): number {
-  return Math.max(12_000, Math.min(45_000, text.length * 110));
+  return Math.max(17_000, Math.min(60_000, text.length * 160));
 }
 
 function playAudioUrl(url: string, signal?: AbortSignal, timeoutMs: number = 12_000): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const audio = ensureSharedAudio() ?? new Audio(url);
+    try {
+      audio.playbackRate = SPEECH_PLAYBACK_RATE;
+    } catch {
+      // Older engines ignore playback rate; the clip still plays.
+    }
     audio.src = url;
     const timer = setTimeout(() => {
       cleanup();

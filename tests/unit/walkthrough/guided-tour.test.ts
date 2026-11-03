@@ -14,6 +14,7 @@ import {
   deriveTourNode,
   fireAssessmentDecided,
   guidedReviewQueue,
+  filmOutroCue,
   filmRoomScript,
   leadershipComplete,
   nameReadbackScript,
@@ -289,6 +290,15 @@ describe("deriveTourNode", () => {
     // English defaults are untouched by the language parameter.
     expect(tourScriptForNode({ kind: "welcome" }, context)).toContain("Tap Start");
     expect(filmRoomScript("kitchen", 1, 4)).toContain("Kitchen");
+  });
+
+  it("film intros set honest expectations and the outro closes each section", () => {
+    const intro = filmRoomScript("bathroom", 2, 4);
+    expect(intro).toContain("End the video when you have captured every shot.");
+    expect(intro).not.toContain("tell you when it is saved");
+    expect(filmRoomScript("kitchen", 1, 4, "es")).toContain("Termine el video cuando haya capturado cada toma.");
+    expect(filmOutroCue()).toContain("end the video");
+    expect(filmOutroCue("es")).toContain("Termine el video");
   });
 
   it("tracks Spanish room-check answers against the Spanish questions", () => {

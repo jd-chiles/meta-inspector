@@ -1,11 +1,27 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { speakCueChain } from "../../../src/features/walkthrough/voice-conversation";
+import {
+  DEVICE_SPEECH_RATE,
+  SPEECH_PLAYBACK_RATE,
+  playbackTimeoutMs,
+  speakCueChain,
+} from "../../../src/features/walkthrough/voice-conversation";
 import { __setGuideSpeakerForTests, speakCueSequence } from "../../../src/features/walkthrough/voice-guide";
 
 afterEach(() => {
   __setGuideSpeakerForTests(null);
   vi.unstubAllGlobals();
+});
+
+describe("narration pace", () => {
+  it("speaks ~30% under conversational rate with matching budgets", () => {
+    expect(SPEECH_PLAYBACK_RATE).toBe(0.7);
+    expect(DEVICE_SPEECH_RATE).toBe(0.75);
+    expect(playbackTimeoutMs("")).toBe(17_000);
+    expect(playbackTimeoutMs("x".repeat(100))).toBe(17_000);
+    expect(playbackTimeoutMs("x".repeat(200))).toBe(32_000);
+    expect(playbackTimeoutMs("x".repeat(1000))).toBe(60_000);
+  });
 });
 
 describe("speakCueChain retry", () => {
