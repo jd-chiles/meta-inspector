@@ -7,27 +7,26 @@ app `metainspect-app`, registry `metainspectprod`. Interim: the tailscale
 funnel preview (ephemeral, dies with this box — not production).
 
 Live dev branch: app `metainspect-dev` in the same group/environment,
-deployed 2026-11-03 from `origin/dev` (`b5dc9f4`, image
-`metainspect:mvp19`, revision `metainspect-dev--0000010`, Healthy).
-Voice restoration: the ambient voice guide is back as one docked bar
-in the footer stack (spoken per-step guidance + live filming cues on
-every manual step, yielding to the tour agent bar on the tour step),
-4-tab nav grid fixed, in-person checks moved inside the capture
-section so the sticky viewport dock keeps its pin range. minReplicas 0
+deployed 2026-11-03 from `origin/dev` (`4c76494`, image
+`metainspect:mvp20`, revision `metainspect-dev--0000011`, Healthy).
+Live pre-screen: `POST /api/prescreen` runs one Census geocode, then
+LADBS open cases, LAHD violations, FEMA flood, HUD lead index, and
+OpenFEMA disasters in parallel (all keyless, per-source degradation).
+minReplicas 0
 (scale-to-zero; cold start covered by the boot splash). Same
 1 vCPU / 2 Gi shape, own `APP_PUBLIC_ORIGIN`. Registry pull via
 system-assigned identity + AcrPull (ACR admin stays off).
 Passcode-gated, live analysis mode. Prior healthy dev revision
-`metainspect-dev--0000009` (image `metainspect:mvp18`).
+`metainspect-dev--0000010` (image `metainspect:mvp19`).
 
 Production: app `metainspect-app`, deployed 2026-11-03 from
-`origin/dev` (`b5dc9f4`, image `metainspect:mvp19`, revision
-`metainspect-app--0000019`, Healthy, minReplicas 1 warm). Same
+`origin/dev` (`4c76494`, image `metainspect:mvp20`, revision
+`metainspect-app--0000020`, Healthy, minReplicas 1 warm). Same
 feature set as dev above; no Langfuse secrets on prod so tracing
 stays dormant there. Passcode-gated, live analysis mode.
 Rollback: `az containerapp update -g metainspect-prod -n
-metainspect-app --image metainspectprod.azurecr.io/metainspect:mvp17`
-(prior healthy revision `metainspect-app--0000018`).
+metainspect-app --image metainspectprod.azurecr.io/metainspect:mvp19`
+(prior healthy revision `metainspect-app--0000019`).
 
 Redeploy: build + push a new tag, `az containerapp update` with the
 app name, re-verify 307 + origin probes. Note: `.dockerignore` must
