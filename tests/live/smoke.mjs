@@ -174,7 +174,7 @@ function validateSegmentResponse(body, { identity, videoSha256, elementIds, now 
   const errors = [];
   const responseKeys = [
     "ok", "stage", "models", "room", "media", "identity", "candidates", "sampleTimestampsMs",
-    "candidateToken", "mappingExpiresAt", "mappingRequired", "humanReviewRequired", "conditionAssessment",
+    "analysisNote", "candidateToken", "mappingExpiresAt", "mappingRequired", "humanReviewRequired", "conditionAssessment",
   ];
   const emptyCandidates = isRecord(body) && Array.isArray(body.candidates) && body.candidates.length === 0;
   if (!isRecord(body) || Object.keys(body).some((key) => !responseKeys.includes(key)) ||
@@ -184,6 +184,9 @@ function validateSegmentResponse(body, { identity, videoSha256, elementIds, now 
     return { ok: false, errors: ["segment response has an unexpected shape"] };
   }
   if (body.ok !== true || body.stage !== "segmented") errors.push("segment response status is invalid");
+  if (typeof body.analysisNote !== "string" || body.analysisNote.length === 0 || body.analysisNote.length > 200) {
+    errors.push("segment analysis window note is invalid");
+  }
   if (!exactKeys(body.models, ["segmentation"]) || body.models.segmentation !== "sam-3.1") errors.push("segmentation model is invalid");
   if (body.room !== DEFAULT_ROOM) errors.push("segment room is invalid");
   if (!exactKeys(body.media, ["container", "sourceVideoSha256"]) || body.media.container !== "mp4" || body.media.sourceVideoSha256 !== videoSha256) {
@@ -513,6 +516,7 @@ function runSelfTest() {
     identity: expected,
     candidates: [candidate],
     sampleTimestampsMs: [500, 1_500, 2_500, 3_500],
+    analysisNote: "Analysis uses the first 30 seconds — film the shot list, then stop.",
     candidateToken: "signed-candidate-token-for-self-test",
     mappingExpiresAt: Date.now() + 60_000,
     mappingRequired: true,
