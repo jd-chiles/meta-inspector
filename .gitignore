@@ -12,3 +12,7 @@ test-results/
 .sdd/locks/
 *.log
 .DS_Store
+.agents/
+.muse/
+.hermes/
+executor-contract*.md
