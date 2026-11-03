@@ -7,27 +7,25 @@ app `metainspect-app`, registry `metainspectprod`. Interim: the tailscale
 funnel preview (ephemeral, dies with this box — not production).
 
 Live dev branch: app `metainspect-dev` in the same group/environment,
-deployed 2026-11-03 from `origin/dev` (`2ebda82`, image
-`metainspect:mvp22`, revision `metainspect-dev--0000013`, Healthy).
-Origin + narration fix: shared checkAppOrigin trusts
-APP_PUBLIC_ORIGIN on guide/analyze/polish/prescreen (was 403ing
-every browser call in prod); guide speech stops exactly once on
-tour entry instead of every record update; cue chains retry once;
-device-voice resume keepalive. minReplicas 0
+deployed 2026-11-03 from `origin/dev` (`634ba1f`, image
+`metainspect:mvp23`, revision `metainspect-dev--0000014`, Healthy).
+Narration pace + honesty: 0.7 playback / 0.75 device rate with
+scaled budgets; film intros end with end-the-video guidance;
+spoken-only outro closes every take (EN+ES). minReplicas 0
 (scale-to-zero; cold start covered by the boot splash). Same
 1 vCPU / 2 Gi shape, own `APP_PUBLIC_ORIGIN`. Registry pull via
 system-assigned identity + AcrPull (ACR admin stays off).
 Passcode-gated, live analysis mode. Prior healthy dev revision
-`metainspect-dev--0000012` (image `metainspect:mvp21`).
+`metainspect-dev--0000013` (image `metainspect:mvp22`).
 
 Production: app `metainspect-app`, deployed 2026-11-03 from
-`origin/dev` (`2ebda82`, image `metainspect:mvp22`, revision
-`metainspect-app--0000022`, Healthy, minReplicas 1 warm). Same
+`origin/dev` (`634ba1f`, image `metainspect:mvp23`, revision
+`metainspect-app--0000023`, Healthy, minReplicas 1 warm). Same
 feature set as dev above; no Langfuse secrets on prod so tracing
 stays dormant there. Passcode-gated, live analysis mode.
 Rollback: `az containerapp update -g metainspect-prod -n
-metainspect-app --image metainspectprod.azurecr.io/metainspect:mvp21`
-(prior healthy revision `metainspect-app--0000021`).
+metainspect-app --image metainspectprod.azurecr.io/metainspect:mvp22`
+(prior healthy revision `metainspect-app--0000022`).
 
 Redeploy: build + push a new tag, `az containerapp update` with the
 app name, re-verify 307 + origin probes. Note: `.dockerignore` must
