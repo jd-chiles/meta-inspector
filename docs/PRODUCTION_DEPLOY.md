@@ -7,18 +7,18 @@ app `metainspect-app`, registry `metainspectprod`. Interim: the tailscale
 funnel preview (ephemeral, dies with this box — not production).
 
 Live dev branch: app `metainspect-dev` in the same group/environment,
-deployed 2026-11-03 from `origin/dev` (`500c521`, image
-`metainspect:mvp17`, revision `metainspect-dev--0000008`, Healthy).
-Sprints S0–S4 + Langfuse join-mode fix: 6-wide SAM with 2-room
-parallel analysis, 30 s analysis cap, Muse Voice Transcribe ASR,
-participant co-signature, visual-alarms flag, LAHSA-schema JSON +
-case note + bilingual landlord fix list, re-inspection mode, offline
-queue, GPS attestation, pre-screen card, Spanish tour, detector test
-shot, Langfuse tracing (dev secrets wired). minReplicas 0
+deployed 2026-11-03 from `origin/dev` (`e6819d5`, image
+`metainspect:mvp18`, revision `metainspect-dev--0000009`, Healthy).
+Single-AI-surface consolidation: guide popup + voice-guide removed,
+the guided tour walks every 1083 input (review → details →
+fire-safety → agency → landlord → leadership → participant →
+sign-off), 4-tab nav, explicit-tap paid analysis, tour-signoff +
+single-ai-surface e2e specs. minReplicas 0
 (scale-to-zero; cold start covered by the boot splash). Same
 1 vCPU / 2 Gi shape, own `APP_PUBLIC_ORIGIN`. Registry pull via
 system-assigned identity + AcrPull (ACR admin stays off).
-Passcode-gated, live analysis mode.
+Passcode-gated, live analysis mode. Prior healthy dev revision
+`metainspect-dev--0000008` (image `metainspect:mvp17`).
 
 Production: app `metainspect-app`, deployed 2026-11-03 from
 `origin/dev` (`500c521`, image `metainspect:mvp17`, revision
