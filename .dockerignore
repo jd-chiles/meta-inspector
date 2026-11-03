@@ -1,6 +1,8 @@
 node_modules
 .next
 .git
+.muse
+.agents
 *.md
 Dockerfile
 .dockerignore
