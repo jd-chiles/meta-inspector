@@ -1,7 +1,7 @@
 {
-  "name": "Habitability Walkthrough Companion",
-  "short_name": "Walkthrough",
-  "description": "Mobile-first LAHSA Form 1083 walkthrough companion for staged mock units. Capture room video and prompts offline, review evidence, record evaluator decisions, and export local drafts. Not an HMIS or LAHSA submission.",
+  "name": "Meta Inspect — Move-in Ready",
+  "short_name": "Meta Inspect",
+  "description": "Move-in Ready by Meta Inspect: mobile-first LAHSA Form 1083 walkthrough companion for staged mock units. Capture room video and prompts offline, review evidence, record evaluator decisions, and export local drafts. Not an HMIS or LAHSA submission.",
   "id": "/",
   "start_url": "/",
   "scope": "/",

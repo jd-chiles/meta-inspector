@@ -20,11 +20,11 @@ const SPLASH_CSS = `
 
 export const metadata: Metadata = {
   title: {
-    default: "Habitability Walkthrough Companion",
-    template: "%s · Habitability Walkthrough Companion",
+    default: "Meta Inspect — Move-in Ready",
+    template: "%s · Meta Inspect",
   },
   description:
-    "A mobile-first LAHSA Form 1083 room-video walkthrough for staged mock units, with human-reviewed evidence and local/manual exports. Not an HMIS submission.",
+    "Move-in Ready by Meta Inspect: mobile-first LAHSA Form 1083 room-video walkthrough for staged mock units, with human-reviewed evidence and local/manual exports. Not an HMIS submission.",
   manifest: "/manifest.webmanifest",
 };
 
@@ -65,8 +65,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <rect x="15" y="3" width="10" height="6" rx="2" fill="#176b5b" />
               <path d="M14 20l5 5 7-9" fill="none" stroke="#176b5b" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <p className="app-splash-title">Habitability Walkthrough</p>
-            <p className="app-splash-sub">Mock-unit pilot</p>
+            <p className="app-splash-title">Meta Inspect</p>
+            <p className="app-splash-sub">Move-in Ready · Mock-unit pilot</p>
             <div className="app-splash-spinner" aria-hidden="true" />
             <p className="app-splash-status" id="app-splash-status">Loading…</p>
           </div>
