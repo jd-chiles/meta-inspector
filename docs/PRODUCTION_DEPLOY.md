@@ -16,7 +16,8 @@ answers prefill draft-less detail), room skip on every filming card,
 bathroom faucet/toilet/fan scope, analysis timeouts + elapsed
 progress + wake-lock, share-sheet exports. Same 1 vCPU / 2 Gi shape,
 same secrets (own copies), own `APP_PUBLIC_ORIGIN` (single-value
-sender check cannot share prod's). minReplicas 1 (warm; reversible).
+sender check cannot share prod's). minReplicas 0 since 2026-11-02
+(scale-to-zero; cold start covered by the boot splash).
 Registry pull via system-assigned identity + AcrPull (ACR admin stays
 off). Passcode-gated, live analysis mode. Prod (`metainspect-app`,
 mvp13) untouched. Redeploy: build + push a new tag,
