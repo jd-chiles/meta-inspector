@@ -7,17 +7,18 @@ app `metainspect-app`, registry `metainspectprod`. Interim: the tailscale
 funnel preview (ephemeral, dies with this box — not production).
 
 Live dev branch: app `metainspect-dev` in the same group/environment,
-deployed 2026-11-02 from `origin/dev` (`3d64b07`, image
-`metainspect:mvp15`, revision `metainspect-dev--0000004`, Healthy).
-Single-entrance tour (prestart guide gate), cache-first SW nav
-(shell-v5), voice-led journey + splash, Form1083/CoC wording. Clean
-from-source FFmpeg 9.0.2 build (ffmpeg.org recovered; fixed a
-pipefail SIGPIPE in the verify step). Same 1 vCPU / 2 Gi shape, same
-secrets (own copies), own `APP_PUBLIC_ORIGIN` (single-value sender
-check cannot share prod's). minReplicas 1 (warm; reversible). Registry pull via system-assigned identity + AcrPull (ACR
-admin stays off). Passcode-gated, live analysis mode. Prod
-(`metainspect-app`, mvp13) untouched. Redeploy: build + push a new
-tag, `az containerapp update -g metainspect-prod -n metainspect-dev
+deployed 2026-11-02 from `origin/dev` (`330d92c`, image
+`metainspect:mvp16`, revision `metainspect-dev--0000005`, Healthy).
+Review friction removal (save = in-person acknowledgment, spoken
+answers prefill draft-less detail), room skip on every filming card,
+bathroom faucet/toilet/fan scope, analysis timeouts + elapsed
+progress + wake-lock, share-sheet exports. Same 1 vCPU / 2 Gi shape,
+same secrets (own copies), own `APP_PUBLIC_ORIGIN` (single-value
+sender check cannot share prod's). minReplicas 1 (warm; reversible).
+Registry pull via system-assigned identity + AcrPull (ACR admin stays
+off). Passcode-gated, live analysis mode. Prod (`metainspect-app`,
+mvp13) untouched. Redeploy: build + push a new tag,
+`az containerapp update -g metainspect-prod -n metainspect-dev
 --image …`, re-verify 307 + origin probes.
 
 ## Image
