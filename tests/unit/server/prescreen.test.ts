@@ -279,4 +279,22 @@ describe("prescreen handler", () => {
     const result = await handlePrescreenRequest(request(QUERY), { analysisModeEnv: "bogus" });
     expect(result.status).toBe(503);
   });
+
+  it("accepts the public origin behind managed ingress", async () => {
+    const publicOrigin = "https://metainspect-dev.test";
+    const viaIngress = request(
+      QUERY,
+      { origin: publicOrigin },
+      "http://10.0.0.5:3000/api/prescreen",
+    );
+    const allowed = await handlePrescreenRequest(viaIngress, { mode: "fixture", appPublicOrigin: publicOrigin });
+    expect(allowed.status).toBe(200);
+    const denied = await handlePrescreenRequest(
+      request(QUERY, { origin: "https://evil.test" }, "http://10.0.0.5:3000/api/prescreen"),
+      { mode: "fixture", appPublicOrigin: publicOrigin },
+    );
+    expect(denied.status).toBe(403);
+    const misconfigured = await handlePrescreenRequest(viaIngress, { mode: "fixture", appPublicOrigin: "not-a-url" });
+    expect(misconfigured.status).toBe(503);
+  });
 });

@@ -1,5 +1,9 @@
 # Change log
 
+## Voice walkthrough reliability — November 3, 2026 (Muse Code)
+
+Owner reported the guided voice sometimes read only the first filming prompt. Three defects: (1) cues raced fixed timers against playback and could be dropped; (2) iOS only lets an Audio element play from timers after it played inside a user gesture, so delayed cues were rejected; (3) the assistant-speech effect cleanup cancelled speech on every record-derived identity change, killing narration mid-take. Fix: recording start primes a shared playback element; tour and capture narration walk cues sequentially (next waits for the current one, a failed cue never blocks the rest); the harmful generic cleanup is removed. Verified: lint/typecheck clean, unit green, browser green (full counts in the session record). No REQ change; no task acceptance or native evidence.
+
 ## Pre-screen round 2: assisted housing, emissions, exclusions (REQ-R1) — November 3, 2026 (Muse Code)
 
 - Three more sources join the fan-out: HUD assisted multifamily within 1 km (subsidy, REAC score, troubled flag, risk), EPA TRI facilities by ZIP (emissions context), and SAM.gov exclusions by owner name (dormant: needs free `SAM_API_KEY` plus an owner name; parcel coverage for owner identity unverified, so it reports skipped with the assessor-portal remedy). LAHD rows gain the APN. Upstream body reads are now time-bounded (5 s) after a trickling EPA response hung the route past the client timeout; full 8-source live report returns in ~4 s.

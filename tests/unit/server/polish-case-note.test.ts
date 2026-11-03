@@ -123,6 +123,8 @@ describe("case-note polish route", () => {
   it("rejects cross-origin, malformed, and oversized requests", async () => {
     const enabled = { metaEnv: { TEXT_POLISH_ENABLED: "1", META_API_KEY: "test-key" } };
     expect((await handlePolishCaseNoteRequest(request({ text: TEMPLATE }, { origin: "https://other.test" }), enabled)).status).toBe(403);
+    const viaIngress = request({ text: TEMPLATE }, { origin: "https://walkthrough.test" }, "http://10.0.0.5:3000/api/exports/polish-case-note");
+    expect((await handlePolishCaseNoteRequest(viaIngress, { ...enabled, appPublicOrigin: "https://walkthrough.test" })).status).toBe(200);
     expect((await handlePolishCaseNoteRequest(request({ text: TEMPLATE, extra: true }), enabled)).status).toBe(400);
     expect((await handlePolishCaseNoteRequest(request({ text: "" }), enabled)).status).toBe(400);
     expect((await handlePolishCaseNoteRequest(request({ text: "x".repeat(20_000) }), enabled)).status).toBe(400);

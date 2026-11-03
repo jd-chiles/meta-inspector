@@ -917,6 +917,11 @@ describe("same-machine origin aliases (REQ-002, REQ-010)", () => {
   });
 
   it("rejects cross-host, cross-port, and cross-scheme origins (403)", async () => {
+    const viaIngress = await handleAnalyzeRequest(
+      analyzeRequestTo("http://10.0.0.5:3000/api/analyze", analyzeForm(GOOD_FIELDS()), "https://walkthrough.test"),
+      { mode: "fixture", tracker: new InflightTracker(), appPublicOrigin: "https://walkthrough.test" },
+    );
+    expect(viaIngress.status).toBe(200);
     const evil = await handleAnalyzeRequest(
       analyzeRequestTo("http://localhost:3100/api/analyze", analyzeForm(GOOD_FIELDS()), "http://evil.com:3100"),
       { mode: "fixture", tracker: new InflightTracker() },

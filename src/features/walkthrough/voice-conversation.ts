@@ -29,36 +29,126 @@ function speakWithDeviceVoice(text: string): Promise<void> {
         return;
       }
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.onend = () => resolve();
-      utterance.onerror = () => resolve();
+      const done = () => {
+        window.clearInterval(keepalive);
+        resolve();
+      };
+      utterance.onend = done;
+      utterance.onerror = done;
       window.speechSynthesis.cancel();
       window.speechSynthesis.speak(utterance);
+      // iOS/macOS randomly suspend long utterances; a resume pulse keeps
+      // narration alive until it ends. Cleared the moment speech settles.
+      const keepalive = window.setInterval(() => {
+        try {
+          if (window.speechSynthesis.speaking && window.speechSynthesis.paused) window.speechSynthesis.resume();
+        } catch {
+          // Best-effort only.
+        }
+      }, 3000);
       // Never hang the conversation on a stuck voice engine.
-      window.setTimeout(resolve, Math.min(30_000, 3000 + text.length * 120));
+      window.setTimeout(done, Math.min(30_000, 3000 + text.length * 120));
     } catch {
       resolve();
     }
   });
 }
 
-function playAudioUrl(url: string, signal?: AbortSignal): Promise<void> {
+/**
+ * Shared playback element. iOS only lets an element play later (from
+ * timers) if it was played inside a user gesture first, so recording
+ * start primes it; every guided clip then plays through it.
+ */
+let sharedAudio: HTMLAudioElement | null = null;
+
+function silentWavUrl(): string {
+  const sampleRate = 8000;
+  const samples = 400;
+  const buffer = new ArrayBuffer(44 + samples * 2);
+  const view = new DataView(buffer);
+  const write = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i));
+  };
+  write(0, "RIFF");
+  view.setUint32(4, 36 + samples * 2, true);
+  write(8, "WAVEfmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  write(36, "data");
+  view.setUint32(40, samples * 2, true);
+  return URL.createObjectURL(new Blob([buffer], { type: "audio/wav" }));
+}
+
+function ensureSharedAudio(): HTMLAudioElement | null {
+  try {
+    if (typeof Audio === "undefined") return null;
+    if (!sharedAudio) sharedAudio = new Audio();
+    return sharedAudio;
+  } catch {
+    return null;
+  }
+}
+
+/** Play near-silence inside a user gesture so later guided clips play. */
+export function primeAudio(): void {
+  try {
+    const audio = ensureSharedAudio();
+    if (!audio) return;
+    audio.src = silentWavUrl();
+    void audio.play().catch(() => undefined);
+  } catch {
+    // Autoplay policy stays silent; speech retries on the next tap.
+  }
+}
+
+export const PLAYBACK_TIMEOUT_MESSAGE = "voice playback timed out";
+
+/** Hard cap for one clip: speech runs ~15 chars/s, floor 12s, cap 45s. */
+export function playbackTimeoutMs(text: string): number {
+  return Math.max(12_000, Math.min(45_000, text.length * 110));
+}
+
+function playAudioUrl(url: string, signal?: AbortSignal, timeoutMs: number = 12_000): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    const audio = new Audio(url);
+    const audio = ensureSharedAudio() ?? new Audio(url);
+    audio.src = url;
+    const timer = setTimeout(() => {
+      cleanup();
+      audio.pause();
+      reject(new Error(PLAYBACK_TIMEOUT_MESSAGE));
+    }, timeoutMs);
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    };
     const onAbort = () => {
+      cleanup();
       audio.pause();
       reject(new DOMException("aborted", "AbortError"));
     };
     signal?.addEventListener("abort", onAbort, { once: true });
     audio.onended = () => {
-      signal?.removeEventListener("abort", onAbort);
+      cleanup();
       resolve();
     };
     audio.onerror = () => {
-      signal?.removeEventListener("abort", onAbort);
+      cleanup();
       reject(new Error("voice playback failed"));
     };
-    void audio.play().catch(reject);
+    void audio.play().catch((error: unknown) => {
+      cleanup();
+      reject(error instanceof Error ? error : new Error("voice playback failed"));
+    });
   });
+}
+
+function isPlaybackTimeout(error: unknown): boolean {
+  return error instanceof Error && error.message === PLAYBACK_TIMEOUT_MESSAGE;
 }
 
 export interface SpeakPromptOptions {
@@ -76,11 +166,13 @@ export async function speakPrompt(text: string, signal?: AbortSignal, options: S
   try {
     const clip = await staticVoiceUrl(text, fetch, language);
     if (clip && !signal?.aborted) {
-      await playAudioUrl(clip, signal);
+      await playAudioUrl(clip, signal, playbackTimeoutMs(text));
       return { engine: "fish" };
     }
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
+    // A stuck clip counts as spoken: never freeze the walkthrough on it.
+    if (isPlaybackTimeout(error)) return { engine: "fish" };
     // A missing or unplayable clip falls through to live speech below.
   }
   if (signal?.aborted) return { engine: "none" };
@@ -99,7 +191,7 @@ export async function speakPrompt(text: string, signal?: AbortSignal, options: S
     if (blob.size === 0) throw new Error("voice speak empty");
     const url = URL.createObjectURL(blob);
     try {
-      await playAudioUrl(url, signal);
+      await playAudioUrl(url, signal, playbackTimeoutMs(text));
       return { engine: "fish" };
     } finally {
       URL.revokeObjectURL(url);
@@ -107,6 +199,7 @@ export async function speakPrompt(text: string, signal?: AbortSignal, options: S
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     if (signal?.aborted) return { engine: "none" };
+    if (isPlaybackTimeout(error)) return { engine: "fish" };
     stopDeviceSpeech();
     await speakWithDeviceVoice(text);
     if (signal?.aborted) return { engine: "none" };
@@ -116,6 +209,63 @@ export async function speakPrompt(text: string, signal?: AbortSignal, options: S
 
 export interface ListenResult {
   blob: Blob;
+}
+
+type CueSpeaker = (text: string, signal: AbortSignal) => Promise<unknown>;
+
+/**
+ * Speak cues strictly in turn: the next cue waits for the current one to
+ * finish instead of racing fixed timers. A failed cue never blocks the
+ * rest; aborting the signal stops the chain silently.
+ */
+export async function speakCueChain(
+  texts: readonly string[],
+  speak: CueSpeaker,
+  signal: AbortSignal,
+  onCue?: (index: number) => void,
+): Promise<void> {
+  for (let index = 0; index < texts.length; index++) {
+    if (signal.aborted) return;
+    onCue?.(index);
+    // One cue gets a hard ceiling (speech time + fetch slack): a stalled
+    // clip, fetch, or device voice can never freeze the walkthrough.
+    // A failed cue retries once before moving on: a network blip must
+    // not silently drop the walkthrough's voice mid-take.
+    const ceilingMs = playbackTimeoutMs(texts[index]!) + 8_000;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (signal.aborted) return;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          speak(texts[index]!, signal),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => reject(new Error("cue timed out")), ceilingMs);
+          }),
+        ]);
+        break;
+      } catch {
+        if (signal.aborted) return;
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    }
+    if (signal.aborted) return;
+    await new Promise((resolveGap) => setTimeout(resolveGap, 600));
+  }
+}
+
+/** Guided narration: speak the shot list step by step through the Fish pipeline. */
+export function speakSequentially(
+  texts: readonly string[],
+  signal: AbortSignal,
+  options: SpeakPromptOptions & { onCue?: (index: number) => void } = {},
+): Promise<void> {
+  return speakCueChain(
+    texts,
+    (text, chainSignal) => speakPrompt(text, chainSignal, { language: options.language }),
+    signal,
+    options.onCue,
+  );
 }
 
 function pickMimeType(): string {

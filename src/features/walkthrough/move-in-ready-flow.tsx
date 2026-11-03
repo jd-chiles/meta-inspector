@@ -156,7 +156,7 @@ import {
 import { deriveGuideModel } from "./walkthrough-guide";
 import { deriveAssistantNode, filmingScriptForRoom, type AssistantAction as GuideVoiceAction } from "./assistant-script";
 import GuideVoiceBar from "./guide-voice-bar";
-import { cancelSpeech, readVoiceEnabled, speakText, writeVoiceEnabled } from "./voice-guide";
+import { cancelSpeech, readVoiceEnabled, speakCueSequence, speakText, writeVoiceEnabled } from "./voice-guide";
 import VoicePrompt from "./voice-prompt";
 import GuidedTourView from "./guided-tour-view";
 import { SETUP_VOICE_QUESTIONS, checksForRoom } from "./voice-checks";
@@ -405,6 +405,7 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
   const [batchAttested, setBatchAttested] = useState(false);
   const [voiceOn, setVoiceOn] = useState(() => readVoiceEnabled());
   const spokenGuideKeyRef = useRef<string | null>(null);
+  const prevStepRef = useRef(step);
   const [batchSendConsent, setBatchSendConsent] = useState(false);
   const batchAttestedRef = useRef(batchAttested);
   batchAttestedRef.current = batchAttested;
@@ -1285,34 +1286,47 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
   // Speak each new guidance node aloud. Silent on the tour step: the
   // tour narrates its own nodes, so the bar yields to keep one voice.
   useEffect(() => {
+    const wasStep = prevStepRef.current;
+    prevStepRef.current = step;
     if (step === "guided") {
       spokenGuideKeyRef.current = null;
-      cancelSpeech();
+      // Tour owns voice here: stop guide narration exactly once on entry.
+      // Cancelling on every run would re-fire on each record update and
+      // decapitate the tour's device-voice fallback mid-sentence.
+      if (wasStep !== "guided") cancelSpeech();
       return;
     }
     if (!voiceOn) return;
     if (spokenGuideKeyRef.current === assistantNode.key) return;
     spokenGuideKeyRef.current = assistantNode.key;
     speakText(assistantNode.speak);
-    return () => cancelSpeech();
+    // No cancelSpeech cleanup here: this effect re-runs on every
+    // record-derived node identity, and cancelling here killed narration
+    // cues mid-take. speakText already replaces in-flight speech.
   }, [assistantNode, step, voiceOn]);
 
-  // Step through the filming script on timed cues while a take is
+  // Walk the filming script step by step while a take is
   // recording. The cue index always advances (muted users read the current
   // cue in the bar and viewport caption); speech additionally narrates when
   // on. Silent on the tour step, where the tour narrates the take.
   useEffect(() => {
     if (!recordingInProgress) return;
     const cues = filmingScriptForRoom(selectedRoomId);
-    const timers = cues.map((cue, index) =>
-      window.setTimeout(() => {
-        setRecordingCueIndex(index);
-        if (voiceOn && stepRef.current !== "guided") speakText(cue);
-      }, 800 + index * 7000));
+    // Sequential: each cue waits for the previous one to finish instead
+    // of racing fixed timers against playback. Muted guide still steps
+    // the caption index on a slow timer so muted users keep pacing.
+    if (!voiceOn || stepRef.current === "guided") {
+      const timers = cues.map((cue, index) =>
+        window.setTimeout(() => setRecordingCueIndex(index), 800 + index * 7000));
+      return () => {
+        timers.forEach((timer) => window.clearTimeout(timer));
+        setRecordingCueIndex(-1);
+      };
+    }
+    const sequence = speakCueSequence(cues, (index) => setRecordingCueIndex(index));
     return () => {
-      timers.forEach((timer) => window.clearTimeout(timer));
+      sequence.cancel();
       setRecordingCueIndex(-1);
-      cancelSpeech();
     };
   }, [recordingInProgress, selectedRoomId, voiceOn]);
 

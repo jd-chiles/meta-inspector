@@ -18,6 +18,7 @@ import {
   Video,
 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { primeAudio } from "./voice-conversation";
 
 import {
   isMoveInReadyRoomId,
@@ -416,6 +417,9 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
   }
 
   async function startCameraRecording(): Promise<void> {
+    // This tap is a user gesture: unlock narration audio for the cues
+    // that play from timers while this take records.
+    primeAudio();
     setCameraIssue(null);
     setLocalError(null);
     pendingPromptIdsRef.current = [];

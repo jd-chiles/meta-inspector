@@ -41,7 +41,7 @@ import {
 import { filmingScriptForRoom } from "./assistant-script";
 import { ANALYSIS_WINDOW_NOTE } from "../../domain/video-format";
 import { parseBathCount, parseUnitType, parseYesNo } from "./voice-parse";
-import { speakPrompt } from "./voice-conversation";
+import { speakPrompt, speakSequentially } from "./voice-conversation";
 import VoicePrompt, { type VoicePromptPhase } from "./voice-prompt";
 import WalkthroughVideoCapture from "./video-capture";
 import DetectorTestCapture, { type CapturedDetectorStill } from "./detector-test-capture";
@@ -325,12 +325,23 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
   useEffect(() => {
     if (node.kind !== "film-room" || !tourRecording || !speakOn) return;
     const cues = filmingScriptForRoom(node.roomId, lang);
-    const timers = cues.map((cue, index) =>
-      window.setTimeout(() => { setShotIndex(index); sayNow(cue); }, 1500 + index * 8000));
+    const controller = new AbortController();
+    speechControllerRef.current = controller;
+    setTourSpeaking(true);
+    void speakSequentially(cues, controller.signal, {
+      language: lang,
+      onCue: (index) => setShotIndex(index),
+    }).finally(() => {
+      if (speechControllerRef.current === controller) {
+        speechControllerRef.current = null;
+        setTourSpeaking(false);
+      }
+    });
     return () => {
-      timers.forEach((timer) => window.clearTimeout(timer));
+      controller.abort();
+      if (speechControllerRef.current === controller) speechControllerRef.current = null;
       setShotIndex(-1);
-      stopSpeech();
+      setTourSpeaking(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodeKey, tourRecording, speakOn, lang]);

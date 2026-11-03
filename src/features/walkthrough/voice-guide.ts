@@ -6,7 +6,7 @@
  * speech-recognition API, so the user answers by tapping. All functions are
  * safe no-ops outside a browser or without voice support.
  */
-import { speakPrompt, type SpeakResult } from "./voice-conversation";
+import { playbackTimeoutMs, speakPrompt, type SpeakResult } from "./voice-conversation";
 
 const VOICE_ENABLED_KEY = "voice-guide-enabled-v1";
 
@@ -49,6 +49,58 @@ export function cancelSpeech(): void {
   } catch {
     // Unsupported browsers stay silent.
   }
+}
+
+export interface CueSequence {
+  done: Promise<void>;
+  cancel: () => void;
+}
+
+/**
+ * Speak the filming cues one at a time, in order. The next cue waits for
+ * the current one to finish; a failed cue never blocks the rest. cancel()
+ * stops the whole sequence. Used for guided-recording narration, where
+ * fixed timers raced playback and dropped cues.
+ */
+export function speakCueSequence(
+  texts: readonly string[],
+  onCue?: (index: number) => void,
+): CueSequence {
+  cancelSpeech();
+  const chain = new AbortController();
+  controller = chain;
+  const done = (async () => {
+    for (let index = 0; index < texts.length; index++) {
+      if (chain.signal.aborted) return;
+      onCue?.(index);
+      // Hard ceiling per cue so one stalled clip never freezes the take.
+      // A failed cue retries once: a network blip must not silently drop
+      // the guide's voice mid-take.
+      const ceilingMs = playbackTimeoutMs(texts[index]!) + 8_000;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (chain.signal.aborted) return;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            speaker(texts[index]!, chain.signal),
+            new Promise<never>((_resolve, reject) => {
+              timer = setTimeout(() => reject(new Error("cue timed out")), ceilingMs);
+            }),
+          ]);
+          break;
+        } catch {
+          if (chain.signal.aborted) return;
+        } finally {
+          if (timer !== undefined) clearTimeout(timer);
+        }
+      }
+      if (chain.signal.aborted) return;
+      await new Promise((resolveGap) => setTimeout(resolveGap, 600));
+    }
+  })().finally(() => {
+    if (controller === chain) controller = null;
+  });
+  return { done, cancel: () => chain.abort() };
 }
 
 /** Speak one guide message, replacing anything currently playing. */

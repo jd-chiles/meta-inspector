@@ -19,6 +19,7 @@ import {
   type FetchImpl,
   type MetaEnv,
 } from "../meta/adapter";
+import { checkAppOrigin } from "../request-origin";
 
 export const TEXT_POLISH_TIMEOUT_MS = 30_000;
 const MAX_TEMPLATE_CHARS = 16_384;
@@ -38,6 +39,7 @@ const POLISH_INSTRUCTIONS =
 export interface PolishCaseNoteDeps {
   metaEnv?: MetaEnv;
   fetchImpl?: FetchImpl;
+  appPublicOrigin?: string | undefined;
 }
 
 export function isTextPolishEnabled(env: MetaEnv): boolean {
@@ -50,29 +52,6 @@ function failure(status: number, code: string, message: string) {
 
 function templateResult(text: string) {
   return { status: 200, body: { text, polished: false as const } };
-}
-
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
-
-function normalizeOriginHost(hostname: string): string {
-  const host = hostname.trim().toLowerCase();
-  return host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
-}
-
-function sameOrigin(request: Request): boolean {
-  const origin = request.headers.get("origin");
-  if (origin === null || origin.trim().length === 0) return true;
-  try {
-    const originUrl = new URL(origin);
-    const targetUrl = new URL(request.url);
-    if (originUrl.origin === targetUrl.origin) return true;
-    return originUrl.protocol === targetUrl.protocol &&
-      originUrl.port === targetUrl.port &&
-      LOOPBACK_HOSTS.has(normalizeOriginHost(originUrl.hostname)) &&
-      LOOPBACK_HOSTS.has(normalizeOriginHost(targetUrl.hostname));
-  } catch {
-    return false;
-  }
 }
 
 function parseRequest(value: unknown): { text: string } | null {
@@ -156,7 +135,9 @@ export async function handlePolishCaseNoteRequest(
   request: Request,
   deps: PolishCaseNoteDeps = {},
 ): Promise<{ status: number; body: unknown }> {
-  if (!sameOrigin(request)) return failure(403, "ORIGIN_FORBIDDEN", "Cross-origin requests are rejected.");
+  const originCheck = checkAppOrigin(request, deps.appPublicOrigin ?? process.env.APP_PUBLIC_ORIGIN);
+  if (originCheck.configError) return failure(503, "SETUP_REQUIRED", "The server origin is misconfigured.");
+  if (!originCheck.allowed) return failure(403, "ORIGIN_FORBIDDEN", "Cross-origin requests are rejected.");
   if (!(request.headers.get("content-type") ?? "").toLowerCase().includes("application/json")) {
     return failure(400, "INVALID_REQUEST", "Send the case-note template as JSON.");
   }

@@ -20,6 +20,7 @@ import {
 } from "../domain/evidence";
 import fixtureJson from "../../fixtures/responses/fixture-draft.json";
 import { getServerCatalog } from "./catalog";
+import { checkAppOrigin } from "./request-origin";
 import {
   callMetaDraft,
   isMetaCallError,
@@ -122,6 +123,7 @@ export interface AnalyzeDeps {
   resampler?: PixelResampler;
   /** Override the explicit fixture payload (tests). Defaults to the bundled fixture. */
   fixture?: { mode: string; model?: unknown; draft?: unknown; fixtureNotice?: unknown };
+  appPublicOrigin?: string | undefined;
 }
 
 function errorBody(
@@ -145,39 +147,6 @@ function errorResult(
 
 function isNonEmpty(value: FormDataEntryValue | null): value is string {
   return typeof value === "string" && value.trim().length > 0;
-}
-
-/** Loopback aliases for the same-machine origin gate (REQ-002, REQ-010). */
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
-
-function normalizeOriginHost(hostname: string): string {
-  let host = hostname.trim().toLowerCase();
-  if (host.startsWith("[") && host.endsWith("]")) {
-    host = host.slice(1, -1);
-  }
-  return host;
-}
-
-function checkSameOrigin(request: Request): boolean {
-  const origin = request.headers.get("origin");
-  if (origin === null || origin.trim().length === 0) return true;
-  try {
-    const originUrl = new URL(origin);
-    const targetUrl = new URL(request.url);
-    if (originUrl.origin === targetUrl.origin) return true;
-    // Real browsers on the same machine may use a different loopback alias
-    // than the page URL (e.g. page on 127.0.0.1:3100 while Next.js reports
-    // localhost:3100). Treat localhost, 127.0.0.1, and ::1 as the same host
-    // only when scheme and port also match.
-    if (originUrl.protocol !== targetUrl.protocol) return false;
-    if (originUrl.port !== targetUrl.port) return false;
-    return (
-      LOOPBACK_HOSTS.has(normalizeOriginHost(originUrl.hostname)) &&
-      LOOPBACK_HOSTS.has(normalizeOriginHost(targetUrl.hostname))
-    );
-  } catch {
-    return false;
-  }
 }
 
 function linkTimeout(
@@ -289,7 +258,11 @@ export async function handleAnalyzeRequest(
   let sessionId = "";
 
   try {
-    if (!checkSameOrigin(request)) {
+    const originCheck = checkAppOrigin(request, deps.appPublicOrigin ?? process.env.APP_PUBLIC_ORIGIN);
+    if (originCheck.configError) {
+      return errorResult(503, "SETUP_REQUIRED", "The server origin is misconfigured.", false, analysisId);
+    }
+    if (!originCheck.allowed) {
       return errorResult(
         403,
         "ORIGIN_FORBIDDEN",
