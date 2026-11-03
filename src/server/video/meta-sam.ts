@@ -50,9 +50,12 @@ import { decodeSourceFrames } from "./source-stills";
 import {
   analysisTraceId,
   createAnalysisTracer,
+  extractResponseUsage,
   noopAnalysisTracer,
   runSpan,
   runSpanSync,
+  spanErrorCode,
+  type ActiveSpan,
   type AnalysisTracer,
 } from "../observability/langfuse-trace";
 
@@ -1606,6 +1609,7 @@ async function mapVideoWithMuse(
   fetchImpl: typeof fetch,
   signal: AbortSignal,
   tracer?: AnalysisTracer,
+  parent?: ActiveSpan | null,
 ): Promise<VideoModelProposal[]> {
   if (mapping.stills.length === 0) return [];
   const stillById = new Map(mapping.stills.map((still) => [still.candidate.candidateId, still]));
@@ -1698,6 +1702,8 @@ async function mapVideoWithMuse(
       sampleStills: mapping.sampleStills.map((still, index) => ({ index, timestampMs: still.timestampMs })),
     },
     outputText: text,
+    usage: extractResponseUsage(responseValue),
+    parent,
   });
   const rawClaims = isRecord(parsed) && Array.isArray(parsed.proposals) ? parsed.proposals.length : 0;
   return runSpanSync(tracer ?? noopAnalysisTracer(), "validate-proposals", {
@@ -1715,7 +1721,7 @@ async function mapVideoWithMuse(
       droppedClaims: Math.max(0, rawClaims - proposals.length),
     });
     return proposals;
-  });
+  }, parent);
 }
 
 function basetenChatOutputText(value: unknown): string {
@@ -1735,6 +1741,7 @@ async function mapVideoWithBaseten(
   fetchImpl: typeof fetch,
   signal: AbortSignal,
   tracer?: AnalysisTracer,
+  parent?: ActiveSpan | null,
 ): Promise<VideoModelProposal[]> {
   if (mapping.stills.length === 0) return [];
   const stillById = new Map(mapping.stills.map((still) => [still.candidate.candidateId, still]));
@@ -1794,7 +1801,8 @@ async function mapVideoWithBaseten(
     if (response.status >= 500) throw new VideoSegmentError(502, "PROVIDER_FAILURE", "The configured Muse fallback could not complete video mapping.");
     throw new VideoSegmentError(503, "SETUP_REQUIRED", "The configured Muse fallback rejected its request. Check the Baseten model setup.");
   }
-  const text = basetenChatOutputText(await boundedJson(response, "INVALID_MODEL_OUTPUT"));
+  const responseValue = await boundedJson(response, "INVALID_MODEL_OUTPUT");
+  const text = basetenChatOutputText(responseValue);
   if (text.length > 48 * 1024) {
     throw new VideoSegmentError(502, "INVALID_MODEL_OUTPUT", "Muse returned an oversized video mapping.");
   }
@@ -1817,6 +1825,8 @@ async function mapVideoWithBaseten(
       sampleStills: mapping.sampleStills.map((still, index) => ({ index, timestampMs: still.timestampMs })),
     },
     outputText: text,
+    usage: extractResponseUsage(responseValue),
+    parent,
   });
   const rawClaims = isRecord(parsed) && Array.isArray(parsed.proposals) ? parsed.proposals.length : 0;
   return runSpanSync(tracer ?? noopAnalysisTracer(), "validate-proposals", {
@@ -1834,7 +1844,7 @@ async function mapVideoWithBaseten(
       droppedClaims: Math.max(0, rawClaims - proposals.length),
     });
     return proposals;
-  });
+  }, parent);
 }
 
 async function mapVideoWithFallback(
@@ -1845,10 +1855,11 @@ async function mapVideoWithFallback(
   fetchImpl: typeof fetch,
   signal: AbortSignal,
   tracer?: AnalysisTracer,
+  parent?: ActiveSpan | null,
 ): Promise<{ proposals: VideoModelProposal[]; mappingModel: typeof MUSE_VIDEO_MODEL | typeof MUSE_BASETEN_MODEL }> {
   try {
     return {
-      proposals: await mapVideoWithMuse(baseUrl, metaApiKey, mapping, fetchImpl, signal, tracer),
+      proposals: await mapVideoWithMuse(baseUrl, metaApiKey, mapping, fetchImpl, signal, tracer, parent),
       mappingModel: MUSE_VIDEO_MODEL,
     };
   } catch (error) {
@@ -1856,7 +1867,7 @@ async function mapVideoWithFallback(
       error.code === "PROVIDER_FAILURE" && (error.status === 429 || error.status === 502);
     if (!basetenApiKey || !retryablePrimaryFailure || signal.aborted) throw error;
     return {
-      proposals: await mapVideoWithBaseten(basetenApiKey, mapping, fetchImpl, signal, tracer),
+      proposals: await mapVideoWithBaseten(basetenApiKey, mapping, fetchImpl, signal, tracer, parent),
       mappingModel: MUSE_BASETEN_MODEL,
     };
   }
@@ -1955,10 +1966,11 @@ export async function handleVideoSegmentRequest(request: Request, deps: Dependen
           schemaVersion: upload.identity.schemaVersion,
           catalogVersion: upload.identity.catalogVersion,
           models: { segmentation: SAM_VIDEO_MODEL },
-        });
+        }, { sessionId: upload.identity.sessionId, room: upload.room });
         const segmentTracer: AnalysisTracer = tracer;
         const operation = claimVideoSegmentation(upload.identity);
         let awaitingMap = false;
+        const segmentSpan = segmentTracer.span("segment", { room: upload.room });
         try {
           const decode = deps.decodeSourceFrames ?? decodeSourceFrames;
           const firstFrameTimestampMs = upload.video.frameTimestampsMs?.[0];
@@ -1977,7 +1989,7 @@ export async function handleVideoSegmentRequest(request: Request, deps: Dependen
             );
             span.end({ frames: frames.length });
             return frames;
-          });
+          }, segmentSpan);
           const preflightFrame = preflightFrames[0];
           if (preflightFrames.length !== 1 || !preflightFrame) {
             throw new VideoSegmentError(422, "INVALID_VIDEO", "The source video could not provide its first review frame.");
@@ -1988,9 +2000,9 @@ export async function handleVideoSegmentRequest(request: Request, deps: Dependen
             sourceVideoSha256: upload.sourceVideoSha256,
           }, async (span) => {
             const uploaded = await uploadVideo(config.baseUrl, config.apiKey, upload, fetchImpl, deadline.signal);
-            span.end({ fileId: uploaded });
+            span.end({ container: upload.video.container, bytes: upload.bytes.length });
             return uploaded;
-          });
+          }, segmentSpan);
           const prompts = videoPromptsForRoom(upload.room);
           // One fixed concept per SAM request; reuse the same short-lived upload.
           const results = await mapVideoConcepts(
@@ -2009,7 +2021,7 @@ export async function handleVideoSegmentRequest(request: Request, deps: Dependen
                 })),
               });
               return result;
-            }),
+            }, segmentSpan),
             deadline.signal,
             resolveMaxConcurrentSamConcepts(env),
           );
@@ -2027,7 +2039,7 @@ export async function handleVideoSegmentRequest(request: Request, deps: Dependen
               })),
             });
             return selected;
-          });
+          }, segmentSpan);
           const mappingExpiresAt = Date.now() + MAPPING_TOKEN_TTL_MS;
           const durationMs = upload.video.durationMs;
           if (!durationMs) throw new VideoSegmentError(422, "INVALID_VIDEO", "The room clip does not have a usable duration.");
@@ -2056,7 +2068,7 @@ export async function handleVideoSegmentRequest(request: Request, deps: Dependen
                   byteLength: stills.byteLength,
                 });
                 return stills;
-              })
+              }, segmentSpan)
             : undefined;
           if (deadline.signal.aborted) throw requestTimeoutError();
           const candidateToken = candidates.length > 0 ? signCandidatePayload({
@@ -2088,7 +2100,16 @@ export async function handleVideoSegmentRequest(request: Request, deps: Dependen
             humanReviewRequired: true,
             conditionAssessment: "not_assessed",
           };
+          segmentSpan.end({
+            candidates: candidates.length,
+            sampleTimestamps: sampleTimestampsMs.length,
+            mappingRequired: Boolean(candidateToken),
+          });
+          segmentTracer.finish({ stage: "segmented", room: upload.room, candidates: candidates.length });
           return jsonResponse(body, 200);
+        } catch (error) {
+          segmentSpan.fail(spanErrorCode(error));
+          throw error;
         } finally {
           if (!awaitingMap) operation.complete();
         }
@@ -2106,8 +2127,9 @@ export async function handleVideoSegmentRequest(request: Request, deps: Dependen
         attempt: mapping.identity.attempt,
         schemaVersion: mapping.identity.schemaVersion,
         catalogVersion: mapping.identity.catalogVersion,
-      });
+      }, { sessionId: mapping.identity.sessionId, room: mapping.room }, true);
       const operation = claimVideoMapping(mapping.identity, requiredText(form, "candidateToken", 48 * 1024));
+      const mapSpan = tracer.span("map", { room: mapping.room, candidates: mapping.candidates.length });
       try {
         const basetenApiKey = (env.BASETEN_API_KEY ?? "").trim() || null;
         const mappingWithStills = attachPendingMappingStills(mapping, operation.pendingStills);
@@ -2119,6 +2141,7 @@ export async function handleVideoSegmentRequest(request: Request, deps: Dependen
           fetchImpl,
           deadline.signal,
           tracer,
+          mapSpan,
         );
         if (deadline.signal.aborted) throw requestTimeoutError();
         const body: VideoMappedSuccess = {
@@ -2132,7 +2155,12 @@ export async function handleVideoSegmentRequest(request: Request, deps: Dependen
           humanReviewRequired: true,
           conditionAssessment: "not_assessed",
         };
+        mapSpan.end({ proposals: proposals.length, mappingModel });
+        tracer.finish({ stage: "mapped", room: mapping.room, proposals: proposals.length, mappingModel });
         return jsonResponse(body, 200);
+      } catch (error) {
+        mapSpan.fail(spanErrorCode(error));
+        throw error;
       } finally {
         operation.complete();
       }

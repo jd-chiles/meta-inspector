@@ -1,5 +1,19 @@
 # Change log
 
+## Langfuse v4-safe tracing (join mode) — November 3, 2026 (Muse Code)
+
+The shared-trace design re-sent client.trace with the same id from the
+map stage, and finish() used trace.update (which re-sends a
+trace-create). Per the Langfuse FAQ "How to update traces...", v4
+backends ingest re-sent ids as duplicate traces. createAnalysisTracer
+gains joinExistingTrace: the segment stage creates the trace, the map
+stage binds by explicit traceId for spans/generations, and finish()
+records a closing "stage-result" span instead of trace.update.
+Covered by tests/unit/server/observability/langfuse-join.test.ts with
+a mocked SDK (join mode never calls client.trace; both modes emit the
+result span). Verified: tsc clean, unit 642 passed / 3 skipped,
+e2e 47/47.
+
 ## Sprint 5 — Observability (REQ-O1, REQ-O2) — November 3, 2026 (Muse Code)
 
 - REQ-O1: server-only Langfuse tracing (`src/server/observability/langfuse-trace.ts`, `langfuse@3.39.2`). One trace per analysis attempt shared by the segment and map stages via a deterministic trace id; spans per phase (`preflight-decode`, `sam-upload`, `sam-concept:*`, `select-candidates`, `frame-decode`, `validate-proposals`) plus a `muse-map` generation; best-effort flush per request. Configured only when both `LANGFUSE_SECRET_KEY` and `LANGFUSE_PUBLIC_KEY` are set (optional `LANGFUSE_BASEURL`); unset means zero overhead and no network calls, and tracing never throws into the pipeline. Payloads are metadata only — never media bytes, pseudonyms, names, keys, or provider bodies (Muse response text excepted as the debugging target). Imported only by server code (both video API routes); no client path reaches it.
