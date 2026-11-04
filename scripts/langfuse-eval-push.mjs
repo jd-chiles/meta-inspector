@@ -14,7 +14,7 @@
  * Items carry references (room, clip SHA-256, task, expected behavior) —
  * never media bytes or resident-identifying content.
  */
-import { Langfuse } from "langfuse";
+import { LangfuseClient } from "@langfuse/client";
 
 import {
   EVAL_DATASET_NAME,
@@ -53,17 +53,18 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  const baseUrl = (process.env.LANGFUSE_BASEURL ?? "").trim() || undefined;
-  const client = new Langfuse({ secretKey, publicKey, ...(baseUrl ? { baseUrl } : {}) });
+  const baseUrl = (process.env.LANGFUSE_BASE_URL ?? process.env.LANGFUSE_BASEURL ?? "").trim() || undefined;
+  const client = new LangfuseClient({ secretKey, publicKey, ...(baseUrl ? { baseUrl } : {}) });
   try {
-    await client.createDataset(EVAL_DATASET_NAME, {
+    await client.api.datasets.create({
+      name: EVAL_DATASET_NAME,
       description: "Meta Inspect walkthrough accuracy benchmark (staged clips, 5 dimensions).",
     });
   } catch (error) {
     console.log(`Dataset create skipped (may already exist): ${error instanceof Error ? error.message : error}`);
   }
   for (const item of items) {
-    await client.createDatasetItem({
+    await client.dataset.createItem({
       datasetName: EVAL_DATASET_NAME,
       id: item.id,
       input: { ...item.input, dimension: item.dimension },
@@ -71,7 +72,7 @@ async function main() {
     });
     console.log(`Pushed ${item.id} [${item.dimension}]`);
   }
-  await client.flushAsync();
+  await client.shutdown();
   console.log(`Done: ${items.length} items in dataset ${EVAL_DATASET_NAME}.`);
 }
 

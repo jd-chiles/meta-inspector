@@ -25,17 +25,25 @@ describe("langfuse tracer gating (REQ-O1)", () => {
     expect(isLangfuseConfigured({ LANGFUSE_SECRET_KEY: "sk", LANGFUSE_PUBLIC_KEY: "pk" })).toBe(true);
   });
 
-  it("derives a deterministic sanitized trace id shared by both stages", () => {
+  it("derives a deterministic W3C trace id shared by both stages", () => {
     const identity = { sessionId: "session-1", analysisId: "analysis-9", attempt: 2 };
-    expect(analysisTraceId(identity)).toBe("analysis-session-1-analysis-9-a2");
-    expect(analysisTraceId(identity)).toBe(analysisTraceId({ ...identity }));
-    expect(
-      analysisTraceId({ sessionId: "a/b:c", analysisId: "d e", attempt: 1 }),
-    ).toBe("analysis-a-b-c-d-e-a1");
+    const first = analysisTraceId(identity);
+    expect(first).toMatch(/^[0-9a-f]{32}$/);
+    expect(analysisTraceId({ ...identity })).toBe(first);
+    expect(analysisTraceId({ ...identity, attempt: 3 })).not.toBe(first);
+    expect(analysisTraceId({ sessionId: "a/b:c", analysisId: "d e", attempt: 1 })).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  it("matches createTraceId for the same seed (verified sync mirror)", async () => {
+    const { createTraceId } = await import("@langfuse/tracing");
+    const identity = { sessionId: "session-1", analysisId: "analysis-9", attempt: 2 };
+    const seed = `analysis-${identity.sessionId}-${identity.analysisId}-a${identity.attempt}`;
+    await expect(createTraceId(seed)).resolves.toBe(analysisTraceId(identity));
   });
 
   it("returns a safe no-op tracer when unconfigured", async () => {
-    const tracer = createAnalysisTracer({}, "analysis-x", { room: "kitchen" }, { sessionId: "", room: "" });
+    const traceId = analysisTraceId({ sessionId: "s", analysisId: "a", attempt: 1 });
+    const tracer = createAnalysisTracer({}, traceId, { room: "kitchen" }, { sessionId: "", room: "" });
     expect(tracer.enabled).toBe(false);
     expect(ANALYSIS_TRACE_NAME).toBe("video-analysis");
     const span = tracer.span("sam-upload", { fileId: "file-1" });
@@ -50,11 +58,21 @@ describe("langfuse tracer gating (REQ-O1)", () => {
   it("constructs an enabled tracer with keys without touching the network", () => {
     const tracer = createAnalysisTracer(
       { LANGFUSE_SECRET_KEY: "sk-test-never-sent", LANGFUSE_PUBLIC_KEY: "pk-test-never-sent" },
-      "analysis-construct-only",
+      analysisTraceId({ sessionId: "session-test", analysisId: "construct", attempt: 1 }),
       { room: "kitchen" },
       { sessionId: "session-test", room: "kitchen" },
     );
     expect(tracer.enabled).toBe(true);
+  });
+
+  it("falls back to no-op for a non-W3C trace id even with keys", () => {
+    const tracer = createAnalysisTracer(
+      { LANGFUSE_SECRET_KEY: "sk-test", LANGFUSE_PUBLIC_KEY: "pk-test" },
+      "analysis-not-a-trace-id",
+      { room: "kitchen" },
+      { sessionId: "session-test", room: "kitchen" },
+    );
+    expect(tracer.enabled).toBe(false);
   });
 
   it("extracts safe span error codes without leaking messages", () => {
@@ -111,17 +129,17 @@ describe("langfuse tracer gating (REQ-O1)", () => {
 });
 
 describe("langfuse best-practice attributes", () => {
-  it("prefers LANGFUSE_BASEURL, then LANGFUSE_BASE_URL, then the default", () => {
+  it("prefers LANGFUSE_BASE_URL, then legacy LANGFUSE_BASEURL, then the default", () => {
     expect(resolveLangfuseBaseUrl({})).toBe("https://cloud.langfuse.com");
-    expect(resolveLangfuseBaseUrl({ LANGFUSE_BASE_URL: "https://us.cloud.langfuse.com" })).toBe(
-      "https://us.cloud.langfuse.com",
+    expect(resolveLangfuseBaseUrl({ LANGFUSE_BASEURL: "https://self.example" })).toBe(
+      "https://self.example",
     );
     expect(
       resolveLangfuseBaseUrl({
         LANGFUSE_BASEURL: "https://self.example",
         LANGFUSE_BASE_URL: "https://us.cloud.langfuse.com",
       }),
-    ).toBe("https://self.example");
+    ).toBe("https://us.cloud.langfuse.com");
     expect(resolveLangfuseBaseUrl({ LANGFUSE_BASEURL: "  " })).toBe("https://cloud.langfuse.com");
   });
 
@@ -179,7 +197,8 @@ describe("langfuse best-practice attributes", () => {
   });
 
   it("finish and usage generations are safe on the no-op tracer", async () => {
-    const tracer = createAnalysisTracer({}, "analysis-x", { room: "kitchen" }, { sessionId: "s", room: "kitchen" });
+    const traceId = analysisTraceId({ sessionId: "s", analysisId: "a", attempt: 1 });
+    const tracer = createAnalysisTracer({}, traceId, { room: "kitchen" }, { sessionId: "s", room: "kitchen" });
     expect(() => tracer.finish({ stage: "mapped" })).not.toThrow();
     expect(() =>
       tracer.generation({
