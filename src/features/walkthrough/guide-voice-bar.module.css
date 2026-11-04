@@ -61,32 +61,6 @@
 
 .message { margin: 0; color: #2c3c4f; font-size: 0.85rem; line-height: 1.45; }
 
-.actions { display: flex; flex-wrap: wrap; gap: 8px; }
-
-.primaryButton {
-  border: 0;
-  border-radius: 9px;
-  padding: 10px 16px;
-  background: #1b57a6;
-  color: #fff;
-  font: inherit;
-  font-size: 0.85rem;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.secondaryButton {
-  border: 1px solid #b9cbe2;
-  border-radius: 9px;
-  padding: 10px 14px;
-  background: #fff;
-  color: #123f73;
-  font: inherit;
-  font-size: 0.85rem;
-  font-weight: 750;
-  cursor: pointer;
-}
-
 @media (max-width: 719px) {
   /* In-flow footer stack: the viewport-locked grid docks [bar][review
      actions?][nav] with zero overlap. Nothing floats over tap targets. */

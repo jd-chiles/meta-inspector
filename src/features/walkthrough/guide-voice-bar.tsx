@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp, Mic, MicOff, RotateCcw, Sparkles } from "lucide-react";
 
-import type { AssistantAction, AssistantNode } from "./assistant-script";
+import type { AssistantNode } from "./assistant-script";
 import styles from "./guide-voice-bar.module.css";
 
 interface GuideVoiceBarProps {
@@ -13,7 +13,6 @@ interface GuideVoiceBarProps {
   recordingCue?: string | null;
   /** Guided-tour language; the guide itself stays English and says so (REQ-R2). */
   tourLanguage?: "en" | "es";
-  onAction: (action: AssistantAction) => void;
   onVoiceToggle: () => void;
   onReplay: () => void;
 }
@@ -21,10 +20,11 @@ interface GuideVoiceBarProps {
 /**
  * The single AI voice surface outside the guided tour: a slim docked bar
  * above the bottom nav that narrates every manual step (setup, filming
- * with live recording cues, analysis, review, sign-off). It never renders
- * on the tour step — the tour's own agent bar owns voice there — so only
- * one AI surface is ever on screen. No close button: muting stops speech
- * while the text guidance stays.
+ * with live recording cues, analysis, review, sign-off). Voice only — it
+ * triggers nothing. Flow actions live in the in-flow screens, and the
+ * tour's own agent bar owns the tour step, so only one AI surface — and
+ * one trigger set — is ever on screen. No close button: muting stops
+ * speech while the text guidance stays.
  */
 export default function GuideVoiceBar({
   node,
@@ -32,7 +32,6 @@ export default function GuideVoiceBar({
   recording,
   recordingCue = null,
   tourLanguage = "en",
-  onAction,
   onVoiceToggle,
   onReplay,
 }: GuideVoiceBarProps) {
@@ -84,20 +83,6 @@ export default function GuideVoiceBar({
               <p className={styles.message} data-testid="guide-voice-bar-english-only">
                 <small>This guide answers in English.</small>
               </p>
-            )}
-            {node.actions.length > 0 && (
-              <div className={styles.actions}>
-                {node.actions.map((action) => (
-                  <button
-                    key={`${action.id}-${action.label}`}
-                    type="button"
-                    className={action.primary ? styles.primaryButton : styles.secondaryButton}
-                    onClick={() => onAction(action)}
-                  >
-                    {action.label}
-                  </button>
-                ))}
-              </div>
             )}
           </div>
         )}

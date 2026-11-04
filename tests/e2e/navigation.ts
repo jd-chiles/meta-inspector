@@ -9,7 +9,7 @@ export async function setupProfile(page: Page, setup: { pseudonym: string; fundi
   await page.getByLabel("Unit type").selectOption(setup.unitType);
 }
 
-/** Film is reached through the single entrance: Home starts the guided tour, whose film nodes link to the full capture screen. */
+/** Manual capture is reached from Home's room grid (the one path: the tour films inline and never ejects). When setup is incomplete the room buttons stay disabled, so drive the tour's setup nodes first — consent auto-completes setup — then exit back to Home. */
 export async function goToCapture(page: Page): Promise<void> {
   const captureHeading = page.getByRole("heading", { level: 1, name: "Film the unit" });
   for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -17,25 +17,30 @@ export async function goToCapture(page: Page): Promise<void> {
 
     const home = page.getByTestId("inspection-home");
     if (await home.isVisible()) {
-      // Single entrance: the Start button opens the tour; drive it to a
-      // film node and take its full-capture link.
+      const roomButton = home.getByTestId("home-room-kitchen");
+      if (await roomButton.isVisible() && await roomButton.isEnabled()) {
+        await roomButton.click();
+        continue;
+      }
+      // No setup yet: the Start button opens the tour; drive setup, exit.
       await home.getByTestId("start-guided-tour").click();
     }
     const tour = page.getByTestId("guided-tour");
     if (await tour.isVisible()) {
       for (let drive = 0; drive < 12; drive += 1) {
         if (await captureHeading.isVisible()) return;
-        const node = (await tour.getAttribute("data-node")) ?? "";
-        if (node.startsWith("film-room:")) {
-          await tour.getByTestId("tour-open-capture").click();
-          continue;
-        }
         const start = tour.getByTestId("tour-start");
         if (await start.isVisible()) { await start.click(); continue; }
         const options = tour.getByTestId("tour-options").getByRole("button");
         if (await options.first().isVisible()) { await options.first().click(); continue; }
         const consent = tour.getByTestId("tour-consent-confirm");
         if (await consent.isVisible()) { await consent.click(); continue; }
+        // Setup nodes are done once filming starts; exit to Home's room grid.
+        const node = (await tour.getAttribute("data-node")) ?? "";
+        if (node.startsWith("film-room:") || node.startsWith("room-check:")) {
+          await tour.getByTestId("tour-exit").click();
+          continue;
+        }
         const yes = tour.getByTestId("tour-check-yes");
         if (await yes.isVisible()) { await yes.click(); continue; }
         break;

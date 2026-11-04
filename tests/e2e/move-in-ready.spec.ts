@@ -691,20 +691,15 @@ test.describe("Move-in Ready mobile flow", () => {
     await mkdir(path.join(process.cwd(), "artifacts/design-qa"), { recursive: true });
     await expect(page.getByRole("heading", { level: 1, name: "Inspection home" })).toBeVisible();
     await page.getByRole("button", { name: "New inspection", exact: true }).click();
-    await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
-    const setupToggle = page.getByTestId("capture-setup-toggle");
-    await expect(setupToggle).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByTestId("guided-tour")).toBeVisible();
+    await expect(page.getByTestId("tour-start")).toBeVisible();
+    await setLahsaProfile(page);
+    await goToCapture(page);
     const firstRunCapture = page.getByTestId("walkthrough-video-capture");
     await expect(firstRunCapture).toBeVisible();
-    await expect(page.getByTestId("capture-setup-gate")).toBeVisible();
     await expect(firstRunCapture.getByText("No video recorded for this room yet.", { exact: true })).toBeVisible();
-    await expect(firstRunCapture.getByRole("button", { name: "Start recording", exact: true })).toBeDisabled();
-    await expect(firstRunCapture.getByRole("button", { name: "Upload video", exact: true })).toBeDisabled();
     await expectNoHorizontalScroll(page);
     await page.screenshot({ path: "artifacts/design-qa/capture-first-run-360.png" });
-    await setLahsaProfile(page);
-
-    await goToCapture(page);
     await page.locator("#main-content").evaluate((element) => element.scrollTo(0, 0));
     await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
     await expectNoHorizontalScroll(page);
@@ -960,8 +955,8 @@ test.describe("Move-in Ready mobile flow", () => {
     await expect(page.getByLabel("Funding type")).toHaveValue("unknown");
     await page.getByRole("button", { name: "Back to home", exact: true }).click();
     await page.getByRole("button", { name: "New inspection", exact: true }).click();
-    await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
-    await expect(page.getByText("Set up this unit to begin recording.", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("guided-tour")).toBeVisible();
+    await expect(page.getByTestId("tour-start")).toBeVisible();
   });
 
   test("the full filming checklist stays room-scoped and resets when its clip changes", async ({ page }) => {
@@ -1658,8 +1653,8 @@ test.describe("Move-in Ready mobile flow", () => {
         await expect(page.getByLabel("Unit pseudonym")).toHaveValue("");
         await page.getByRole("button", { name: "Back to home", exact: true }).click();
         await page.getByRole("button", { name: "New inspection", exact: true }).click();
-        await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
-        await expect(page.getByText("Set up this unit to begin recording.", { exact: true })).toBeVisible();
+        await expect(page.getByTestId("guided-tour")).toBeVisible();
+        await expect(page.getByTestId("tour-start")).toBeVisible();
         const deleted = await readStoredWalkthroughState(page, deletedSessionId!);
         expect(deleted).toMatchObject({ clipCount: 0, stillCount: 0, record: null });
         expect(await readSavedWaterSupplyDecision(page)).toMatchObject({

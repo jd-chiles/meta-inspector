@@ -36,6 +36,10 @@ test("one voice surface per screen: docked bar on manual steps, tour agent bar o
   // The bar expands to the full guidance message with mute + replay.
   await bar.getByTestId("guide-voice-bar-toggle").click();
   await expect(bar.getByTestId("guide-voice-bar-message")).toContainText("Start inspection");
+  // One trigger set: the voice bar narrates and never renders flow actions.
+  await expect(bar.getByRole("button", { name: "Set up the unit", exact: true })).toHaveCount(0);
+  await expect(bar.getByRole("button", { name: /Film the /, exact: false })).toHaveCount(0);
+  await expect(bar.getByRole("button", { name: /Confirm & analyze /, exact: false })).toHaveCount(0);
   const mute = bar.getByTestId("guide-voice-bar-mute");
   await expect(mute).toHaveAttribute("aria-pressed", "true");
   await mute.click();

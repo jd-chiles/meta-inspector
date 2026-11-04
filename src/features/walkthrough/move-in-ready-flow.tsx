@@ -154,7 +154,7 @@ import {
   type FireSafetyDraftOutcome,
 } from "./decision-draft";
 import { deriveGuideModel } from "./walkthrough-guide";
-import { deriveAssistantNode, filmingScriptForRoom, type AssistantAction as GuideVoiceAction } from "./assistant-script";
+import { deriveAssistantNode, filmingScriptForRoom } from "./assistant-script";
 import GuideVoiceBar from "./guide-voice-bar";
 import { cancelSpeech, readVoiceEnabled, speakCueSequence, speakText, writeVoiceEnabled } from "./voice-guide";
 import VoicePrompt from "./voice-prompt";
@@ -1577,28 +1577,6 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     batchAutoStartedRef.current = true;
     batchQueueRef.current = createRoomBatchQueue(rooms);
     beginBatchRun(rooms.length, true);
-  }
-
-  function handleGuideVoiceAction(action: GuideVoiceAction): void {
-    if (action.id === "setup") {
-      openProfileForRequiredDetails();
-    } else if (action.id === "film-room" && action.roomId) {
-      changeStep("capture");
-      selectRoom(action.roomId);
-      window.setTimeout(() => captureControlRef.current?.startCapture(), 400);
-    } else if (action.id === "analyze-all") {
-      changeStep("capture");
-      setBatchAttested(true);
-      setBatchSendConsent(true);
-      window.setTimeout(() => startBatchAnalysis(), 60);
-    } else if (action.id === "open-requirement" && action.elementId) {
-      changeStep("review");
-      openReviewElement(action.elementId);
-    } else if (action.id === "signoff") {
-      changeStep("signoff");
-    } else if (action.id === "dismiss") {
-      changeStep("home");
-    }
   }
 
   function cancelBatchAnalysis(): void {
@@ -3093,7 +3071,10 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
       const fresh = createInitialInspectionRecord(makeId("walkthrough"));
       await inspectionStoreRef.current?.put(fresh);
       await activateInspection(fresh);
-      changeStep("capture");
+      // One entrance: a new inspection starts in the guided tour, never in
+      // raw manual capture. Setup, filming, analysis, and review all run
+      // through the tour's single trigger set.
+      changeStep("guided");
       setSetupExpanded(true);
     } catch (error) {
       setStorageWarning(safeClientError(error, "A new inspection could not be started."));
@@ -3340,6 +3321,7 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
                       key={room.id}
                       type="button"
                       className={styles.homeRoomButton}
+                      data-testid={`home-room-${room.id}`}
                       disabled={!canCapture}
                       onClick={() => { changeStep("capture"); selectRoom(room.id); }}
                     >
@@ -4499,7 +4481,6 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
             recording={recordingInProgress}
             recordingCue={recordingInProgress ? filmingScriptForRoom(selectedRoomId)[recordingCueIndex] ?? null : null}
             tourLanguage={record?.tourLanguage === "es" ? "es" : "en"}
-            onAction={handleGuideVoiceAction}
             onVoiceToggle={() => {
               const next = !voiceOn;
               setVoiceOn(next);
