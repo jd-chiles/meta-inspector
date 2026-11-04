@@ -819,18 +819,17 @@ describe("POST /api/video/segment", () => {
     expect(await json(cancelled)).toMatchObject({ ok: true, stage: "cancelled", released: false });
   });
 
-  it("rejects a QuickTime MOV before making a provider request", async () => {
+  it("refuses a MOV it cannot remux, without calling the provider", async () => {
     const { calls, fetchImpl } = mockMetaFetch();
+    // Synthetic "qt  " bytes are not a decodable QuickTime file, so the
+    // server-side remux must fail closed rather than upload it.
     const movBytes = makeMp4(1_000, 2, "qt  ");
     const { response, body } = await segment({ bytes: movBytes, identity: identityFor("sam-mov") }, fetchImpl);
 
-    expect(response.status).toBe(415);
+    expect(response.status).toBe(422);
     expect(body).toMatchObject({
       ok: false,
-      error: {
-        code: "UNSUPPORTED_VIDEO",
-        message: "Meta's current video upload API accepts MP4 only. Convert this MOV to MP4 before live analysis.",
-      },
+      error: { code: "UNSUPPORTED_VIDEO" },
     });
     expect(calls).toHaveLength(0);
   });

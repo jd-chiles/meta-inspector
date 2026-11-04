@@ -37,7 +37,7 @@ function loadManifest(fetchImpl: typeof fetch, language: VoiceManifestLanguage):
   if (cached) return cached;
   const pending = (async () => {
     try {
-      const response = await fetchImpl(MANIFEST_URLS[language], { cache: "force-cache" });
+      const response = await fetchImpl(MANIFEST_URLS[language], { cache: "no-store" });
       if (!response.ok) return null;
       return parseManifest(await response.json());
     } catch {

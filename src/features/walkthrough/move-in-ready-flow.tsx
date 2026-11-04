@@ -1255,7 +1255,7 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     const current = recordRef.current;
     if (!current || current.fundingType !== "lahsa" || !current.pseudonym.trim()) return;
     const needsWork = rooms.some((room) =>
-      clips[room.id] && clips[room.id]?.mime !== "video/quicktime" && !roomHasCurrentProposal(room.id));
+      clips[room.id] && !roomHasCurrentProposal(room.id));
     if (!needsWork) return;
     setBatchAttested(true);
     setBatchSendConsent(true);
@@ -1285,7 +1285,7 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     const current = recordRef.current;
     if (!current || current.fundingType !== "lahsa" || !current.pseudonym.trim()) return;
     const queued = (current.analysisQueue ?? []).filter((roomId) =>
-      clips[roomId] && clips[roomId]?.mime !== "video/quicktime" && !roomHasCurrentProposal(roomId));
+      clips[roomId] && !roomHasCurrentProposal(roomId));
     if (queued.length === 0) return;
     const key = `${current.sessionId}:${queued.join(",")}`;
     if (queueRunnerKeyRef.current === key) return;
@@ -1581,7 +1581,7 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     // Manual Analyze covers only rooms not yet analyzed, queued, or in
     // flight (Sprint 0 REQ-S5): analyze-on-save may own some already.
     const rooms = current.roomIds
-      .filter((roomId) => clips[roomId] && clips[roomId]?.mime !== "video/quicktime" &&
+      .filter((roomId) => clips[roomId] &&
         !roomHasCurrentProposal(roomId) && !queued.includes(roomId) &&
         !analysisInFlightRef.current.has(roomId));
     if (rooms.length === 0) return;
@@ -1787,11 +1787,6 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     const controller = new AbortController();
     const current = recordRef.current;
     if (!current) return;
-    if (clips[roomId]?.mime === "video/quicktime") {
-      setAnalysisError("Meta's current video upload API accepts MP4 only. This MOV stays on this device for manual review; choose or record an MP4 for live analysis.");
-      setAnalysisStatus("error");
-      return;
-    }
     const expectedSessionId = current.sessionId;
     let intentIdentity = current.clipIdentities[roomId] ?? null;
     const consentIsCurrent = () => {
@@ -3212,7 +3207,7 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
           <span className={styles.brandMark} aria-hidden="true">MR</span>
           <div className={styles.brandCopy}>
             <p className={styles.brandKicker}>LAHSA Form 1083 · Local draft</p>
-            <p className={styles.brandTitle}>Move-in Ready</p>
+            <p className={styles.brandTitle}>Walkthrough Kit</p>
           </div>
         </div>
         <span className={`${styles.modeBadge} ${analysisMode === "live" ? styles.modeLive : analysisMode === "fixture" ? styles.modeFixture : styles.modeUnconfigured}`} data-testid="analysis-mode">
@@ -3739,7 +3734,7 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
                         {analysisMode === "fixture" && <div className={`${styles.callout} ${styles.calloutWarning}`} role="status">Sample mode is active. This video flow will not invent a sample result or fall back when live analysis is unavailable.</div>}
                         {analysisMode === "unconfigured" && <div className={`${styles.callout} ${styles.calloutDanger}`} role="status">Live Meta analysis is off on this server. Configure APP_ANALYSIS_MODE=live and restart the server to enable it.</div>}
                         {analysisMode === "live" && <div className={`${styles.callout} ${styles.calloutWarning}`} role="status">Live mode is enabled, but the provider connection has not been tested. A request is sent only for consented analysis: confirm the per-room notices below, or walkthrough and batch consent to analyze each saved clip automatically.</div>}
-                        {clips[selectedRoomId]?.mime === "video/quicktime" && <div className={`${styles.callout} ${styles.calloutWarning}`} role="status">Meta&apos;s current video upload API accepts MP4 only. This MOV stays on this device for manual review; choose or record an MP4 for live analysis.</div>}
+                        
                         <div className={`${styles.callout} ${styles.calloutWarning}`}><p>Sending a room transmits its clip to this server and Meta for temporary SAM processing. Candidate stills and one-per-second source samples go to Meta Muse; if Meta Muse is unavailable and a Baseten key is configured, Baseten Muse Spark Open may receive those stills as a fallback. Check every observation yourself. Provider terms determine retention; local deletion does not delete provider copies.</p></div>
                         <label className={styles.checkLabel}>
                           <input
@@ -3767,7 +3762,7 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
                         </label>
                         {analysisError && <p className={styles.inlineError} role="alert">{analysisError}</p>}
                         <div className={styles.buttonRow}>
-                          <button className={`${styles.button} ${styles.wideButton}`} type="button" onClick={() => { const roomId = selectedRoomId; void analyzeRoomFor(roomId).finally(() => { analysisInFlightRef.current.delete(roomId); }); }} disabled={batchActive || analysisMode !== "live" || !clips[selectedRoomId] || clips[selectedRoomId]?.mime === "video/quicktime" || !mockUnitAttested || !sendVideoConsent || analysisStatus === "segmenting" || analysisStatus === "mapping" || (!online && Boolean(pendingForSelectedRoom))}>
+                          <button className={`${styles.button} ${styles.wideButton}`} type="button" onClick={() => { const roomId = selectedRoomId; void analyzeRoomFor(roomId).finally(() => { analysisInFlightRef.current.delete(roomId); }); }} disabled={batchActive || analysisMode !== "live" || !clips[selectedRoomId] || !mockUnitAttested || !sendVideoConsent || analysisStatus === "segmenting" || analysisStatus === "mapping" || (!online && Boolean(pendingForSelectedRoom))}>
                             {(analysisStatus === "segmenting" || analysisStatus === "mapping") && !batchActive ? <><LoaderCircle className={styles.spinner} size={17} aria-hidden="true" /> {analysisStatus === "segmenting" ? "Segmenting room video…" : "Mapping source stills…"} <span aria-hidden="true">{formatTimestamp(analysisElapsedSeconds)}</span></> : pendingForSelectedRoom ? online ? <><RefreshCw size={17} aria-hidden="true" /> Retry analysis</> : <><CloudOff size={17} aria-hidden="true" /> Analysis queued</> : analysisStatus === "complete" ? <><RefreshCw size={17} aria-hidden="true" /> Analyze this room again</> : online ? <><Video size={17} aria-hidden="true" /> Analyze this room</> : <><CloudOff size={17} aria-hidden="true" /> Queue analysis for when connected</>}
                           </button>
                           {(analysisStatus === "segmenting" || analysisStatus === "mapping") && !batchActive && <button className={styles.secondaryButton} type="button" onClick={() => invalidateActiveAnalysis("Analysis was cancelled. No result was saved.")}>Cancel</button>}
