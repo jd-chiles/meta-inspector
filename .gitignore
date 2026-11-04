@@ -16,3 +16,5 @@ test-results/
 .muse/
 .hermes/
 executor-contract*.md
+data/
+

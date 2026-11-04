@@ -3402,7 +3402,13 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
                 <div className={styles.cardTitleRow}>
                   <div>
                     <h2 id="home-prescreen-heading">Building pre-screen</h2>
-                    <p className={styles.cardLead}>Illustrative in this demo — live records are not connected.</p>
+                    <p className={styles.cardLead}>
+                      {analysisMode === "live"
+                        ? "Free public records — the address is looked up, never saved. The example address shows a sample result."
+                        : analysisMode === "fixture"
+                          ? "Sample mode — live records are not connected in this preview. The address is never saved."
+                          : "Live records are not configured on this server."}
+                    </p>
                   </div>
                   <ShieldCheck size={21} aria-hidden="true" />
                 </div>
