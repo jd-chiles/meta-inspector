@@ -291,16 +291,6 @@ export async function queueVerifiedVideoJob(id: string, identity: DurableVideoId
   });
 }
 
-export async function persistNormalizedVideoHash(id: string, leaseId: string, sha256: string): Promise<void> {
-  const result = await getJobPool().query(
-    `UPDATE video_analysis_jobs SET normalized_video_sha256=$3, updated_at=now()
-     WHERE id=$1 AND worker_lease_id=$2 AND status='segmenting' AND cancel_requested_at IS NULL
-       AND expected_video_sha256=$3`,
-    [id, leaseId, sha256],
-  );
-  if (result.rowCount !== 1) throw new Error("The verified video identity no longer matches this job.");
-}
-
 export type StageClaim =
   | { kind: "claimed"; job: VideoJobRow }
   | { kind: "busy"; job: VideoJobRow }
@@ -606,19 +596,6 @@ export async function hasLiveVideoJobMediaObject(id: string): Promise<boolean> {
   return result.rowCount === 1;
 }
 
-export async function getVideoEvidenceObject(id: string, stillId: string): Promise<{ objectKey: string; sha256: string; byteLength: number } | null> {
-  const result = await getJobPool().query(
-    `SELECT o.object_key, o.sha256, o.byte_length FROM video_analysis_job_objects o
-     JOIN video_analysis_jobs j ON j.id=o.job_id
-     WHERE o.job_id=$1 AND o.still_id=$2 AND o.object_kind='evidence' AND o.deleted_at IS NULL
-       AND EXISTS (SELECT 1 FROM inspection_sessions s WHERE s.session_id=j.session_id AND s.deleted_at IS NULL)`,
-    [id, stillId],
-  );
-  const row = result.rows[0] as { object_key?: unknown; sha256?: unknown; byte_length?: unknown } | undefined;
-  if (!row || typeof row.object_key !== "string" || typeof row.sha256 !== "string") return null;
-  return { objectKey: row.object_key, sha256: row.sha256.trim(), byteLength: Number(row.byte_length) };
-}
-
 export async function getVideoEvidenceObjectByOrdinal(id: string, ordinal: number): Promise<{ objectKey: string; sha256: string; byteLength: number } | null> {
   if (!Number.isSafeInteger(ordinal) || ordinal < 0 || ordinal > 100) return null;
   const result = await getJobPool().query(
@@ -722,21 +699,6 @@ export async function terminalizeExpiredActiveVideoJobs(limit = 100): Promise<st
   return result.rows.map((row) => String((row as { id: unknown }).id));
 }
 
-export async function listExpiredVideoJobs(limit = 100): Promise<Array<{ id: string; objectKey: string }>> {
-  const result = await getJobPool().query(
-    `SELECT j.id, o.object_key FROM video_analysis_jobs j
-     LEFT JOIN video_analysis_job_objects o ON o.job_id=j.id AND o.deleted_at IS NULL
-     WHERE j.expires_at < now() AND j.status IN ('upload_pending','ready','completed','failed','ambiguous','cancelled')
-       AND EXISTS (SELECT 1 FROM inspection_sessions s WHERE s.session_id=j.session_id AND s.deleted_at IS NULL)
-     ORDER BY j.expires_at LIMIT $1`,
-    [Math.max(1, Math.min(500, limit))],
-  );
-  return result.rows.flatMap((row) => {
-    const item = row as { id: string; object_key: string | null };
-    return item.object_key ? [{ id: String(item.id), objectKey: item.object_key }] : [];
-  });
-}
-
 export async function listExpiredVideoJobIds(limit = 100): Promise<string[]> {
   const result = await getJobPool().query(
     `SELECT id FROM video_analysis_jobs
@@ -758,9 +720,4 @@ export async function listRunnableVideoJobs(limit = 100): Promise<Array<{ id: st
      ORDER BY j.updated_at LIMIT $1`, [Math.max(1, Math.min(500, limit))],
   );
   return result.rows.map((row) => ({ id: String((row as { id: unknown }).id), stage: (row as { stage: "sam" | "muse" }).stage }));
-}
-
-export async function getVideoJobSchemaReady(): Promise<void> {
-  await getJobPool().query("SELECT id FROM video_analysis_jobs LIMIT 0");
-  await getJobPool().query("SELECT job_id FROM video_analysis_job_objects LIMIT 0");
 }

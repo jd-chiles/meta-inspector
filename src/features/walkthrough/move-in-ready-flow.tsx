@@ -115,6 +115,8 @@ import {
   findVerifiedEvidenceStill,
   isExpectedMp4Media,
   resolveMappedProposalState,
+  verifyMappedServerEvidence,
+  type VerifiedMappedEvidence,
 } from "./evidence-verification";
 import {
   DeferredInstallPrompt,
@@ -131,12 +133,15 @@ import {
   makeElementClipId,
   makeVideoClipId,
   type StoredVideoClip,
+  type StoredVideoStill,
   type VideoClipStore,
 } from "./video-store";
 import { extractVideoStills, formatTimestamp, sha256Blob, type VideoStill } from "./video-utils";
+import { createCloudInspectionStore } from "./cloud-inspection-client";
+import { createCloudVideoClient } from "./cloud-video-client";
 import { createPendingCancelTracker } from "./pending-cancel";
 import { canShareExportFiles } from "./export-share";
-import { FetchTimeoutError, STILLS_TIMEOUT_MS, fetchWithTimeout } from "./fetch-timeout";
+import { FetchTimeoutError, MAP_TIMEOUT_MS, SEGMENT_TIMEOUT_MS, fetchWithTimeout } from "./fetch-timeout";
 import { isAnalysisCurrent } from "./analysis-identity";
 import { MAX_CONCURRENT_BATCH_ROOMS, createRoomBatchQueue, runRoomBatch, shouldAutoEnqueueOnSave } from "./batch-scheduler";
 import {
@@ -246,6 +251,48 @@ export interface VideoIdentityFields {
   expectedVideoSha256: string;
 }
 
+interface SegmentCandidate {
+  candidateId: string;
+  elementId: MoveInReadyElementId;
+  concept: string;
+  evidence: {
+    frameIndex: number;
+    timestampMs: number;
+    objectOrdinal: number;
+    box: { left: number; top: number; right: number; bottom: number };
+    samConfidence?: number;
+  };
+}
+
+interface SegmentResponse {
+  candidateToken: string | null;
+  identity: VideoIdentityFields;
+  room: MoveInReadyRoomId;
+  media: { container: "mp4"; sourceVideoSha256: string };
+  candidates: SegmentCandidate[];
+  sampleTimestampsMs: number[];
+}
+
+interface MapProposal {
+  elementId: MoveInReadyElementId;
+  state: "draft-proposal" | "needs-human-check";
+  modelSuggestion: "A" | "D";
+  observation: string;
+  confidence: number;
+  evidenceCandidateIds: string[];
+  evidence: Array<{ candidateId: string; verified: VerifiedMappedEvidence | null }>;
+  evidenceIntegrityValid: boolean;
+  deficiencySuggestion?: ModelDeficiencySuggestion;
+}
+
+interface MapResponse {
+  identity: VideoIdentityFields;
+  room: MoveInReadyRoomId;
+  media: { container: "mp4"; sourceVideoSha256: string };
+  mappingModel: "muse-spark-1.3" | "muse-spark-open-baseten";
+  proposals: MapProposal[];
+}
+
 interface EvidenceView {
   reference: EvidenceReference;
   clip: StoredVideoClip;
@@ -253,23 +300,20 @@ interface EvidenceView {
   src: string;
 }
 
-interface StillsProposalResponse {
-  elementId: MoveInReadyElementId;
-  modelSuggestion: "A" | "D";
-  observation: string;
-  confidence: number;
-  evidenceStillIds: string[];
-  deficiencySuggestion?: ModelDeficiencySuggestion;
+interface ParsedSegmentResponse extends SegmentResponse {
+  stage: "segmented";
 }
 
-interface ParsedStillsResponse {
-  stage: "stills-mapped";
-  identity: VideoIdentityFields;
-  room: MoveInReadyRoomId;
-  media: { container: "mp4"; sourceVideoSha256: string };
-  mappingModel: "muse-spark-1.3";
-  proposals: StillsProposalResponse[];
+interface ParsedMapResponse extends MapResponse {
+  stage: "mapped";
 }
+
+/** Minimal dev cloud backup state. Render is always gated on the current room + clip hash. */
+type CloudClipUploadState =
+  | { status: "idle" }
+  | { status: "uploading"; roomId: MoveInReadyRoomId; videoHash: string }
+  | { status: "done"; roomId: MoveInReadyRoomId; videoHash: string; jobId: string }
+  | { status: "error"; roomId: MoveInReadyRoomId; videoHash: string; message: string };
 
 const CATALOG_VERSION = catalogJson.version;
 const ACTIVE_SESSION_KEY = "move-in-ready-active-session-v1";
@@ -369,6 +413,9 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
   stepRef.current = step;
   const [analysisError, setAnalysisError] = useState("");
   const [analysisNotice, setAnalysisNotice] = useState("");
+  const [cloudClipUpload, setCloudClipUpload] = useState<CloudClipUploadState>({ status: "idle" });
+  const cloudInspectionStoreRef = useRef(createCloudInspectionStore());
+  const cloudVideoClientRef = useRef(createCloudVideoClient());
   const [batchAttested, setBatchAttested] = useState(false);
   const [voiceOn, setVoiceOn] = useState(() => readVoiceEnabled());
   const spokenGuideKeyRef = useRef<string | null>(null);
@@ -1670,6 +1717,56 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     }
   }
 
+  /**
+   * Minimal dev cloud backup inside the existing consent UI: save the
+   * walkthrough to cloud storage, then upload the saved clip bytes. Storage
+   * only — no analysis runs and the on-device clip is unchanged. Success copy
+   * renders only for the still-current room + clip hash.
+   */
+  async function uploadClipToCloud(roomId: MoveInReadyRoomId): Promise<void> {
+    const clip = clips[roomId];
+    const latestRecord = recordRef.current;
+    if (!clip || !latestRecord) return;
+    if (clip.mime !== "video/mp4" && clip.mime !== "video/quicktime") {
+      setCloudClipUpload({ status: "error", roomId, videoHash: clip.sourceSha256, message: "Only a saved MP4 or MOV clip can be uploaded to cloud storage." });
+      return;
+    }
+    setCloudClipUpload({ status: "uploading", roomId, videoHash: clip.sourceSha256 });
+    try {
+      const bound = latestRecord.clipIdentities[roomId];
+      const boundMatches = bound && bound.videoHash === clip.sourceSha256 ? bound : null;
+      // The job route requires a cloud-saved walkthrough and the next clip
+      // revision for the room; both come from the current local record.
+      await cloudInspectionStoreRef.current.put(latestRecord);
+      const snapshot = await cloudVideoClientRef.current.upload({
+        sessionId: latestRecord.sessionId,
+        roomId,
+        fileName: clip.fileName,
+        contentType: clip.mime,
+        video: clip.video,
+        identity: {
+          sessionId: latestRecord.sessionId,
+          schemaVersion: latestRecord.schemaVersion,
+          videoId: boundMatches ? boundMatches.videoId : makeId("video"),
+          videoRevision: (boundMatches ? boundMatches.videoRevision : 0) + 1,
+          analysisId: makeId("analysis"),
+          attempt: 1,
+          catalogVersion: latestRecord.catalogVersion,
+        },
+      });
+      if (snapshot.media?.sha256 !== clip.sourceSha256) {
+        throw new Error("The cloud copy does not match the saved clip bytes. The saved clip on this device is unchanged.");
+      }
+      setCloudClipUpload({ status: "done", roomId, videoHash: clip.sourceSha256, jobId: snapshot.jobId });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setCloudClipUpload({ status: "idle" });
+        return;
+      }
+      setCloudClipUpload({ status: "error", roomId, videoHash: clip.sourceSha256, message: safeClientError(error, "The saved clip could not be uploaded to cloud storage. The saved clip on this device is unchanged.") });
+    }
+  }
+
   async function analyzeRoomFor(targetRoomId: MoveInReadyRoomId, options: { fromBatch?: boolean } = {}): Promise<void> {
     const { fromBatch = false } = options;
     // Batch pipelines bind the full media identity but not the UI
@@ -1829,19 +1926,40 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
       catalogVersion: current.catalogVersion,
       expectedVideoSha256: identity.videoHash,
     };
+    let candidateTokenToRelease: string | null = null;
+    let mappingCompleted = false;
+    let segmentationRequested = false;
     if (!intentIsCurrent() || !analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
     const latestRecord = recordRef.current;
     if (!latestRecord) return;
     persist(clearRoomAnalysisState(latestRecord, roomId));
     try {
-      // Stills-first analysis: extract frames locally and send only those
-      // (about a megabyte) for one vision call. The legacy path uploaded
-      // the whole clip for server-side video segmentation, which timed
-      // out on real phone footage (server-logged PROVIDER_TIMEOUT).
-      const stillTimestamps = evenlySpacedTimestamps(
-        makeRoomEvidenceTimestamps(clip.durationSeconds, []),
-        MAX_CANDIDATE_STILLS,
-      );
+      const segmentForm = new FormData();
+      segmentForm.set("stage", "segment");
+      segmentForm.set("room", roomId);
+      segmentForm.set("video", new File([clip.video], clip.fileName, { type: clip.mime }));
+      appendIdentity(segmentForm, requestIdentity);
+      if (!intentIsCurrent() || !analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
+      segmentationRequested = true;
+      pendingCancelFor(roomId).set(requestIdentity, null);
+      const segmentResponse = await fetchWithTimeout("/api/video/segment?stage=segment", {
+        method: "POST",
+        headers: { [WALKTHROUGH_CLIENT_HEADER]: WALKTHROUGH_CLIENT_ID },
+        body: segmentForm,
+        signal: controller.signal,
+        cache: "no-store",
+      }, SEGMENT_TIMEOUT_MS);
+      const segmentJson: unknown = await segmentResponse.json().catch(() => null);
+      if (!segmentResponse.ok) throw new Error(readSafeApiError(segmentJson, segmentResponse.status));
+      const segmented = parseSegmentResponse(segmentJson, requestIdentity, roomId);
+      candidateTokenToRelease = segmented.candidateToken;
+      pendingCancelFor(roomId).set(requestIdentity, segmented.candidateToken ?? null);
+      if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
+
+      setAnalysisStatus("mapping");
+      const uniqueTimes = [...new Set(segmented.candidates.map((candidate) => candidate.evidence.timestampMs))];
+      if (uniqueTimes.length > MAX_CANDIDATE_STILLS) throw new Error("This analysis returned more still moments than the app can safely map at once.");
+      const stillTimestamps = makeRoomEvidenceTimestamps(clip.durationSeconds, uniqueTimes);
       const extracted: VideoStill[] = [];
       for (let offset = 0; offset < stillTimestamps.length; offset += MAX_STILLS_PER_DECODE) {
         const batch = await extractVideoStills(
@@ -1890,7 +2008,10 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
           height: item.height,
         });
       }
-      if (stillByTime.size === 0) throw new Error("No frames could be extracted from this room clip. Retake the clip and try again.");
+      for (const candidate of segmented.candidates) {
+        const item = findNearestSourceStill(stillByTime, candidate.evidence.timestampMs);
+        if (!item) throw new Error("A segmented moment could not be matched to a nearby decoded source frame.");
+      }
       const stillsSaved = await store.addStillsIfSourceMatches(
         expectedSessionId,
         roomId,
@@ -1904,7 +2025,7 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
       if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
       if (!updatedClip || updatedClip.sourceSha256 !== identity.videoHash) throw new Error("The source clip changed before its review stills could be reopened.");
       setClips((previous) => ({ ...previous, [roomId]: updatedClip }));
-      const extractedIdentity = { ...identity, evidence: [...sourceReferences.values()] };
+      let extractedIdentity = { ...identity, evidence: [...sourceReferences.values()] };
       const latestRecord = recordRef.current;
       if (!latestRecord || !analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
       persist({
@@ -1912,38 +2033,34 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
         updatedAt: new Date().toISOString(),
         clipIdentities: { ...latestRecord.clipIdentities, [roomId]: extractedIdentity },
       });
-      setAnalysisStatus("mapping");
-      const orderedStills = [...stillByTime.entries()]
-        .map(([timestampMs, item]) => ({ timestampMs, item, reference: sourceReferences.get(timestampMs) }))
-        .filter((entry): entry is { timestampMs: number; item: { blob: Blob; hash: string; width: number; height: number }; reference: EvidenceReference } => Boolean(entry.reference))
-        .sort((left, right) => left.timestampMs - right.timestampMs);
-      const referenceByStillId = new Map(orderedStills.map((entry) => [entry.reference.stillId, entry.reference]));
-      const stillsForm = new FormData();
-      stillsForm.set("stage", "stills");
-      stillsForm.set("room", roomId);
-      appendIdentity(stillsForm, requestIdentity);
-      stillsForm.set("stillMeta", JSON.stringify(orderedStills.map((entry) => ({
-        stillId: entry.reference.stillId,
-        timestampMs: entry.timestampMs,
-      }))));
-      for (const entry of orderedStills) {
-        stillsForm.append("still", new File([entry.item.blob], entry.reference.stillId, { type: entry.item.blob.type || "image/jpeg" }));
+      if (segmented.candidates.length === 0) {
+        const next = replaceRoomProposals(recordRef.current!, roomId, extractedIdentity, makeNoEvidenceProposals());
+        persist(next);
+        mappingCompleted = true;
+        setAnalysisNotice(`SAM returned no reviewable moments. ${sourceReferences.size} locally extracted room stills are available for manual evidence selection; nothing was inferred from non-detection.`);
+        setAnalysisStatus("complete");
+        setAnalysisExpanded(false);
+        return;
       }
-      if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
-      const stillsResponse = await fetchWithTimeout("/api/video/segment?stage=stills", {
+      const mapForm = new FormData();
+      mapForm.set("stage", "map");
+      mapForm.set("room", roomId);
+      if (!segmented.candidateToken) throw new Error("The segmentation response omitted its required mapping token.");
+      mapForm.set("candidateToken", segmented.candidateToken);
+      appendIdentity(mapForm, requestIdentity);
+      // The server derives and retains bounded Muse input stills from the
+      // original clip during segmentation. Only the signed identity returns
+      // here, so the phone neither uploads the clip twice nor supplies pixels
+      // that the server cannot tie back to that clip.
+      const mapResponse = await fetchWithTimeout("/api/video/segment?stage=map", {
         method: "POST",
         headers: { [WALKTHROUGH_CLIENT_HEADER]: WALKTHROUGH_CLIENT_ID },
-        body: stillsForm,
+        body: mapForm,
         signal: controller.signal,
         cache: "no-store",
-      }, STILLS_TIMEOUT_MS);
-      const stillsJson: unknown = await stillsResponse.json().catch(() => null);
-      if (!stillsResponse.ok) throw new Error(readSafeApiError(stillsJson, stillsResponse.status));
-      // A clip replaced or removed while the response was in flight must
-      // never receive that response's proposals.
-      const settledClip = await store.get(expectedSessionId, roomId);
-      if (!settledClip || settledClip.sourceSha256 !== identity.videoHash) throw new Error("The room clip changed while its analysis response was in flight.");
-      if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
+      }, MAP_TIMEOUT_MS);
+      const mapJson: unknown = await mapResponse.json().catch(() => null);
+      if (!mapResponse.ok) throw new Error(readSafeApiError(mapJson, mapResponse.status));
       const analysisIdentity: VideoAnalysisIdentity = {
         sessionId: requestIdentity.sessionId,
         roomId,
@@ -1955,21 +2072,61 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
         attempt: requestIdentity.attempt,
         catalogVersion: requestIdentity.catalogVersion,
       };
-      const mapped = parseStillsResponse(stillsJson, requestIdentity, roomId);
-      const proposals = buildStillsProposals(mapped, referenceByStillId, analysisIdentity);
+      const mapped = await parseMapResponse(mapJson, requestIdentity, roomId, segmented.candidates, {
+        schemaVersion: analysisIdentity.schemaVersion,
+        catalogVersion: analysisIdentity.catalogVersion,
+        videoId: analysisIdentity.videoId,
+        videoRevision: analysisIdentity.videoRevision,
+        roomId: analysisIdentity.roomId,
+      });
       if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
+      const proposals = mapProposalsToEvidence(mapped, segmented.candidates, analysisIdentity);
+      const verifiedByStillId = new Map<string, VerifiedMappedEvidence>();
+      for (const proposal of mapped.proposals) {
+        for (const evidence of proposal.evidence) {
+          if (evidence.verified) verifiedByStillId.set(evidence.verified.reference.stillId, evidence.verified);
+        }
+      }
+      const verifiedItems = [...verifiedByStillId.values()];
+      if (verifiedItems.length > 0) {
+        const stillsSaved = await store.addStillsIfSourceMatches(
+          expectedSessionId,
+          roomId,
+          identity.videoHash,
+          clip.capturedAt,
+          verifiedItems.map((item): StoredVideoStill => item.still),
+        );
+        if (!stillsSaved) throw new Error("The room clip changed before verified server review stills could be saved.");
+        if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
+        const updatedClip = await store.get(expectedSessionId, roomId);
+        if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion, requireSelectedRoom)) return;
+        if (!updatedClip || updatedClip.sourceSha256 !== identity.videoHash) throw new Error("The source clip changed before verified server stills could be reopened.");
+        setClips((previous) => ({ ...previous, [roomId]: updatedClip }));
+        const serverEvidenceById = new Map(verifiedItems.map((item) => [item.reference.stillId, { ...item.reference, frameIndex: null }]));
+        const serverTimes = new Set(verifiedItems.map((item) => item.reference.timestampMs));
+        const localEvidence = extractedIdentity.evidence.filter((reference) =>
+          ![...serverTimes].some((timestampMs) => Math.abs(timestampMs - reference.timestampMs) <= 100),
+        );
+        const serverReferences = [...serverEvidenceById.values()];
+        extractedIdentity = {
+          ...extractedIdentity,
+          evidence: [
+            ...localEvidence.slice(0, Math.max(0, MAX_ROOM_EVIDENCE_STILLS - serverReferences.length)),
+            ...serverReferences,
+          ],
+        };
+      }
       const next = replaceRoomProposals(recordRef.current!, roomId, extractedIdentity, proposals);
       persist(next);
+      mappingCompleted = true;
       setAnalysisStatus("complete");
       setAnalysisExpanded(false);
-      setAnalysisNotice(`Meta Muse Spark reviewed ${orderedStills.length} frames from this room and returned unreviewed suggestions; check each actual still and complete the physical inspection yourself.`);
+      const mapper = mapped.mappingModel === "muse-spark-open-baseten" ? "Baseten Muse Spark Open fallback" : "Meta Muse Spark";
+      setAnalysisNotice(`SAM segmented ${segmented.candidates.length} moments. ${mapper} used one-frame-per-second context and returned unreviewed suggestions; check each actual still and complete the physical inspection yourself.`);
     } catch (error) {
       if (error instanceof FetchTimeoutError) {
         setAnalysisStatus("error");
-        const timeoutLabel = error.timeoutMs >= 60_000
-          ? `${Math.round(error.timeoutMs / 60_000)} minutes`
-          : `${Math.round(error.timeoutMs / 1_000)} seconds`;
-        setAnalysisError(`The server did not answer within ${timeoutLabel}. Keep this app open on Wi-Fi and run it again — finished rooms are kept and this room is marked for retry.`);
+        setAnalysisError(`The server did not answer within ${Math.round(error.timeoutMs / 60000)} minutes. Keep this app open on Wi-Fi and run it again — finished rooms are kept and this room is marked for retry.`);
         return;
       }
       if (controller.signal.aborted || generation !== (analysisGenerationRef.current[roomId] ?? 0)) return;
@@ -1981,6 +2138,9 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
         delete analysisControllersRef.current[roomId];
       }
       pendingCancelFor(roomId).clear();
+      if (segmentationRequested && !mappingCompleted) {
+        void cancelPendingVideoMapping(requestIdentity, candidateTokenToRelease);
+      }
     }
   }
 
@@ -3606,6 +3766,22 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
                           </button>
                           {(analysisStatus === "segmenting" || analysisStatus === "mapping") && !batchActive && <button className={styles.secondaryButton} type="button" onClick={() => invalidateActiveAnalysis("Analysis was cancelled. No result was saved.")}>Cancel</button>}
                         </div>
+                        {analysisMode === "live" && online && clips[selectedRoomId] && (clips[selectedRoomId]?.mime === "video/mp4" || clips[selectedRoomId]?.mime === "video/quicktime") && (
+                          <div className={styles.buttonRow}>
+                            <button className={styles.secondaryButton} type="button" disabled={!mockUnitAttested || !sendVideoConsent || cloudClipUpload.status === "uploading" || analysisStatus === "segmenting" || analysisStatus === "mapping" || batchActive} onClick={() => void uploadClipToCloud(selectedRoomId)}>
+                              {cloudClipUpload.status === "uploading" && cloudClipUpload.roomId === selectedRoomId ? <><LoaderCircle className={styles.spinner} size={17} aria-hidden="true" /> Uploading saved clip…</> : <>Upload saved clip to cloud storage</>}
+                            </button>
+                          </div>
+                        )}
+                        {analysisMode === "live" && online && clips[selectedRoomId] && (clips[selectedRoomId]?.mime === "video/mp4" || clips[selectedRoomId]?.mime === "video/quicktime") && (
+                          <p className={styles.helpText}>Saves this walkthrough to cloud storage, then uploads the saved clip bytes. Storage only — analysis still runs from the Analyze button above.</p>
+                        )}
+                        {cloudClipUpload.status === "done" && cloudClipUpload.roomId === selectedRoomId && cloudClipUpload.videoHash === clips[selectedRoomId]?.sourceSha256 && (
+                          <p className={styles.statusText} role="status">Saved {roomLabel(selectedRoomId)} clip uploaded to cloud storage as job {cloudClipUpload.jobId}. Storage only: no analysis ran and the on-device clip is unchanged.</p>
+                        )}
+                        {cloudClipUpload.status === "error" && cloudClipUpload.roomId === selectedRoomId && cloudClipUpload.videoHash === clips[selectedRoomId]?.sourceSha256 && (
+                          <p className={styles.inlineError} role="alert">{cloudClipUpload.message}</p>
+                        )}
                         <p className={styles.privacyText}>Each explicit run makes one segmentation stage and one mapping stage. No automatic paid retries. A clip is uploaded only for analysis you authorized: your Analyze tap, or automatically on save when walkthrough and batch consent are confirmed.</p>
                         {analysisStatus === "error" && analysisError && <p className={styles.statusText} role="status">No sample result was substituted.</p>}
                       </div>
@@ -3925,7 +4101,7 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
                               {evidence.slice(0, MAX_ROOM_EVIDENCE_STILLS * element.roomIds.length).map(({ reference, src }) => {
                                 const modelEvidence = proposal?.evidence.find((item) => item.stillId === reference.stillId);
                                 const liveCaptureNote = reference.stillId.startsWith(DETECTOR_TEST_STILL_PREFIX) ? ", live detector-test capture" : "";
-                                const accessibleEvidenceLabel = `${roomLabel(reference.roomId)} source still at ${formatTimestamp(reference.timestampMs / 1000)} (${reference.timestampMs} ms)${modelEvidence && modelEvidence.frameIndex !== null ? `, SAM frame index ${modelEvidence.frameIndex}` : modelEvidence ? ", model evidence" : ""}${liveCaptureNote}`;
+                                const accessibleEvidenceLabel = `${roomLabel(reference.roomId)} source still at ${formatTimestamp(reference.timestampMs / 1000)} (${reference.timestampMs} ms)${modelEvidence ? `, SAM frame index ${modelEvidence.frameIndex}` : ""}${liveCaptureNote}`;
                                 return <label className={styles.evidenceOption} key={reference.stillId}>
                                   <input type="checkbox" aria-label={accessibleEvidenceLabel} checked={draft.evidenceStillIds.includes(reference.stillId)} onChange={(event) => { const checked = event.currentTarget.checked; updateDecisionDraft(element.id, (current) => ({ ...current, evidenceStillIds: updateChecked(current.evidenceStillIds, reference.stillId, checked, 5) })); }} />
                                   <Image src={src} width={96} height={72} unoptimized alt="" />
@@ -4488,28 +4664,88 @@ async function cancelPendingVideoMapping(identity: VideoIdentityFields, candidat
   }
 }
 
+function parseSegmentResponse(value: unknown, expected: VideoIdentityFields, room: MoveInReadyRoomId): ParsedSegmentResponse {
+  const root = recordObject(value, "The segmentation response was invalid.");
+  if (root.ok !== true || root.stage !== "segmented" || root.humanReviewRequired !== true || root.conditionAssessment !== "not_assessed") throw new Error("The segmentation response did not match the expected review-only contract.");
+  const models = recordObject(root.models, "The model identity was invalid.");
+  if (models.segmentation !== "sam-3.1" || typeof root.mappingRequired !== "boolean") throw new Error("The response was produced by an unsupported segmentation configuration.");
+  const identity = parseIdentity(root.identity, expected);
+  if (root.room !== room) throw new Error("The segmentation response was for a different room.");
+  const media = recordObject(root.media, "The segmentation media reference was invalid.");
+  if (!isExpectedMp4Media(media, expected.expectedVideoSha256)) throw new Error("The segmentation response did not match the selected MP4 bytes.");
+  const hasMappingToken = typeof root.candidateToken === "string" && root.candidateToken.length >= 16 && root.candidateToken.length <= 48 * 1024;
+  if (!Array.isArray(root.sampleTimestampsMs) || root.sampleTimestampsMs.length < 1 || root.sampleTimestampsMs.length > 30 ||
+      root.sampleTimestampsMs.some((timestamp, index) => typeof timestamp !== "number" || !Number.isSafeInteger(timestamp) || timestamp < 0 || timestamp >= 30_000 || (index > 0 && timestamp <= (root.sampleTimestampsMs as number[])[index - 1]!))) {
+    throw new Error("The segmentation response did not include a valid one-frame-per-second Muse sample schedule.");
+  }
+      if (!Array.isArray(root.candidates) || root.candidates.length > 40) throw new Error("The segmentation response contains too many candidate moments.");
+  const seen = new Set<string>();
+  const candidates = root.candidates.map((raw): SegmentCandidate => {
+    const candidate = recordObject(raw, "A segmentation candidate was invalid.");
+    if (Object.keys(candidate).some((key) => !["candidateId", "elementId", "concept", "evidence"].includes(key))) throw new Error("A segmentation candidate included unsupported fields.");
+    if (typeof candidate.candidateId !== "string" || !/^cand-\d{4}$/.test(candidate.candidateId) || seen.has(candidate.candidateId)) throw new Error("A segmentation candidate identifier was invalid.");
+    seen.add(candidate.candidateId);
+    if (!isMoveInReadyElementId(candidate.elementId) || typeof candidate.concept !== "string" || candidate.concept.length > 80) throw new Error("A segmentation candidate referenced an unsupported inspection element.");
+    const evidence = recordObject(candidate.evidence, "A candidate source moment was invalid.");
+    if (Object.keys(evidence).some((key) => !["frameIndex", "timestampMs", "objectOrdinal", "box", "samConfidence"].includes(key))) throw new Error("A candidate source moment included unsupported fields.");
+    if (!Number.isSafeInteger(evidence.frameIndex) || (evidence.frameIndex as number) < 0 || !Number.isSafeInteger(evidence.timestampMs) || (evidence.timestampMs as number) < 0 || (evidence.timestampMs as number) >= 30_000 || !Number.isSafeInteger(evidence.objectOrdinal) || (evidence.objectOrdinal as number) < 0) throw new Error("A candidate source frame was outside the allowed video bounds.");
+    const box = recordObject(evidence.box, "A candidate geometry was invalid.");
+    if (Object.keys(box).some((key) => !["left", "top", "right", "bottom"].includes(key)) || ![box.left, box.top, box.right, box.bottom].every((part) => typeof part === "number" && Number.isFinite(part) && part >= 0 && part <= 100_000) || (box.left as number) >= (box.right as number) || (box.top as number) >= (box.bottom as number)) throw new Error("A candidate geometry was outside the supported image bounds.");
+    if (evidence.samConfidence !== undefined && (typeof evidence.samConfidence !== "number" || evidence.samConfidence < 0 || evidence.samConfidence > 1)) throw new Error("A candidate confidence was invalid.");
+    return {
+      candidateId: candidate.candidateId,
+      elementId: candidate.elementId,
+      concept: candidate.concept,
+      evidence: {
+        frameIndex: evidence.frameIndex as number,
+        timestampMs: evidence.timestampMs as number,
+        objectOrdinal: evidence.objectOrdinal as number,
+        box: { left: box.left as number, top: box.top as number, right: box.right as number, bottom: box.bottom as number },
+        ...(typeof evidence.samConfidence === "number" ? { samConfidence: evidence.samConfidence } : {}),
+      },
+    };
+  });
+  const times = new Set(candidates.map((candidate) => candidate.evidence.timestampMs));
+  if (times.size > MAX_CANDIDATE_STILLS) throw new Error("The segmentation response exceeded the still-extraction limit.");
+  if (root.mappingRequired !== (candidates.length > 0) || (candidates.length > 0 && (!hasMappingToken || typeof root.mappingExpiresAt !== "number" || !Number.isFinite(root.mappingExpiresAt))) || (candidates.length === 0 && (root.candidateToken !== undefined || root.mappingExpiresAt !== undefined))) {
+    throw new Error("The response mapping lease did not match its candidate evidence.");
+  }
+  return {
+    stage: "segmented",
+    identity,
+    room,
+    media: { container: media.container, sourceVideoSha256: media.sourceVideoSha256 as string },
+    candidateToken: hasMappingToken ? root.candidateToken as string : null,
+    candidates,
+    sampleTimestampsMs: root.sampleTimestampsMs as number[],
+  };
+}
 
-function parseStillsResponse(
+async function parseMapResponse(
   value: unknown,
   expected: VideoIdentityFields,
   room: MoveInReadyRoomId,
-): ParsedStillsResponse {
-  const root = recordObject(value, "The Muse stills response was invalid.");
-  if (root.ok !== true || root.stage !== "stills-mapped" || root.humanReviewRequired !== true || root.conditionAssessment !== "not_assessed") throw new Error("Muse output did not match the expected review-only contract.");
+  candidates: readonly SegmentCandidate[],
+  evidenceIdentity: Pick<EvidenceReference, "schemaVersion" | "catalogVersion" | "videoId" | "videoRevision" | "roomId">,
+): Promise<ParsedMapResponse> {
+  const root = recordObject(value, "The Muse mapping response was invalid.");
+  if (root.ok !== true || root.stage !== "mapped" || root.humanReviewRequired !== true || root.conditionAssessment !== "not_assessed") throw new Error("Muse output did not match the expected review-only contract.");
   const models = recordObject(root.models, "The model identity was invalid.");
-  if (models.mapping !== "muse-spark-1.3") throw new Error("The response was produced by an unsupported model configuration.");
+  if (models.segmentation !== "sam-3.1" || (models.mapping !== "muse-spark-1.3" && models.mapping !== "muse-spark-open-baseten")) throw new Error("The response was produced by an unsupported model configuration.");
   const identity = parseIdentity(root.identity, expected);
-  if (root.room !== room) throw new Error("Muse stills analysis returned a different room.");
+  if (root.room !== room) throw new Error("Muse mapping returned a different room.");
   const media = recordObject(root.media, "The mapped media reference was invalid.");
-  if (!isExpectedMp4Media(media, expected.expectedVideoSha256)) throw new Error("Muse stills analysis did not match the selected MP4 bytes.");
-  if (!Array.isArray(root.proposals) || root.proposals.length > MOVE_IN_READY_ELEMENTS.length) throw new Error("Muse stills analysis contained an invalid proposal count.");
+  if (!isExpectedMp4Media(media, expected.expectedVideoSha256)) throw new Error("Muse mapping did not match the selected MP4 bytes.");
+  if (!Array.isArray(root.proposals) || root.proposals.length > MOVE_IN_READY_ELEMENTS.length) throw new Error("Muse mapping contained an invalid proposal count.");
+  const candidateById = new Map(candidates.map((candidate) => [candidate.candidateId, candidate]));
   const seen = new Set<string>();
-  const proposals: StillsProposalResponse[] = [];
+  const proposals: MapProposal[] = [];
   for (const raw of root.proposals) {
     const proposal = recordObject(raw, "A Muse proposal was invalid.");
-    if (Object.keys(proposal).some((key) => !["elementId", "modelSuggestion", "observation", "confidence", "evidenceStillIds", "deficiencySuggestion"].includes(key))) throw new Error("Muse returned an unsupported or verdict-like proposal field.");
+    if (Object.keys(proposal).some((key) => !["elementId", "state", "modelSuggestion", "observation", "confidence", "evidenceCandidateIds", "evidence", "deficiencySuggestion"].includes(key))) throw new Error("Muse returned an unsupported or verdict-like proposal field.");
     if (!isMoveInReadyElementId(proposal.elementId) || seen.has(proposal.elementId)) throw new Error("Muse returned a duplicate or unsupported element ID.");
     seen.add(proposal.elementId);
+    if (proposal.state !== "draft-proposal" && proposal.state !== "needs-human-check") throw new Error("Muse proposal status was invalid.");
     if (proposal.modelSuggestion !== "A" && proposal.modelSuggestion !== "D") throw new Error("Muse suggestion must be an unreviewed A or D proposal.");
     let deficiencySuggestion: ModelDeficiencySuggestion | undefined;
     if (proposal.modelSuggestion === "D") {
@@ -4521,45 +4757,78 @@ function parseStillsResponse(
     }
     if (typeof proposal.observation !== "string" || proposal.observation.length < 1 || proposal.observation.length > 600) throw new Error("Muse observation text was outside its allowed length.");
     if (typeof proposal.confidence !== "number" || !Number.isFinite(proposal.confidence) || proposal.confidence < 0 || proposal.confidence > 100) throw new Error("Muse proposal confidence was invalid.");
-    const evidenceStillIds = proposal.evidenceStillIds;
-    if (!Array.isArray(evidenceStillIds) || evidenceStillIds.length === 0 || evidenceStillIds.length > 5 || evidenceStillIds.some((id) => typeof id !== "string")) throw new Error("Muse evidence references were invalid.");
+    const evidenceCandidateIds = proposal.evidenceCandidateIds;
+    if (!Array.isArray(evidenceCandidateIds) || evidenceCandidateIds.length === 0 || evidenceCandidateIds.length > 5 || evidenceCandidateIds.some((id) => typeof id !== "string")) throw new Error("Muse evidence references were invalid.");
+    const rawEvidence = Array.isArray(proposal.evidence) ? proposal.evidence : [];
+    let evidenceIntegrityValid = rawEvidence.length === evidenceCandidateIds.length && new Set(evidenceCandidateIds).size === evidenceCandidateIds.length;
+    const evidence = await Promise.all(evidenceCandidateIds.map(async (rawCandidateId, index) => {
+      const candidateId = rawCandidateId as string;
+      const candidate = candidateById.get(candidateId);
+      const verified = candidate && candidate.elementId === proposal.elementId
+        ? await verifyMappedServerEvidence(rawEvidence[index], candidate, evidenceIdentity)
+        : null;
+      if (!verified) evidenceIntegrityValid = false;
+      return { candidateId, verified };
+    }));
     proposals.push({
       elementId: proposal.elementId,
+      state: proposal.state,
       modelSuggestion: proposal.modelSuggestion,
       observation: proposal.observation,
       confidence: proposal.confidence,
-      evidenceStillIds: evidenceStillIds as string[],
+      evidenceCandidateIds: evidenceCandidateIds as string[],
+      evidence,
+      evidenceIntegrityValid,
       ...(deficiencySuggestion ? { deficiencySuggestion } : {}),
     });
   }
   return {
-    stage: "stills-mapped",
+    stage: "mapped",
     identity,
     room,
     media: { container: media.container, sourceVideoSha256: media.sourceVideoSha256 as string },
-    mappingModel: models.mapping as "muse-spark-1.3",
+    mappingModel: models.mapping,
     proposals,
   };
 }
 
-function buildStillsProposals(
-  mapped: ParsedStillsResponse,
-  referenceByStillId: ReadonlyMap<string, EvidenceReference>,
+function parseIdentity(value: unknown, expected: VideoIdentityFields): VideoIdentityFields {
+  const identity = recordObject(value, "The provider response identity was invalid.");
+  for (const [key, value] of Object.entries(expected)) {
+    if (identity[key] !== value) throw new Error("The response belongs to a different clip or analysis attempt. No result was saved.");
+  }
+  return expected;
+}
+
+function mapProposalsToEvidence(
+  mapped: ParsedMapResponse,
+  candidates: readonly SegmentCandidate[],
   analysisIdentity: VideoAnalysisIdentity,
 ): Partial<Record<MoveInReadyElementId, ModelElementProposal>> {
+  const candidateById = new Map(candidates.map((candidate) => [candidate.candidateId, candidate]));
   const result: Partial<Record<MoveInReadyElementId, ModelElementProposal>> = {};
   for (const proposal of mapped.proposals) {
     const evidence: EvidenceReference[] = [];
-    let evidenceIntegrityValid = true;
-    for (const stillId of proposal.evidenceStillIds) {
-      const reference = referenceByStillId.get(stillId);
-      if (!reference) {
+    const ids = new Set<string>();
+    let evidenceIntegrityValid = proposal.evidenceIntegrityValid;
+    for (const mappedEvidence of proposal.evidence) {
+      const candidateId = mappedEvidence.candidateId;
+      if (ids.has(candidateId)) {
         evidenceIntegrityValid = false;
         continue;
       }
-      if (!evidence.some((item) => item.stillId === reference.stillId)) evidence.push(reference);
+      ids.add(candidateId);
+      const candidate = candidateById.get(candidateId);
+      const verified = mappedEvidence.verified;
+      if (!candidate || !verified || candidate.elementId !== proposal.elementId ||
+          verified.reference.frameIndex !== candidate.evidence.frameIndex ||
+          verified.reference.timestampMs !== candidate.evidence.timestampMs) {
+        evidenceIntegrityValid = false;
+        continue;
+      }
+      if (!evidence.some((item) => item.stillId === verified.reference.stillId)) evidence.push(verified.reference);
     }
-    const state = resolveMappedProposalState("draft-proposal", evidence.length, evidenceIntegrityValid);
+    const state = resolveMappedProposalState(proposal.state, evidence.length, evidenceIntegrityValid);
     const base = {
       elementId: proposal.elementId,
       state,
@@ -4579,16 +4848,9 @@ function buildStillsProposals(
   return result;
 }
 
-
-function parseIdentity(value: unknown, expected: VideoIdentityFields): VideoIdentityFields {
-  const identity = recordObject(value, "The provider response identity was invalid.");
-  for (const [key, value] of Object.entries(expected)) {
-    if (identity[key] !== value) throw new Error("The response belongs to a different clip or analysis attempt. No result was saved.");
-  }
-  return expected;
+function makeNoEvidenceProposals(): Partial<Record<MoveInReadyElementId, ModelElementProposal>> {
+  return {};
 }
-
-
 
 function replaceRoomProposals(
   current: MoveInReadyInspection,
@@ -4877,6 +5139,20 @@ function readSafeApiError(value: unknown, status: number): string {
   return `Live analysis did not complete (server response ${status}). No sample result was substituted.`;
 }
 
+function findNearestSourceStill(
+  stills: Map<number, { blob: Blob; hash: string; width: number; height: number }>,
+  requestedTimestampMs: number,
+): { timestampMs: number; blob: Blob; hash: string; width: number; height: number } | null {
+  let closest: { timestampMs: number; blob: Blob; hash: string; width: number; height: number } | null = null;
+  for (const [timestampMs, still] of stills) {
+    if (!closest || Math.abs(timestampMs - requestedTimestampMs) < Math.abs(closest.timestampMs - requestedTimestampMs)) {
+      closest = { timestampMs, ...still };
+    }
+  }
+  if (!closest || Math.abs(closest.timestampMs - requestedTimestampMs) > 100) return null;
+  return closest;
+}
+
 function sameRoomClipIdentity(
   left: StoredRoomClipIdentity | null,
   right: StoredRoomClipIdentity | null,
@@ -4900,16 +5176,6 @@ function sameStoredClipSource(left: StoredVideoClip, right: StoredVideoClip): bo
     left.capturedAt === right.capturedAt &&
     left.sizeBytes === right.sizeBytes &&
     left.durationSeconds === right.durationSeconds;
-}
-
-/** Evenly thin a timestamp grid to at most `max` entries, order preserved. */
-function evenlySpacedTimestamps(timestamps: readonly number[], max: number): number[] {
-  if (timestamps.length <= max) return [...timestamps];
-  const picked: number[] = [];
-  for (let index = 0; index < max; index += 1) {
-    picked.push(timestamps[Math.floor((index * timestamps.length) / max)]!);
-  }
-  return [...new Set(picked)];
 }
 
 function makeRoomEvidenceTimestamps(

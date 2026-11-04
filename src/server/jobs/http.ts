@@ -151,32 +151,3 @@ export async function boundedJsonBody(request: Request, maxBytes = 16 * 1024): P
     throw new VideoJobHttpError(400, "INVALID_REQUEST", "The video job details were not valid JSON.");
   }
 }
-
-export function publicVideoJob(job: {
-  id: string;
-  status: string;
-  stage: string;
-  retryable: boolean;
-  roomId: string;
-  identity: Record<string, unknown>;
-  safeErrorCode: string | null;
-  safeErrorMessage: string | null;
-  segmentResult: Record<string, unknown> | null;
-  result: Record<string, unknown> | null;
-}) {
-  return {
-    ok: true,
-    jobId: job.id,
-    status: job.status,
-    stage: job.stage,
-    retryable: job.retryable,
-    room: job.roomId,
-    identity: job.identity,
-    error: job.safeErrorCode ? { code: job.safeErrorCode, message: job.safeErrorMessage ?? "Video processing could not be completed." } : null,
-    ...(job.status === "completed" && job.result
-      ? { result: job.result }
-      : job.status === "mapping" && job.segmentResult
-        ? { result: { segment: job.segmentResult, mapped: null } }
-        : {}),
-  };
-}

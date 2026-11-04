@@ -3,7 +3,7 @@
  * with APP_ANALYSIS_MODE=live on :3102 (the queue runner requires live mode);
  * the suite runs with serial workers so this port reuse is safe. Playwright
  * intercepts every video API request before it reaches the server and answers
- * the stills stage with a stubbed empty-proposal response, so neither app
+ * the segment stage with a stubbed zero-candidate response, so neither app
  * server can call Meta. The clip is the generated synthetic H.264 pattern.
  * This proves the queue/unchanged-chip/reconnect behavior only; it does not
  * validate live SAM/Muse behavior. The manual per-room pending intent keeps
@@ -142,14 +142,9 @@ function videoIdentityFromRequest(requestBody: Buffer, contentType: string): Moc
   };
 }
 
-function stillIdsFromRequest(requestBody: Buffer, contentType: string): string[] {
-  const meta = JSON.parse(multipartField(requestBody, contentType, "stillMeta")) as Array<{ stillId?: unknown }>;
-  return meta.map((entry) => String(entry.stillId));
-}
-
 test("offline clip save queues analysis and reconnect auto-starts it", async ({ page, context }) => {
   test.setTimeout(180_000);
-  const stillsCalls: Array<{ stage: string; room: string }> = [];
+  const segmentCalls: Array<{ stage: string; room: string }> = [];
   await page.route("**/api/video/segment*", async (route) => {
     const request = route.request();
     const stage = new URL(request.url()).searchParams.get("stage") ?? "";
@@ -161,7 +156,7 @@ test("offline clip save queues analysis and reconnect auto-starts it", async ({ 
       });
       return;
     }
-    if (request.method() !== "POST" || stage !== "stills") {
+    if (request.method() !== "POST" || stage !== "segment") {
       await route.fulfill({ status: 400, body: "Unexpected mocked video request." });
       return;
     }
@@ -170,26 +165,23 @@ test("offline clip save queues analysis and reconnect auto-starts it", async ({ 
     const contentType = request.headers()["content-type"] ?? "";
     const identity = videoIdentityFromRequest(body, contentType);
     const room = multipartField(body, contentType, "room");
-    stillsCalls.push({ stage, room });
-    // Stills-first analysis: the browser sends local frames only, never the
-    // clip. The stub returns no proposals (the zero-detection equivalent).
-    const requestText = body.toString("latin1");
-    if (/name="video"/.test(requestText)) {
-      throw new Error("The browser must not upload the clip on the stills path.");
-    }
-    const stillIds = stillIdsFromRequest(body, contentType);
-    if (stillIds.length === 0) throw new Error("The intercepted stills request described no frames.");
+    segmentCalls.push({ stage, room });
+    // Minimal parseable segment shape: the client parser requires the echoed
+    // identity, matching MP4 media, a non-empty sample schedule, and
+    // mappingRequired false with no mapping token when no candidates return.
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
         ok: true,
-        stage: "stills-mapped",
-        models: { mapping: "muse-spark-1.3" },
+        stage: "segmented",
+        models: { segmentation: "sam-3.1" },
         room,
         media: { container: "mp4", sourceVideoSha256: identity.expectedVideoSha256 },
         identity,
-        proposals: [],
+        candidates: [],
+        sampleTimestampsMs: [500],
+        mappingRequired: false,
         humanReviewRequired: true,
         conditionAssessment: "not_assessed",
       }),
@@ -227,13 +219,13 @@ test("offline clip save queues analysis and reconnect auto-starts it", async ({ 
 
     // Negative assertion: the offline save must queue locally without sending.
     await page.waitForTimeout(2_000);
-    expect(stillsCalls, "offline clip save must not call analysis").toHaveLength(0);
+    expect(segmentCalls, "offline clip save must not call analysis").toHaveLength(0);
 
     await context.setOffline(false);
     await expect
-      .poll(() => stillsCalls.length, { timeout: 60_000 })
+      .poll(() => segmentCalls.length, { timeout: 60_000 })
       .toBeGreaterThan(0);
-    expect(stillsCalls[0]?.room).toBe("kitchen");
+    expect(segmentCalls[0]?.room).toBe("kitchen");
   } finally {
     await context.setOffline(false);
     await page.unroute("**/api/video/segment*");

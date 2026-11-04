@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { expect, type Page } from "@playwright/test";
 
+import { goToCapture } from "./navigation";
+
 type IdentitySeed = {
   sessionId: string;
   schemaVersion: number;
@@ -219,13 +221,5 @@ export async function configureMockUnit(page: Page, expectedMode = "Sample only"
   await page.getByLabel("Funding type").selectOption("lahsa");
   await page.getByLabel("Unit type").selectOption("studio");
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Home", exact: true }).click();
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Guide", exact: true }).click();
-  const guide = page.getByTestId("assistant-guide");
-  await expect(guide).toBeVisible();
-  const toggle = guide.getByTestId("assistant-guide-toggle");
-  if (await toggle.getAttribute("aria-expanded") !== "true") await toggle.click();
-  await guide.locator("button[class*='primaryButton']").first().click();
-  const closeGuide = page.getByRole("button", { name: "Close the AI inspection guide", exact: true });
-  if (await closeGuide.isVisible()) await closeGuide.click();
-  await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
+  await goToCapture(page);
 }

@@ -27,9 +27,8 @@ Rollback: `az containerapp update -g metainspect-prod -n
 metainspect-app --image metainspectprod.azurecr.io/metainspect:mvp22`
 (prior healthy revision `metainspect-app--0000022`).
 
-Commit labels mvp24–mvp27 (from `git log` on `dev`; no image
-build or deploy records exist for them — committed but never
-deployed, covered by the Phase 2 tag instead):
+ACR holds images mvp12–mvp31 (verified 2026-11-04). mvp24–mvp27
+match `dev` commit labels:
 `9ec4c70` mvp24 (Nov 3: storage-cause naming in local-save failures,
 working retry + download on the failed clip),
 `6a9ef0e` mvp25 (Nov 3: network-first navigations + shell-v6,
@@ -38,6 +37,11 @@ stale manifest spec fix),
 video segment failure),
 `0660eb8` mvp27 (Nov 4: SAM.gov owner checks — exclusions parser
 fix, entity identity source, owner input, quota cache).
+Images mvp28–mvp31 have NO matching git commits — they were pushed
+from unknown trees with no record. Dev currently runs mvp31
+(rev `metainspect-dev--0000024`, banner `MVP_31`); treat it as
+untrusted until Phase 2 redeploys dev from a known commit.
+Prod never went past mvp23.
 Unreleased after mvp27: `da77301`, `89cb9eb`, `b17a3b9`,
 `96785bc`, `d7065be` (tour batch status, one-path voice guide,
 design-qa refresh, approvals/home-entrance fixes, version banner).
