@@ -1,26 +1,22 @@
 # Documentation
 
-Start with the project overview, then use the focused guides below. The SDD and evaluation records preserve implementation decisions and evidence; they are deeper engineering records, not a claim that every external gate has passed.
+This documentation describes the current prototype and its evidence boundaries. It does not imply production readiness, external acceptance, or measured impact.
 
-## For visitors
+## Product and portfolio
 
-- [Project overview](PROJECT_OVERVIEW.md) — problem, users, product approach, and what remains a hypothesis.
-- [Hackathon narrative](HACKATHON.md) — story, Meta tooling, demo framing, and honest limitations.
-- [Privacy and safety](PRIVACY_AND_SAFETY.md) — media flow, human review, data retention, and out-of-scope actions.
+- [Project overview](PROJECT_OVERVIEW.md): problem, intended users, product scope, and limitations.
+- [Hackathon narrative](HACKATHON.md): problem framing, technical approach, demo guidance, and claims boundaries.
+- [Privacy and safety](PRIVACY_AND_SAFETY.md): media handling, human review, and data limitations.
 
-## For developers
+## Engineering
 
-- [Architecture](ARCHITECTURE.md) — capture-to-export data flow and trust boundaries.
-- [Development setup](DEVELOPMENT.md) — Node version, fixture mode, live configuration, and checks.
-- [Build plan](BUILD_PLAN.md) and [production roadmap](PRODUCTION_MVP_ROADMAP.md).
-- [Runbook](RUNBOOK.md) and [production deployment notes](PRODUCTION_DEPLOY.md) are operational records; review their dated context before reuse.
+- [Architecture](ARCHITECTURE.md): system flow and trust boundaries.
+- [Development setup](DEVELOPMENT.md): local setup, fixture mode, and live-provider configuration.
+- [Form 1083 mapping contract](integration/FORM_1083_MAPPING.md): supported mapping and export boundaries.
+- [Analysis API contract](integration/ANALYZE_CONTRACT.md): request and response behavior.
 
-## Evidence and specifications
+## Evaluation
 
-- [Current status](STATUS.md) — compact snapshot with the links to detailed evidence.
-- [Demo and evaluation status](DEMO.md) and [video clip gate](evaluation/video-clip-gate.md).
-- [Form 1083 mapping contract](integration/FORM_1083_MAPPING.md) and [analysis API contract](integration/ANALYZE_CONTRACT.md).
-- [Product brief](PRODUCT_BRIEF.md), [decisions](DECISIONS.md), and [SDD feature folder](sdd/features/habitability-walkthrough-mvp/).
-- [Research ledger](RESEARCH.md), [review and CI history](REVIEW_AND_CI.md), and [visual QA](../design-qa.md).
+- [Evaluation protocol](evaluation/protocol.md): how to distinguish fixture checks from measured live evaluation and report results responsibly.
 
-Historical handoffs and release records remain available in the repository. Their dates and status apply to the recorded snapshot; use the current status page and linked evidence for present claims.
+For corrections, limitations, and contribution guidance, see [CONTRIBUTING.md](../CONTRIBUTING.md).

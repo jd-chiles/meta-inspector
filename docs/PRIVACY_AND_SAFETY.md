@@ -10,7 +10,7 @@ The app is not an HQS inspection tool. Housing Authority or voucher paths receiv
 
 Room clips and inspection records are stored locally in browser storage. A live analysis action sends the selected clip to the server and Meta for SAM processing. Server-derived stills may be sent to Meta Muse Spark; the configured mapping fallback may send them to Baseten. Provider credentials remain server-side. Review current provider terms for retention; deleting local data does not delete provider-side files or downloads.
 
-Only staged/mock-unit media should be used in demonstrations or evaluations. Do not record tenants, faces, addresses, personal documents, or real case notes. Never put API keys, raw provider responses, or provider file IDs in browser code, logs, exports, or repository fixtures.
+Use only rights-cleared staged/mock-unit media in demonstrations and evaluations. Do not record tenants, faces, addresses, personal documents, or real case notes. Keep API keys, raw provider responses, and provider file IDs out of browser code, logs, exports, and repository fixtures.
 
 ## Export and integration limits
 
@@ -22,4 +22,4 @@ Address screening and SAM.gov lookup are product ideas only. The current app doe
 
 ## Evidence limits
 
-The repo distinguishes fixture behavior, provider connectivity, scored staged-video evaluation, physical-device behavior, and recipient acceptance. A pass in one category is not proof of another. See [current status](STATUS.md) and the [video evaluation record](evaluation/video-clip-gate.md).
+Fixture behavior, provider connectivity, staged-video quality, physical-device behavior, and recipient acceptance are separate evidence categories. Passing a check in one category does not establish the others. See the [evaluation protocol](evaluation/protocol.md).

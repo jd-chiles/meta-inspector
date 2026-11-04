@@ -2,32 +2,24 @@
 
 ## The story
 
-For a household waiting a long time for housing assistance, receiving a voucher is not the end of the search. The household and case manager still have to find a suitable apartment and complete the work needed to document its condition. Visits to units that later fail the applicable requirements can consume scarce time. Walkthroughs also ask busy staff—some with limited inspection experience—to gather evidence and make careful, accountable judgments.
+Receiving housing assistance does not end the search for a suitable home. Households and case managers still coordinate apartment searches and document unit conditions. A visit to an unsuitable unit can consume scarce time, while busy staff must make careful, accountable judgments.
 
-Walkthrough Kit explores how a mobile companion can support that job. It guides a room-by-room video walkthrough, links draft observations to timestamped evidence, and prepares local files for the existing manual process. The evaluator remains responsible for decisions and sign-off.
+Walkthrough Kit explores a focused support tool for the walkthrough itself. It guides room-by-room video capture, links draft observations to source evidence, and prepares local files for a manual process. The evaluator remains responsible for decisions and sign-off.
 
-## Why Meta tools
+## Technical approach
 
-- **Meta SAM 3.1** identifies candidate moments for visual concepts in the submitted room video.
-- **Meta Muse Spark** uses server-derived frames to draft observations associated with the supported Form 1083 elements.
-- The system keeps these outputs in the evidence-review path. They do not decide the result or replace required human checks.
+- **Meta SAM 3.1** identifies candidate moments in submitted room video.
+- **Meta Muse Spark** drafts observations associated with supported Form 1083 elements using server-derived frames.
+- Evidence identity and human review remain part of the workflow; model output does not decide whether a unit passes or fails.
 
-The technical integration, fallback boundary, and live-evaluation evidence are described in [the architecture guide](ARCHITECTURE.md), [the mapping contract](integration/FORM_1083_MAPPING.md), and [the evaluation record](evaluation/video-clip-gate.md).
+See [architecture](ARCHITECTURE.md) and the [Form 1083 mapping contract](integration/FORM_1083_MAPPING.md) for implementation details.
 
-## Demo framing
+## Demo guidance
 
-Show the real capture, review, and sign-off flow. State whether a visible result is a fixture or a live provider response. Use only staged/mock-unit footage. Do not imply that empty screenshots show completed inspections, and do not present a connectivity smoke as quality evaluation.
+Show the capture, review, and sign-off flow using staged/mock-unit data. Clearly label fixture output and live provider output. Do not imply that empty screenshots show completed inspections. A successful automated check or provider connectivity request is not a quality evaluation.
 
-The project has a scored owner-authorized two-room variance and a separate authored single-clip gate that remains open. The exact state and evidence are in [current status](STATUS.md) and [the clip gate](evaluation/video-clip-gate.md). Do not claim measured time saved, reduced wasted visits, inspection accuracy, or recipient acceptance.
+The repository does not establish measured time savings, avoided visits, inspection accuracy, or external recipient acceptance. Present pre-visit address screening and SAM.gov lookups only as future exploration; they are not part of the implemented app.
 
-## Product direction beyond this build
+## Portfolio presentation
 
-The project owner also wants to explore checking a candidate address and relevant SAM.gov records before scheduling a visit. The hypothesis is that earlier checks might identify issues before a case manager and household spend time on an unsuitable unit. This is not implemented, and the reliable meaning and limits of those data sources have not been established. Present it as future exploration only, not as part of the demo or current system.
-
-## Submission and portfolio checklist
-
-- Add the final public demo-video URL when available.
-- Identify which work was built for the event and link the relevant commits or release record.
-- Verify final event rules and submission metadata from the organizer before publishing.
-- Link to the public repository after confirming the final repository name and URL.
-- Keep impact statements qualitative unless supported by documented measurements and sample size.
+Describe the work in terms of the problem, the human-centered workflow, the evidence boundary, and the technical implementation. Keep impact claims qualitative until there are documented measurements with sample size and method.

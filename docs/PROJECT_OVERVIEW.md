@@ -2,30 +2,26 @@
 
 ## The problem
 
-Getting housing assistance can take a long time. After a household receives a voucher or other assistance, the search for a qualifying home can still require repeated coordination. A household and case manager may invest time in an apartment visit only to learn later that the unit does not meet the relevant requirements.
+People may wait a long time for housing assistance, then face a time-sensitive search for a home that meets program requirements. An unsuitable-unit visit can consume time for the household and case manager. The walkthrough and documentation add work for staff who may have heavy caseloads or limited inspection experience.
 
-The inspection and documentation work adds another burden. Case managers often manage heavy caseloads, and some may have limited experience conducting a habitability walkthrough. The work needs to be consistent and reviewable without treating an AI suggestion as an inspection decision.
-
-These statements describe the product motivation and owner-reported context. The repository does not contain a representative study, measured time savings, or outcome data; do not present them as quantified research findings.
+This is the product's motivation, based on early practitioner context. The repository contains no representative study or outcome data, so it does not establish prevalence, avoided visits, or time savings.
 
 ## The approach
 
-Walkthrough Kit is a mobile-first companion for housing navigators and case managers. It guides a staged unit walkthrough across four rooms, organizes timestamped video evidence, and offers draft observations for a worker to review. The worker records the actual inspection decisions, required checks, corrections, and sign-off. The app can then prepare local files for the existing manual workflow.
+Walkthrough Kit is a mobile-first companion for housing navigators and case managers. It guides a staged unit walkthrough across four rooms, organizes video evidence, and offers draft observations linked to source moments. The evaluator records the inspection decisions, required checks, corrections, and sign-off. The app can prepare local files for a manual workflow.
 
-The intended value is practical support: make the walkthrough easier to follow, reduce avoidable documentation friction, and help less-experienced staff see what still needs human attention. It does not replace a qualified evaluator or automate a housing decision.
+The goal is to make evidence capture and review easier to follow. AI output is an observation for a person to review; it is not an inspection verdict or a substitute for a qualified evaluator.
 
-## Proposed pre-visit screening direction
+## Current scope
 
-The project owner described a potential earlier step: check a candidate unit address and relevant SAM.gov records before arranging a visit, with the goal of identifying issues that could make a unit unsuitable and avoid unnecessary case-manager effort.
+- The modeled form is LAHSA Habitability Standards Inspection Form 1083, FY 2022–23.
+- The walkthrough covers kitchen, bathroom, bedroom/living area, and hallway. The front door and lock are covered in the hallway.
+- Video limits are 30 seconds for kitchen, bathroom, and bedroom/living area, and 15 seconds for hallway.
+- Exports are generated locally for manual handling. The staged demonstration leaves participant/HMIS identity and unit address blank.
+- The app does not conduct an HQS inspection, submit to HMIS, deliver files to a landlord, track vouchers, or make eligibility decisions.
 
-This pre-inspection screening is **not implemented in this repository**. The exact address source, SAM.gov records and meaning, decision rules, data quality, privacy requirements, and recourse for incorrect matches still need product and legal review. Until those are defined and evaluated, documentation must call this a concept, not a feature or a proven way to prevent wasted visits.
+## Future exploration
 
-## Current product boundaries
+Pre-visit address screening and SAM.gov lookups have been discussed as a possible way to surface questions before arranging a visit. These checks are not implemented. Their sources, matching rules, interpretation, privacy requirements, and handling of ambiguous results need to be defined before they can be presented as product capabilities.
 
-- The modeled workflow is LAHSA Habitability Standards Inspection Form 1083, FY 2022–23.
-- Four-room video evidence and Meta SAM/Muse draft suggestions support the worker's review.
-- The overall inspection result comes from the evaluator's decisions and required sign-off.
-- Exports are local and intended for manual handling. Participant/HMIS identity and unit address are blank in the staged demo.
-- Direct HMIS submission, landlord delivery, voucher tracking, HQS inspection, and the proposed address/SAM.gov pre-check are not implemented.
-
-See the [product brief](PRODUCT_BRIEF.md), [privacy and safety guide](PRIVACY_AND_SAFETY.md), and [current status](STATUS.md) for details and evidence links.
+See [architecture](ARCHITECTURE.md), [development setup](DEVELOPMENT.md), and [privacy and safety](PRIVACY_AND_SAFETY.md) for technical and data boundaries.

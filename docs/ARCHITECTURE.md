@@ -1,6 +1,6 @@
 # Architecture
 
-Walkthrough Kit is a Next.js application with a local-first mobile walkthrough and server-side provider routes. The implementation details and API shapes remain documented in the [video mapping contract](integration/FORM_1083_MAPPING.md), [analysis contract](integration/ANALYZE_CONTRACT.md), and feature [design](sdd/features/habitability-walkthrough-mvp/02-design.md).
+Walkthrough Kit is a Next.js application with a local-first mobile walkthrough and server-side provider routes. The implementation details and API shapes remain documented in the [video mapping contract](integration/FORM_1083_MAPPING.md), [analysis contract](integration/ANALYZE_CONTRACT.md).
 
 ## Walkthrough data flow
 
@@ -20,4 +20,4 @@ Walkthrough Kit is a Next.js application with a local-first mobile walkthrough a
 
 ## Current and proposed systems
 
-The address and SAM.gov pre-inspection screening described in the project overview has no implementation or API in the current architecture. Do not draw it as an existing service or include it in claims about the current product. If adopted, it requires a separately specified data source, identity/matching policy, user review, failure behavior, privacy analysis, and evaluation plan.
+Address and SAM.gov checks are not implemented in the current architecture. Any future screening workflow would need defined data sources, matching rules, human review, failure handling, privacy analysis, and evaluation.

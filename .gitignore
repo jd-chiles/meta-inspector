@@ -12,3 +12,6 @@ test-results/
 .sdd/locks/
 *.log
 .DS_Store
+
+# Local-only working notes and handoffs; never publish these files.
+.private-project-notes/

@@ -19,7 +19,7 @@
   },
   "checks": {
     "docs": {
-      "command": "node scripts/verify-sdd.mjs",
+      "command": "node scripts/verify-docs.mjs",
       "requirements": [
         "REQ-001",
         "REQ-002",

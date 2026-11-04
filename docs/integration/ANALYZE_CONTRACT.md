@@ -1,14 +1,6 @@
 # POST /api/analyze — frontend contract (backend-owned)
 
-Status: current. This doc is the single source of truth the walkthrough client
-builds against; `src/server/analyze.ts` (invoked by
-`src/app/api/analyze/route.ts`) implements it. On any mismatch the frontend
-**blocks** and PM arbitrates — never work around the contract in UI code
-(see `docs/RUNBOOK.md` §3). REQ-002, REQ-003, REQ-004, REQ-010.
-
-Provider reference: `docs/integration/FORM_1083_MAPPING.md` §2. Catalog rule:
-every checklist surface carries `Demo checklist — not a verified Form 1083
-mapping.` No form-specific claim (provider gate §1.2 unmet).
+This contract describes the still-image analysis endpoint implemented by `src/server/analyze.ts` and `src/app/api/analyze/route.ts`. The current room walkthrough uses the video pipeline documented in [the Form 1083 integration guide](FORM_1083_MAPPING.md). The server owns model selection, prompts, and provider access; clients must not work around contract mismatches.
 
 ## 1. Endpoint and transport
 

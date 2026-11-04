@@ -1,25 +1,19 @@
 # Contributing
 
-Thanks for your interest in Walkthrough Kit. The repository handles inspection evidence and provider data, so contributions must preserve the distinction between model suggestions and evaluator decisions.
+Thanks for your interest in Walkthrough Kit. Contributions should preserve the distinction between AI observations and evaluator decisions.
 
-## Before changing code
+## Before submitting a change
 
-- Read `AGENTS.md`, the product brief, decisions, and the active feature request, requirements, design, task plan, and verification plan.
-- Follow the active SDD task graph and its file ownership. Keep requirement/task mappings current.
-- Use fixture data only for routine development. Never add tenant, address, case, or other personal data to source, tests, screenshots, or commits.
-
-## Safety and evidence rules
-
-- Do not let AI output complete a human check, set an inspection result, or enter approved exports without evaluator review.
-- Preserve media/session/version identity across asynchronous work; stale results must fail closed.
-- Keep provider credentials and raw provider bodies server-side and out of logs and exports.
-- Keep fixture behavior clearly labeled and separate from live-provider evidence.
-- Do not describe local deletion as provider deletion, or local exports as HMIS submissions or accepted provider records.
+- Read the relevant product, architecture, and integration documentation.
+- Use fixture data for routine development. Do not add tenant, address, case, or other personal data to source, tests, screenshots, or commits.
+- Keep provider credentials and raw provider bodies server-side and out of logs, exports, and browser bundles.
+- Preserve evidence identity across asynchronous work; stale results must fail closed.
+- Do not describe local deletion as provider deletion or local exports as HMIS submissions or accepted records.
 
 ## Verification
 
-Run the checks required by the task and list the exact commands and outcomes in the change description. The CI workflow runs the configured docs, lint, typecheck, unit, build, and browser checks. Live provider checks are separate and require explicit authorization and rights-cleared staged media.
+Run the relevant project checks and list the exact commands and outcomes in your change description. Live provider checks are separate from fixture checks and require authorized staged media. Do not claim reviews, evidence, or acceptance that were not recorded.
 
 ## Pull requests
 
-Use the repository pull request template. Summarize the user-visible change, requirement/task mapping, verification results, review focus, and remaining limitations. Do not claim reviews or evidence that were not recorded.
+Explain the user-visible change, relevant requirements, verification performed, and known limitations. Keep changes focused and include documentation updates when behavior or user-facing claims change.
