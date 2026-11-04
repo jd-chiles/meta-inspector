@@ -165,6 +165,16 @@ function isPlaybackTimeout(error: unknown): boolean {
   return error instanceof Error && error.message === PLAYBACK_TIMEOUT_MESSAGE;
 }
 
+/**
+ * Autoplay policy, not a broken clip. Falling through to live synthesis here
+ * would bill a provider call that is equally unable to play, and the device
+ * voice would then read the line in a different voice. Stay silent instead:
+ * the next user gesture unlocks playback and the same static clip plays.
+ */
+function isAutoplayBlocked(error: unknown): boolean {
+  return (error as { name?: unknown } | null)?.name === "NotAllowedError";
+}
+
 export interface SpeakPromptOptions {
   /** Tour narration language; "es" uses the Spanish owner voice (REQ-R2). */
   language?: "en" | "es";
@@ -185,6 +195,8 @@ export async function speakPrompt(text: string, signal?: AbortSignal, options: S
     }
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
+    // Autoplay-blocked: the clip is fine, the browser is waiting for a gesture.
+    if (isAutoplayBlocked(error)) return { engine: "none" };
     // A stuck clip counts as spoken: never freeze the walkthrough on it.
     if (isPlaybackTimeout(error)) return { engine: "fish" };
     // A missing or unplayable clip falls through to live speech below.
@@ -214,6 +226,7 @@ export async function speakPrompt(text: string, signal?: AbortSignal, options: S
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     if (signal?.aborted) return { engine: "none" };
     if (isPlaybackTimeout(error)) return { engine: "fish" };
+    if (isAutoplayBlocked(error)) return { engine: "none" };
     stopDeviceSpeech();
     await speakWithDeviceVoice(text);
     if (signal?.aborted) return { engine: "none" };

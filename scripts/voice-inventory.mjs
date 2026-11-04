@@ -1,7 +1,7 @@
 /**
  * Single source of truth for pre-generated voice clips: every static string
  * the app speaks through Fish Audio (tour scripts, setup questions, room
- * checks, filming cues). Dynamic scripts (film-room position, live proofs,
+ * checks, filming cues, film-room intros). Dynamic scripts (live proofs,
  * review-item excerpts, finish counts) stay live with a server-side cache.
  *
  * Playback matches by exact text: stay in sync with the sources named per
@@ -79,8 +79,47 @@ const FILMING_CUES = [
   "Show the lighting along the path.",
 ];
 
+/**
+ * Guide-bar narration from deriveAssistantNode() in assistant-script.ts.
+ * Static branches only; the film-step and review-count lines are generated
+ * in FILM_ROOM_INTROS below. voice-inventory.test.ts walks every branch.
+ */
+const ASSISTANT_GUIDE = [
+  "This unit needs the H Q S workflow. I can't run a Form 1083 here.",
+  "Tap Start inspection on Home to begin. I'll guide you from there.",
+  "Hi! I'm your inspection guide. I'll walk you through the whole thing. First, let's set up the unit.",
+  "I'm analyzing your clips now. Hang tight.",
+  "All filmed. Confirm your clips are staged mock footage, and I'll analyze everything now.",
+  "All done. Let's sign off and export.",
+  "Inspection complete. Nice work.",
+];
+
+const FILM_ROOM_INTROS = (() => {
+  // Must match filmRoomScript()/filmOutroCue() in
+  // src/features/walkthrough/guided-tour.ts and the film/review nodes in
+  // src/features/walkthrough/assistant-script.ts (EN branch) exactly;
+  // voice-inventory.test.ts guards every variant against those sources.
+  // Indexed room labels (Bathroom 2, …) and legacy bedroom-living stay live;
+  // only the standard tour rooms and 11 requirement counts are pinned.
+  const rooms = ["Kitchen", "Bathroom", "Bedroom", "Living room", "Hallway"];
+  const out = [];
+  for (const label of rooms) {
+    for (let total = 1; total <= 5; total += 1) {
+      for (let position = 1; position <= total; position += 1) {
+        out.push(`Let's film the ${label}, room ${position} of ${total}. Start recording — your shot list is on screen. End the video when you have captured every shot.`);
+        out.push(`Step ${position} of ${total}. Let's film the ${label}. I'll tell you exactly what to show.`);
+      }
+    }
+  }
+  out.push("That's the full shot list — end the video when you have captured every shot.");
+  for (let remaining = 1; remaining <= 11; remaining += 1) {
+    out.push(`${remaining} items left. Review each one and record your decision.`);
+  }
+  return out;
+})();
+
 /** Every static spoken string, deduplicated, in stable generation order. */
-export const VOICE_CLIP_TEXTS = [...new Set([...TOUR_STATIC, ...SETUP_QUESTIONS, ...ROOM_CHECKS, ...FILMING_CUES, ...REPROMPTS, ...REVIEW_AND_TEST])];
+export const VOICE_CLIP_TEXTS = [...new Set([...TOUR_STATIC, ...SETUP_QUESTIONS, ...ROOM_CHECKS, ...FILMING_CUES, ...REPROMPTS, ...REVIEW_AND_TEST, ...ASSISTANT_GUIDE, ...FILM_ROOM_INTROS])];
 
 /**
  * Spanish-tour static strings (REQ-R2), mirroring the English groups above.
