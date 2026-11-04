@@ -53,6 +53,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <head>
+        <meta name="apple-mobile-web-app-capable" content="yes" />
         <link
           rel="preload"
           href="/fonts/public-sans-latin-400-normal.woff2"
