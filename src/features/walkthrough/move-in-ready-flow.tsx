@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import catalogJson from "../../data/catalog.demo.json";
+import { APP_VERSION } from "../../app-version";
 import {
   useCallback,
   useEffect,
@@ -3142,7 +3143,7 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
   return (
     <div className={styles.app} data-step={step} data-guide-bar={step !== "guided" ? "true" : "false"} data-review-detail={mobileReviewDetailOpen ? "true" : "false"} data-testid="move-in-ready-app">
       <p className={styles.demoBanner} data-testid="synthetic-data-banner" role="note">
-        Demo build · staged mock-unit data only — no real client data. Stills come only from filmed clips.
+        MVP_{APP_VERSION}
       </p>
       <header className={`${styles.topBar} ${analysisMode === "live" ? styles.topBarConfigured : ""}`}>
         <div className={styles.brand}>
