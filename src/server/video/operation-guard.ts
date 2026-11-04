@@ -5,6 +5,7 @@ const SESSION_DEDUPE_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_TRACKED_SESSIONS = 5_000;
 const MAX_ATTEMPTS_PER_SESSION = 64;
 const MAX_CONCURRENT_VIDEO_OPERATIONS = 2;
+const MAX_CONCURRENT_STILLS_OPERATIONS = 4;
 /**
  * Concurrent operations per walkthrough session (Sprint 0 REQ-S2). Two
  * rooms analyze at once; the full request identity (session, video,
@@ -20,6 +21,8 @@ export interface PendingMappingStill {
   frameIndex: number;
   timestampMs: number;
   bytes: Uint8Array;
+  width?: number;
+  height?: number;
 }
 
 export interface PendingMappingStills {
@@ -78,7 +81,20 @@ export interface VideoProcessingLease {
  * unbounded number of large uploads while the provider is busy.
  */
 export function claimVideoProcessing(): VideoProcessingLease {
-  if (activeVideoOperations >= MAX_CONCURRENT_VIDEO_OPERATIONS) {
+  return claimWithCap(MAX_CONCURRENT_VIDEO_OPERATIONS);
+}
+
+/**
+ * Stills requests carry a few JPEG frames instead of a full clip, so the
+ * shared counter admits more of them at once. The cap still bounds total
+ * concurrent provider work when legacy and stills requests mix.
+ */
+export function claimStillsProcessing(): VideoProcessingLease {
+  return claimWithCap(MAX_CONCURRENT_STILLS_OPERATIONS);
+}
+
+function claimWithCap(cap: number): VideoProcessingLease {
+  if (activeVideoOperations >= cap) {
     throw new VideoSegmentError(429, "PROCESSING_BUSY", "Video processing is busy. Wait briefly and try again.");
   }
   activeVideoOperations += 1;
@@ -250,6 +266,49 @@ export function claimVideoMapping(
   active.phase = "mapping";
   session.expiresAt = now + SESSION_DEDUPE_TTL_MS;
   return makeLease(identity.sessionId, active.key, active.pendingStills);
+}
+
+/** Rebuild a one-time map lease after a durable worker is restarted between SAM and Muse. */
+export function restoreAwaitingVideoMapping(
+  identity: VideoOperationIdentity,
+  candidateToken: string,
+  expiresAt: number,
+  pendingStills: PendingMappingStills,
+): void {
+  const now = Date.now();
+  const session = getOrCreateSession(identity.sessionId, now);
+  if (expiresAt <= now || expiresAt > now + 15 * 60 * 1000 + 5_000) throw stale();
+  const key = operationKey(identity);
+  const existing = session.active.get(key);
+  if (existing) {
+    if (existing.phase === "awaiting-map") {
+      if (digestMatches(existing.candidateTokenDigest, tokenDigest(candidateToken))) return;
+      // A durable worker may need to renew its private signed token after a
+      // restart. Replace only the same identity's unused mapping lease.
+      clearOperation(session, key);
+    } else {
+      throw busy();
+    }
+  }
+  if (session.active.size >= MAX_ACTIVE_OPERATIONS_PER_SESSION) throw busy();
+  const attempt = attemptKey(identity);
+  if (!session.seenAnalysisAttempts.has(attempt)) {
+    if (session.seenAnalysisAttempts.size >= MAX_ATTEMPTS_PER_SESSION) throw busy();
+    session.seenAnalysisAttempts.add(attempt);
+  }
+  session.expiresAt = now + SESSION_DEDUPE_TTL_MS;
+  session.active.set(key, { key, phase: "segmenting" });
+  const lease = makeLease(identity.sessionId, key);
+  lease.awaitingMap(candidateToken, expiresAt, pendingStills);
+  if (operationsBySession.get(identity.sessionId)?.active.get(key)?.phase !== "awaiting-map") throw stale();
+}
+
+/** Allow pg-boss to safely retry only when no SAM request was started. */
+export function releaseSafeVideoSegmentationAttempt(identity: VideoOperationIdentity): void {
+  const session = operationsBySession.get(identity.sessionId);
+  if (!session) return;
+  session.seenAnalysisAttempts.delete(attemptKey(identity));
+  if (session.active.size === 0) session.expiresAt = Math.min(session.expiresAt, Date.now() + SESSION_DEDUPE_TTL_MS);
 }
 
 /**

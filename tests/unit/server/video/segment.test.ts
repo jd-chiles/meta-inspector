@@ -1702,3 +1702,109 @@ describe("two-room request isolation (Sprint 0 REQ-S2)", () => {
     expect(bathroomMappedBody.media).toMatchObject({ sourceVideoSha256: sha256(bathroomBytes) });
   });
 });
+
+describe("POST /api/video/segment?stage=stills", () => {
+  const VIDEO_BYTES = makeMp4();
+  const VIDEO_HASH = sha256(VIDEO_BYTES);
+
+  function stillsRequest(options: {
+    stills?: Array<{ stillId: string; timestampMs: number; bytes?: Uint8Array }>;
+    stillMeta?: string;
+    extraField?: boolean;
+  } = {}): Request {
+    const stills = options.stills ?? [
+      { stillId: "s-video-demo-0-abcdef12", timestampMs: 0 },
+      { stillId: "s-video-demo-2500-1234abcd", timestampMs: 2500 },
+    ];
+    const form = new FormData();
+    form.append("stage", "stills");
+    form.append("room", "kitchen");
+    form.append("sessionId", IDENTITY_BASE.sessionId);
+    form.append("schemaVersion", IDENTITY_BASE.schemaVersion);
+    form.append("videoId", IDENTITY_BASE.videoId);
+    form.append("videoRevision", IDENTITY_BASE.videoRevision);
+    form.append("analysisId", IDENTITY_BASE.analysisId);
+    form.append("attempt", IDENTITY_BASE.attempt);
+    form.append("catalogVersion", IDENTITY_BASE.catalogVersion);
+    form.append("expectedVideoSha256", VIDEO_HASH);
+    form.append("stillMeta", options.stillMeta ?? JSON.stringify(stills.map(({ stillId, timestampMs }) => ({ stillId, timestampMs }))));
+    for (const still of stills) {
+      form.append("still", new File([still.bytes ?? JPEG_STILL], still.stillId, { type: "image/jpeg" }));
+    }
+    if (options.extraField) form.append("video", new File([VIDEO_BYTES], "clip.mp4", { type: "video/mp4" }));
+    const headers = new Headers({ origin: ORIGIN, "content-length": "65536" });
+    return new Request(`${ORIGIN}/api/video/segment?stage=stills`, { method: "POST", headers, body: form });
+  }
+
+  function stillsMetaFetch(museText: string): typeof fetch {
+    return async (input) => {
+      const url = String(input);
+      if (url.endsWith("/responses")) {
+        return Response.json({ status: "completed", output_text: museText });
+      }
+      throw new Error("unexpected endpoint");
+    };
+  }
+
+  it("maps room stills in one vision call and echoes the walkthrough identity", async () => {
+    const museText = JSON.stringify({
+      proposals: [{
+        elementId: "demo-water-supply",
+        modelSuggestion: "A",
+        observation: "A faucet and sink are visible.",
+        confidence: 81,
+        evidenceStillIds: ["s-video-demo-0-abcdef12"],
+        deficiencySuggestion: null,
+      }],
+    });
+    const response = await handleVideoSegmentRequest(stillsRequest(), {
+      env: LIVE_ENV,
+      fetch: stillsMetaFetch(museText),
+    });
+    expect(response.status).toBe(200);
+    const body = await json(response);
+    expect(body.stage).toBe("stills-mapped");
+    expect(body.room).toBe("kitchen");
+    expect(body.identity).toMatchObject({ videoId: "video-demo", analysisId: "analysis-attempt-1" });
+    expect(body.media).toMatchObject({ container: "mp4", sourceVideoSha256: VIDEO_HASH });
+    expect(body.proposals).toEqual([expect.objectContaining({
+      elementId: "demo-water-supply",
+      modelSuggestion: "A",
+      evidenceStillIds: ["s-video-demo-0-abcdef12"],
+    })]);
+  });
+
+  it("rejects non-JPEG stills and unknown form fields before any provider call", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const png = await handleVideoSegmentRequest(
+      stillsRequest({ stills: [{ stillId: "s-video-demo-0-abcdef12", timestampMs: 0, bytes: PNG_STILL }] }),
+      { env: LIVE_ENV, fetch: fetchImpl },
+    );
+    expect(png.status).toBe(415);
+    const extra = await handleVideoSegmentRequest(
+      stillsRequest({ extraField: true }),
+      { env: LIVE_ENV, fetch: fetchImpl },
+    );
+    expect(extra.status).toBe(400);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when Muse cites a still that was never sent", async () => {
+    const museText = JSON.stringify({
+      proposals: [{
+        elementId: "demo-water-supply",
+        modelSuggestion: "A",
+        observation: "A faucet is visible.",
+        confidence: 50,
+        evidenceStillIds: ["s-not-sent-00000000"],
+        deficiencySuggestion: null,
+      }],
+    });
+    const response = await handleVideoSegmentRequest(stillsRequest(), {
+      env: LIVE_ENV,
+      fetch: stillsMetaFetch(museText),
+    });
+    expect(response.status).toBe(502);
+    expect(await json(response)).toMatchObject({ ok: false, error: { code: "INVALID_MODEL_OUTPUT" } });
+  });
+});

@@ -34,8 +34,8 @@ describe("room batch queue", () => {
 });
 
 describe("runRoomBatch", () => {
-  it("runs at most two rooms at once and attributes interleaved results to the correct room", async () => {
-    expect(MAX_CONCURRENT_BATCH_ROOMS).toBe(2);
+  it("runs at most three rooms at once and attributes interleaved results to the correct room", async () => {
+    expect(MAX_CONCURRENT_BATCH_ROOMS).toBe(3);
     const queue = createRoomBatchQueue(["kitchen", "bathroom", "bedroom"]);
     const gates = new Map([
       ["kitchen", deferred<boolean>()],
@@ -61,9 +61,9 @@ describe("runRoomBatch", () => {
       },
     });
 
-    // Two rooms launch synchronously; the third waits for a slot.
-    expect(maxInFlight).toBe(2);
-    expect(queue.size).toBe(1);
+    // All three rooms launch synchronously under the cap of three.
+    expect(maxInFlight).toBe(3);
+    expect(queue.size).toBe(0);
     // Settle out of order: bathroom fails first, kitchen proves.
     gates.get("bathroom")!.resolve(false);
     await tick();
@@ -72,11 +72,11 @@ describe("runRoomBatch", () => {
     gates.get("kitchen")!.resolve(true);
     await tick();
     await tick();
-    // Bedroom picked up the freed slot; prove it last.
+    // Bedroom proves last.
     gates.get("bedroom")!.resolve(true);
     const outcome = await batch;
 
-    expect(maxInFlight).toBe(2);
+    expect(maxInFlight).toBe(3);
     expect(outcome.proved).toEqual(["kitchen", "bedroom"]);
     expect(outcome.failed).toEqual(["bathroom"]);
     expect(settled).toEqual([
@@ -100,11 +100,12 @@ describe("runRoomBatch", () => {
   });
 
   it("stops launching on cancel while in-flight rooms settle normally", async () => {
-    const queue = createRoomBatchQueue(["kitchen", "bathroom", "bedroom"]);
+    const queue = createRoomBatchQueue(["kitchen", "bathroom", "bedroom", "hallway"]);
     const gates = new Map([
       ["kitchen", deferred<boolean>()],
       ["bathroom", deferred<boolean>()],
       ["bedroom", deferred<boolean>()],
+      ["hallway", deferred<boolean>()],
     ]);
     const launched: string[] = [];
     let stopped = false;
@@ -116,14 +117,15 @@ describe("runRoomBatch", () => {
         return gates.get(roomId)!.promise;
       },
     });
-    expect(launched).toEqual(["kitchen", "bathroom"]);
+    expect(launched).toEqual(["kitchen", "bathroom", "bedroom"]);
     stopped = true;
     gates.get("kitchen")!.resolve(true);
     gates.get("bathroom")!.resolve(false);
+    gates.get("bedroom")!.resolve(true);
     const outcome = await batch;
-    expect(launched).toEqual(["kitchen", "bathroom"]);
-    expect(queue.snapshot()).toEqual(["bedroom"]);
-    expect(outcome.proved).toEqual(["kitchen"]);
+    expect(launched).toEqual(["kitchen", "bathroom", "bedroom"]);
+    expect(queue.snapshot()).toEqual(["hallway"]);
+    expect(outcome.proved).toEqual(["kitchen", "bedroom"]);
     expect(outcome.failed).toEqual(["bathroom"]);
   });
 });

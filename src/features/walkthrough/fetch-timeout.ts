@@ -3,6 +3,8 @@
 /** Upload + server processing budget per stage. Staged clips segment in ~2 min; real takes run longer. */
 export const SEGMENT_TIMEOUT_MS = 300_000;
 export const MAP_TIMEOUT_MS = 240_000;
+/** Stills-first analysis: one vision call per room, so the budget is 90 s. */
+export const STILLS_TIMEOUT_MS = 90_000;
 
 export class FetchTimeoutError extends Error {
   readonly timeoutMs: number;

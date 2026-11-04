@@ -7,7 +7,7 @@
  */
 
 /** Max concurrent analyzeRoom pipelines in one batch (matches the server's two admission slots). */
-export const MAX_CONCURRENT_BATCH_ROOMS = 2;
+export const MAX_CONCURRENT_BATCH_ROOMS = 3;
 
 export interface RoomBatchQueue<RoomId> {
   enqueue(roomId: RoomId): boolean;

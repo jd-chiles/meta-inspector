@@ -805,7 +805,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
                       />
                     </div>
                     <p className={flowStyles.helpText}>
-                      Each room takes a few minutes on cellular — the timer above proves it is still working. Keep this app open until every room is done.
+                      Each room usually takes under a minute — the timer above proves it is still working. Keep this app open until every room is done.
                     </p>
                   </>
                 )}

@@ -213,41 +213,16 @@ function videoIdentityFromRequest(requestBody: Buffer, contentType: string): Moc
   };
 }
 
-function mockSegmentResponse(identity: MockVideoIdentity, room: string, candidateToken: string) {
-  return {
-    ok: true,
-    stage: "segmented",
-    models: { segmentation: "sam-3.1" },
-    room,
-    media: { container: "mp4", sourceVideoSha256: identity.expectedVideoSha256 },
-    identity,
-    candidates: [{
-      candidateId: "cand-0001",
-      elementId: "demo-water-supply",
-      concept: "water faucet",
-      evidence: {
-        frameIndex: 1,
-        timestampMs: 1_000,
-        objectOrdinal: 0,
-        box: { left: 10, top: 10, right: 80, bottom: 90 },
-        samConfidence: 0.9,
-      },
-    }],
-    sampleTimestampsMs: [500, 1_500, 2_500, 3_500],
-    candidateToken,
-    mappingExpiresAt: Date.now() + 60_000,
-    mappingRequired: true,
-    humanReviewRequired: true,
-    conditionAssessment: "not_assessed",
-  };
+function stillIdsFromRequest(requestBody: Buffer, contentType: string): string[] {
+  const meta = JSON.parse(multipartField(requestBody, contentType, "stillMeta")) as Array<{ stillId?: unknown }>;
+  return meta.map((entry) => String(entry.stillId));
 }
 
-function mockMapResponse(identity: MockVideoIdentity, room: string, stillBytes: Buffer) {
-  const stillSha256 = createHash("sha256").update(stillBytes).digest("hex");
+function mockStillsResponse(identity: MockVideoIdentity, room: string, stillIds: string[]) {
   return {
     ok: true,
-    stage: "mapped",
-    models: { segmentation: "sam-3.1", mapping: "muse-spark-1.3" },
+    stage: "stills-mapped",
+    models: { mapping: "muse-spark-1.3" },
     room,
     media: { container: "mp4", sourceVideoSha256: identity.expectedVideoSha256 },
     identity,
@@ -255,30 +230,10 @@ function mockMapResponse(identity: MockVideoIdentity, room: string, stillBytes: 
     conditionAssessment: "not_assessed",
     proposals: [{
       elementId: "demo-water-supply",
-      state: "draft-proposal",
       modelSuggestion: "A",
       observation: `Mock ${room} water supply proposal.`,
       confidence: 92,
-      evidenceCandidateIds: ["cand-0001"],
-      evidence: [{
-        candidateId: "cand-0001",
-        elementId: "demo-water-supply",
-        concept: "water faucet",
-        evidence: {
-          frameIndex: 1,
-          timestampMs: 1_000,
-          objectOrdinal: 0,
-          box: { left: 10, top: 10, right: 80, bottom: 90 },
-          samConfidence: 0.9,
-        },
-        still: {
-          sha256: stillSha256,
-          mimeType: "image/jpeg",
-          width: 320,
-          height: 180,
-          base64: stillBytes.toString("base64"),
-        },
-      }],
+      evidenceStillIds: [stillIds[0]],
     }],
   };
 }
@@ -286,48 +241,30 @@ function mockMapResponse(identity: MockVideoIdentity, room: string, stillBytes: 
 async function installSharedElementAnalysisMock(page: Page): Promise<{ stages: string[]; rooms: string[] }> {
   const stages: string[] = [];
   const rooms: string[] = [];
-  const stillBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern-frame.jpg"));
   await page.route("**/api/video/segment*", async (route) => {
     const request = route.request();
     const stage = new URL(request.url()).searchParams.get("stage") ?? "";
     stages.push(stage);
-    if (stage === "cancel") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ ok: true, stage: "cancelled", released: true }),
-      });
-      return;
-    }
-    if (request.method() !== "POST" || (stage !== "segment" && stage !== "map")) {
+    if (request.method() !== "POST" || stage !== "stills") {
       await route.fulfill({ status: 400, body: "Unexpected mocked video request." });
       return;
     }
     const body = request.postDataBuffer();
-    if (!body) throw new Error(`The intercepted ${stage} request had no body.`);
+    if (!body) throw new Error("The intercepted stills request had no body.");
     const contentType = request.headers()["content-type"] ?? "";
     const identity = videoIdentityFromRequest(body, contentType);
     const room = multipartField(body, contentType, "room");
     rooms.push(`${stage}:${room}`);
-    if (stage === "segment") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(mockSegmentResponse(identity, room, `e2e-shared-element-${room}`)),
-      });
-      return;
+    const requestText = body.toString("latin1");
+    if (/name="video"/.test(requestText)) {
+      throw new Error("The browser must not upload the clip on the stills path.");
     }
-    const mappingBody = body.toString("latin1");
-    if (/name="(?:video|still|sampleStill|sampleTimestampsMs)"/.test(mappingBody)) {
-      throw new Error("The browser must not resend the clip or supply unverified pixels to the Muse mapping stage.");
-    }
-    if (multipartField(body, contentType, "candidateToken").length < 16) {
-      throw new Error("The Muse mapping request did not retain its signed segmentation token.");
-    }
+    const stillIds = stillIdsFromRequest(body, contentType);
+    if (stillIds.length === 0) throw new Error("The intercepted stills request described no frames.");
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(mockMapResponse(identity, room, stillBytes)),
+      body: JSON.stringify(mockStillsResponse(identity, room, stillIds)),
     });
   });
   return { stages, rooms };
@@ -373,21 +310,14 @@ async function readSavedWaterSupplyDecision(page: Page): Promise<{
   });
 }
 
-interface DelayedSegmentMock {
+interface DelayedStillsMock {
   requestStarted: Promise<{ identity: MockVideoIdentity; room: string }>;
   releaseResponse: () => void;
   responseSettled: Promise<void>;
-  mappingStarted: Promise<{ identity: MockVideoIdentity; room: string }>;
-  releaseMappingResponse: () => void;
-  mappingResponseSettled: Promise<void>;
   stages: string[];
 }
 
-async function installDelayedSegmentMock(
-  page: Page,
-  testRun: string,
-  options: { delayMapping?: boolean } = {},
-): Promise<DelayedSegmentMock> {
+async function installDelayedStillsMock(page: Page): Promise<DelayedStillsMock> {
   let release!: () => void;
   let didRelease = false;
   const responseGate = new Promise<void>((resolve) => {
@@ -405,86 +335,30 @@ async function installDelayedSegmentMock(
   const responseSettled = new Promise<void>((resolve) => {
     resolveSettled = resolve;
   });
-  let releaseMapping!: () => void;
-  let didReleaseMapping = false;
-  const mappingGate = new Promise<void>((resolve) => {
-    releaseMapping = () => {
-      if (didReleaseMapping) return;
-      didReleaseMapping = true;
-      resolve();
-    };
-  });
-  let resolveMappingStarted!: (request: { identity: MockVideoIdentity; room: string }) => void;
-  const mappingStarted = new Promise<{ identity: MockVideoIdentity; room: string }>((resolve) => {
-    resolveMappingStarted = resolve;
-  });
-  let resolveMappingSettled!: () => void;
-  const mappingResponseSettled = new Promise<void>((resolve) => {
-    resolveMappingSettled = resolve;
-  });
   const stages: string[] = [];
-  const stillBytes = options.delayMapping
-    ? await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern-frame.jpg"))
-    : null;
 
   await page.route("**/api/video/segment*", async (route) => {
     const request = route.request();
     const stage = new URL(request.url()).searchParams.get("stage") ?? "";
     stages.push(stage);
-    if (stage === "cancel") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ ok: true, stage: "cancelled", released: true }),
-      });
-      return;
-    }
-    if (stage === "map") {
-      if (!options.delayMapping || !stillBytes) {
-        await route.fulfill({
-          status: 500,
-          contentType: "application/json",
-          body: JSON.stringify({ ok: false, error: { code: "TEST_UNEXPECTED_MAP", message: "Unexpected mocked map stage." } }),
-        });
-        return;
-      }
-      const body = request.postDataBuffer();
-      if (!body) throw new Error("The intercepted mapping request had no body.");
-      const contentType = request.headers()["content-type"] ?? "";
-      const identity = videoIdentityFromRequest(body, contentType);
-      const room = multipartField(body, contentType, "room");
-      resolveMappingStarted({ identity, room });
-      await mappingGate;
-      try {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify(mockMapResponse(identity, room, stillBytes)),
-        });
-      } catch {
-        // A request cancelled by the client can no longer consume this late body.
-      } finally {
-        resolveMappingSettled();
-      }
-      return;
-    }
-    if (stage !== "segment" || request.method() !== "POST") {
+    if (stage !== "stills" || request.method() !== "POST") {
       await route.fulfill({ status: 400, body: "Unexpected mocked video request." });
       return;
     }
 
     const body = request.postDataBuffer();
-    if (!body) throw new Error("The intercepted segment request had no body.");
+    if (!body) throw new Error("The intercepted stills request had no body.");
     const contentType = request.headers()["content-type"] ?? "";
     const identity = videoIdentityFromRequest(body, contentType);
     const room = multipartField(body, contentType, "room");
+    const stillIds = stillIdsFromRequest(body, contentType);
     resolveStarted({ identity, room });
     await responseGate;
     try {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(mockSegmentResponse(identity, room, `e2e-candidate-token-${testRun}`)),
+        body: JSON.stringify(mockStillsResponse(identity, room, stillIds)),
       });
     } catch {
       // A request cancelled by the client can no longer consume this late body.
@@ -493,15 +367,7 @@ async function installDelayedSegmentMock(
     }
   });
 
-  return {
-    requestStarted,
-    releaseResponse: release,
-    responseSettled,
-    mappingStarted,
-    releaseMappingResponse: releaseMapping,
-    mappingResponseSettled,
-    stages,
-  };
+  return { requestStarted, releaseResponse: release, responseSettled, stages };
 }
 
 async function replacePersistedClipDuringRequest(page: Page, videoBase64: string, fileName: string): Promise<void> {
@@ -1265,8 +1131,8 @@ test.describe("Move-in Ready mobile flow", () => {
         // takes over room selection; assert the batch outcome instead of the
         // transient per-room notice.
         await expect(page.getByRole("heading", { level: 1, name: "Requirement checklist" })).toBeVisible({ timeout: 240_000 });
-        expect(mock.rooms.filter((entry) => entry.startsWith("segment:"))).toHaveLength(4);
-        expect(mock.rooms.filter((entry) => entry.startsWith("map:"))).toHaveLength(4);
+        expect(mock.rooms.filter((entry) => entry.startsWith("stills:"))).toHaveLength(4);
+        expect(mock.stages).toEqual(["stills", "stills", "stills", "stills"]);
 
         const overview = page.getByRole("region", { name: "All 11 inspection elements" });
         await overview.locator("#element-overview-list").getByRole("button", { name: /^\d+ Water supply/ }).click();
@@ -1323,9 +1189,8 @@ test.describe("Move-in Ready mobile flow", () => {
         expect(stages).toHaveLength(0);
 
         await page.getByRole("button", { name: "Retry analysis", exact: true }).click();
-        await expect.poll(() => stages.some((stage) => stage === "segment")).toBe(true);
-        expect(stages.filter((stage) => stage === "segment"), "explicit retry sends one segmentation request").toHaveLength(1);
-        expect(stages).not.toContain("map");
+        await expect.poll(() => stages.some((stage) => stage === "stills")).toBe(true);
+        expect(stages, "explicit retry sends one stills request").toEqual(["stills"]);
       } finally {
         await page.context().setOffline(false);
         await page.unroute("**/api/video/segment*");
@@ -1360,7 +1225,7 @@ test.describe("Move-in Ready mobile flow", () => {
         await expect(waterSupply).toContainText("Mock kitchen water supply proposal.");
         await waterSupply.getByRole("button", { name: "A · Acceptable", exact: true }).click();
         const proposedStillCheckbox = waterSupply.getByRole("group", { name: "Attach source stills to your decision" })
-          .getByRole("checkbox", { name: /SAM frame index 1/ });
+          .getByRole("checkbox", { name: /model evidence/ });
         await expect(proposedStillCheckbox).toHaveCount(1);
         await proposedStillCheckbox.check();
         await waterSupply.getByLabel("Evaluator observation").fill("I checked the kitchen water supply in person.");
@@ -1394,7 +1259,7 @@ test.describe("Move-in Ready mobile flow", () => {
         await expect(page.getByTestId("analysis-disclosure")).toHaveJSProperty("open", false);
         await expandAnalysisDetails(page);
         await expect(page.getByRole("button", { name: "Analyze this room again", exact: true })).toBeVisible({ timeout: 30_000 });
-        expect(mock.rooms).toEqual(["segment:kitchen", "map:kitchen", "segment:bathroom", "map:bathroom"]);
+        expect(mock.rooms).toEqual(["stills:kitchen", "stills:bathroom"]);
 
         await page.getByRole("button", { name: "Review", exact: true }).click();
         await waterSupplyRow.click();
@@ -1420,6 +1285,52 @@ test.describe("Move-in Ready mobile flow", () => {
       } finally {
         if (!page.isClosed()) await page.unroute("**/api/video/segment*");
       }
+    });
+
+    test("zz debug decision save state", async ({ page }) => {
+      test.setTimeout(120_000);
+      const videoBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern.mp4"));
+      await installSharedElementAnalysisMock(page);
+      await prepareMockLiveVideo(page, videoBytes);
+      await page.getByRole("button", { name: "Profile", exact: true }).click();
+      await page.getByLabel("Evaluator name").fill("Mock Evaluator");
+      await goToCapture(page);
+      await selectRoom(page, "kitchen");
+      await expandAnalysisDetails(page);
+      await page.getByRole("checkbox", { name: /I attest this is staged\/mock-unit footage/ }).check();
+      await page.getByRole("checkbox", { name: /I understand this selected mock-unit video/ }).check();
+      await page.getByRole("button", { name: "Analyze this room", exact: true }).click();
+      await expect(page.getByTestId("analysis-disclosure")).toHaveJSProperty("open", false);
+      await expandAnalysisDetails(page);
+      await expect(page.getByRole("button", { name: "Analyze this room again", exact: true })).toBeVisible({ timeout: 30_000 });
+      const state = await page.evaluate(async () => {
+        const sessionId = localStorage.getItem("move-in-ready-active-session-v1");
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+          const r = indexedDB.open("move-in-ready-inspections");
+          r.onsuccess = () => resolve(r.result);
+          r.onerror = () => reject(r.error);
+        });
+        type InspectionRow = {
+          proposals?: Record<string, { state?: unknown; evidence?: unknown[] }>;
+          clipIdentities?: Record<string, { evidence?: unknown[] }>;
+        };
+        const row = await new Promise<InspectionRow | null | undefined>((resolve, reject) => {
+          const r = db.transaction("inspections", "readonly").objectStore("inspections").get(sessionId!);
+          r.onsuccess = () => resolve(r.result);
+          r.onerror = () => reject(r.error);
+        });
+        db.close();
+        const proposal = row?.proposals?.["demo-water-supply"];
+        return {
+          proposalKeys: Object.keys(row?.proposals ?? {}),
+          notice: document.body.innerText.slice(document.body.innerText.indexOf("Meta Muse Spark") - 20, document.body.innerText.indexOf("Meta Muse Spark") + 220),
+          proposalState: proposal?.state ?? null,
+          evidenceCount: proposal?.evidence?.length ?? -1,
+          evidence0: proposal?.evidence?.[0] ?? null,
+          clipEvidenceCount: row?.clipIdentities?.kitchen?.evidence?.length ?? -1,
+        };
+      });
+      console.log("PROPOSAL_STATE:" + JSON.stringify(state));
     });
 
     test("one tap confirms an AI draft as the evaluator decision", async ({ page }) => {
@@ -1470,7 +1381,7 @@ test.describe("Move-in Ready mobile flow", () => {
       // Change only the MP4 minor-version metadata; the H.264 video remains
       // decodable while the byte identity and server-side hash both change.
       replacementBytes.writeUInt32BE(replacementBytes.readUInt32BE(12) + 1, 12);
-      const mock = await installDelayedSegmentMock(page, "replace-race");
+      const mock = await installDelayedStillsMock(page);
       try {
         await prepareMockLiveVideo(page, videoBytes);
         await page.getByRole("button", { name: "Analyze this room", exact: true }).click();
@@ -1480,8 +1391,8 @@ test.describe("Move-in Ready mobile flow", () => {
 
         mock.releaseResponse();
         await mock.responseSettled;
-        await expect(page.getByRole("alert").filter({ hasText: "The room clip changed before its source stills could be saved." })).toBeVisible({ timeout: 30_000 });
-        expect(mock.stages.filter((stage) => stage === "map"), "a stale segmented response must not start Muse mapping").toHaveLength(0);
+        await expect(page.getByRole("alert").filter({ hasText: "The room clip changed while its analysis response was in flight." })).toBeVisible({ timeout: 30_000 });
+        expect(mock.stages, "a stale response must not trigger another request").toEqual(["stills"]);
 
         await page.reload();
         await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
@@ -1500,39 +1411,23 @@ test.describe("Move-in Ready mobile flow", () => {
       }
     });
 
-    test("cancelling an in-flight segment request releases the server lease and keeps retry available", async ({ page }) => {
+    test("cancelling an in-flight stills request saves nothing and keeps retry available", async ({ page }) => {
       test.setTimeout(90_000);
       const videoBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern.mp4"));
-      const mock = await installDelayedSegmentMock(page, "cancel-race");
+      const mock = await installDelayedStillsMock(page);
       try {
         await prepareMockLiveVideo(page, videoBytes);
         await page.getByRole("button", { name: "Analyze this room", exact: true }).click();
         const started = await mock.requestStarted;
         expect(started.room).toBe("kitchen");
 
-        const cancelRequestPromise = page.waitForRequest(
-          (request) => request.url().includes("/api/video/segment") && request.url().includes("stage=cancel"),
-          { timeout: 30_000 },
-        );
         await expect(page.getByRole("button", { name: "Cancel", exact: true })).toBeVisible();
         await page.getByRole("button", { name: "Cancel", exact: true }).click();
         await expect(page.getByRole("status").filter({ hasText: "Analysis was cancelled. No result was saved." })).toBeVisible({ timeout: 30_000 });
 
-        const cancelRequest = await cancelRequestPromise;
-        const cancelBody = cancelRequest.postDataBuffer();
-        expect(cancelBody, "the abort path must notify the server to release its lease").not.toBeNull();
-        const cancelContentType = cancelRequest.headers()["content-type"] ?? "";
-        expect(videoIdentityFromRequest(cancelBody!, cancelContentType)).toMatchObject({
-          sessionId: started.identity.sessionId,
-          videoId: started.identity.videoId,
-          analysisId: started.identity.analysisId,
-          attempt: started.identity.attempt,
-        });
-        expect(cancelBody!.toString("latin1")).not.toContain('name="candidateToken"');
-
         mock.releaseResponse();
         await mock.responseSettled;
-        expect(mock.stages.filter((stage) => stage === "map"), "a cancelled segmentation must not start Muse mapping").toHaveLength(0);
+        expect(mock.stages, "a cancelled run must not send anything after its one stills request").toEqual(["stills"]);
         await expect(page.getByRole("status").filter({ hasText: "Analysis was cancelled. No result was saved." })).toBeVisible();
         await expect(page.getByRole("button", { name: "Analyze this room", exact: true })).toBeEnabled();
       } finally {
@@ -1545,7 +1440,7 @@ test.describe("Move-in Ready mobile flow", () => {
     test("a late response cannot restore a clip removed from local storage", async ({ page }) => {
       test.setTimeout(90_000);
       const videoBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern.mp4"));
-      const mock = await installDelayedSegmentMock(page, "remove-race");
+      const mock = await installDelayedStillsMock(page);
       try {
         await prepareMockLiveVideo(page, videoBytes);
         await page.getByRole("button", { name: "Analyze this room", exact: true }).click();
@@ -1555,8 +1450,8 @@ test.describe("Move-in Ready mobile flow", () => {
 
         mock.releaseResponse();
         await mock.responseSettled;
-        await expect(page.getByRole("alert").filter({ hasText: "The room clip changed before its source stills could be saved." })).toBeVisible({ timeout: 30_000 });
-        expect(mock.stages.filter((stage) => stage === "map"), "a stale segmented response must not start Muse mapping").toHaveLength(0);
+        await expect(page.getByRole("alert").filter({ hasText: "The room clip changed while its analysis response was in flight." })).toBeVisible({ timeout: 30_000 });
+        expect(mock.stages, "a stale response must not trigger another request").toEqual(["stills"]);
 
         await page.reload();
         await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
@@ -1573,32 +1468,28 @@ test.describe("Move-in Ready mobile flow", () => {
       }
     });
 
-    test("a late Muse response cannot attach evidence to a replacement clip", async ({ page }) => {
+    test("a late stills response cannot attach evidence to a replacement clip", async ({ page }) => {
       test.setTimeout(90_000);
       const videoBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern.mp4"));
       const replacementBytes = Buffer.from(videoBytes);
       replacementBytes.writeUInt32BE(replacementBytes.readUInt32BE(12) + 1, 12);
-      const mock = await installDelayedSegmentMock(page, "replace-during-map", { delayMapping: true });
+      const mock = await installDelayedStillsMock(page);
       try {
         await prepareMockLiveVideo(page, videoBytes);
         await page.getByRole("button", { name: "Analyze this room", exact: true }).click();
-        const segmentRequest = await mock.requestStarted;
-        expect(segmentRequest.room).toBe("kitchen");
+        const started = await mock.requestStarted;
+        expect(started.room).toBe("kitchen");
+        await replacePersistedClipDuringRequest(page, replacementBytes.toString("base64"), "replacement-during-stills.mp4");
+
         mock.releaseResponse();
         await mock.responseSettled;
-
-        const mappingRequest = await mock.mappingStarted;
-        expect(mappingRequest.room).toBe("kitchen");
-        expect(mock.stages).toEqual(["segment", "map"]);
-        await replacePersistedClipDuringRequest(page, replacementBytes.toString("base64"), "replacement-during-map.mp4");
-
-        mock.releaseMappingResponse();
-        await mock.mappingResponseSettled;
+        await expect(page.getByRole("alert").filter({ hasText: "The room clip changed while its analysis response was in flight." })).toBeVisible({ timeout: 30_000 });
+        expect(mock.stages).toEqual(["stills"]);
         await page.reload();
         await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
         await goToCapture(page);
         await selectRoom(page, "kitchen");
-        await expect(page.getByText("replacement-during-map.mp4", { exact: true })).toBeVisible();
+        await expect(page.getByText("replacement-during-stills.mp4", { exact: true })).toBeVisible();
         await page.getByRole("button", { name: "Review", exact: true }).click();
         const overview = page.getByRole("region", { name: "All 11 inspection elements" });
         const waterSupplyRow = overview.locator("#element-overview-list").getByRole("button", { name: /^\d+ Water supply/ });
@@ -1611,27 +1502,22 @@ test.describe("Move-in Ready mobile flow", () => {
         });
       } finally {
         mock.releaseResponse();
-        mock.releaseMappingResponse();
-        await Promise.race([mock.responseSettled, mock.mappingResponseSettled, delay(2_000)]);
+        await Promise.race([mock.responseSettled, delay(2_000)]);
         await page.unroute("**/api/video/segment*");
       }
     });
 
-    test("a late Muse response cannot restore a walkthrough cleared from this device", async ({ page }) => {
+    test("a late stills response cannot restore a walkthrough cleared from this device", async ({ page }) => {
       test.setTimeout(90_000);
       const videoBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern.mp4"));
-      const mock = await installDelayedSegmentMock(page, "delete-during-map", { delayMapping: true });
+      const mock = await installDelayedStillsMock(page);
       try {
         await prepareMockLiveVideo(page, videoBytes);
         const deletedSessionId = await page.evaluate(() => localStorage.getItem("move-in-ready-active-session-v1"));
         expect(deletedSessionId).toBeTruthy();
         await page.getByRole("button", { name: "Analyze this room", exact: true }).click();
-        const segmentRequest = await mock.requestStarted;
-        expect(segmentRequest.room).toBe("kitchen");
-        mock.releaseResponse();
-        await mock.responseSettled;
-        const mappingRequest = await mock.mappingStarted;
-        expect(mappingRequest.room).toBe("kitchen");
+        const started = await mock.requestStarted;
+        expect(started.room).toBe("kitchen");
 
         page.on("dialog", (dialog) => dialog.accept());
         await page.getByRole("button", { name: "Profile", exact: true }).click();
@@ -1645,8 +1531,8 @@ test.describe("Move-in Ready mobile flow", () => {
         expect(activeSessionId).toBeTruthy();
         expect(activeSessionId).not.toBe(deletedSessionId);
 
-        mock.releaseMappingResponse();
-        await mock.mappingResponseSettled;
+        mock.releaseResponse();
+        await mock.responseSettled;
         await page.reload();
         await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
         await page.getByRole("button", { name: "Profile", exact: true }).click();
@@ -1664,8 +1550,7 @@ test.describe("Move-in Ready mobile flow", () => {
         });
       } finally {
         mock.releaseResponse();
-        mock.releaseMappingResponse();
-        await Promise.race([mock.responseSettled, mock.mappingResponseSettled, delay(2_000)]);
+        await Promise.race([mock.responseSettled, delay(2_000)]);
         await page.unroute("**/api/video/segment*");
       }
     });
@@ -1728,7 +1613,7 @@ test.describe("Move-in Ready mobile flow", () => {
         });
         await expect(page.getByText(/Clip saved on this device\./)).toBeVisible({ timeout: 20_000 });
       };
-      const segmentCalls = (): number => stages.filter((stage) => stage === "segment").length;
+      const stillsCalls = (): number => stages.filter((stage) => stage === "stills").length;
 
       try {
         await page.goto(MOCK_LIVE_BASE_URL);
@@ -1749,13 +1634,13 @@ test.describe("Move-in Ready mobile flow", () => {
 
         await uploadRoomClip("kitchen");
         await expect(page.getByText(/1 room needing attention/)).toBeVisible({ timeout: 60_000 });
-        expect(segmentCalls()).toBe(1);
+        expect(stillsCalls()).toBe(1);
 
         // Further saves must not restart while failures await review.
         await uploadRoomClip("bathroom");
         await uploadRoomClip("living-room");
         await page.waitForTimeout(3_000);
-        expect(segmentCalls(), "saving rooms must not restart while failures await review").toBe(1);
+        expect(stillsCalls(), "saving rooms must not restart while failures await review").toBe(1);
 
         // Explicit manual retry still analyzes every room needing work.
         const disclosure = page.getByTestId("batch-analysis-disclosure");
@@ -1765,12 +1650,12 @@ test.describe("Move-in Ready mobile flow", () => {
         await page.getByRole("checkbox", { name: /I understand the filmed clips will be sent/ }).check();
         await page.getByRole("button", { name: "Analyze 3 filmed rooms", exact: true }).click();
         await expect(page.getByText(/3 rooms needing attention/)).toBeVisible({ timeout: 60_000 });
-        expect(segmentCalls()).toBe(4);
+        expect(stillsCalls()).toBe(4);
 
         await uploadRoomClip("hallway");
         await expect(page.getByText("4 of 4 clips saved", { exact: true })).toBeVisible({ timeout: 20_000 });
         await page.waitForTimeout(3_000);
-        expect(segmentCalls(), "filming the last room must not restart a finished batch").toBe(4);
+        expect(stillsCalls(), "filming the last room must not restart a finished batch").toBe(4);
         await expect(page.getByText(/3 rooms needing attention/)).toBeVisible();
       } finally {
         if (!page.isClosed()) await page.unroute("**/api/video/segment*");
