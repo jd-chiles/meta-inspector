@@ -3382,6 +3382,12 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
                   onVoiceTranscript: setVoiceTranscript,
                   batchActive,
                   batchProgress,
+                  batchElapsedLabel: batchActive && batchProgress
+                    ? formatBatchElapsed(Date.now() - batchProgress.startedAt, batchTick)
+                    : "",
+                  batchStageLabel: !batchActive
+                    ? ""
+                    : analysisStatus === "mapping" ? "Mapping" : "Segmenting",
                   batchFailedRooms,
                   analysisQueue: record.analysisQueue ?? [],
                   analysisComplete: tourAnalysisComplete,

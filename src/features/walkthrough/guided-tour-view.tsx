@@ -87,6 +87,10 @@ export interface GuidedTourBindings {
   onVoiceTranscript: (text: string | null) => void;
   batchActive: boolean;
   batchProgress: { done: number; total: number; roomLabel: string; startedAt: number } | null;
+  /** Ticking m:ss batch elapsed, recomputed by the owner every second. */
+  batchElapsedLabel: string;
+  /** Current batch phase shown while rooms are in flight. */
+  batchStageLabel: string;
   batchFailedRooms: readonly string[];
   /** Persisted offline analysis queue (REQ-L2): room ids awaiting analysis. */
   analysisQueue: readonly MoveInReadyRoomId[];
@@ -787,11 +791,32 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
               </>
             ) : bindings.batchActive ? (
               <>
-                <p className={flowStyles.cardLead} role="status">
+                <p className={flowStyles.cardLead} role="status" data-testid="tour-analysis-status">
                   {bindings.batchProgress
-                    ? `Analyzing ${bindings.batchProgress.roomLabel} — ${bindings.batchProgress.done} of ${bindings.batchProgress.total} rooms done.`
+                    ? `${bindings.batchProgress.roomLabel ? `Analyzing ${bindings.batchProgress.roomLabel}` : "Starting the first room"} — ${bindings.batchProgress.done} of ${bindings.batchProgress.total} rooms done · ${bindings.batchElapsedLabel} · ${bindings.batchStageLabel}…`
                     : "Starting analysis."}
                 </p>
+                {bindings.batchProgress && bindings.batchProgress.total > 0 && (
+                  <>
+                    <div
+                      className={flowStyles.progressTrack}
+                      role="progressbar"
+                      aria-label="Batch analysis progress"
+                      aria-valuemin={0}
+                      aria-valuemax={bindings.batchProgress.total}
+                      aria-valuenow={bindings.batchProgress.done}
+                      data-testid="tour-analysis-progress"
+                    >
+                      <div
+                        className={flowStyles.progressFill}
+                        style={{ width: `${(bindings.batchProgress.done / bindings.batchProgress.total) * 100}%` }}
+                      />
+                    </div>
+                    <p className={flowStyles.helpText}>
+                      Each room takes a few minutes on cellular — the timer above proves it is still working. Keep this app open until every room is done.
+                    </p>
+                  </>
+                )}
                 <button className={flowStyles.secondaryButton} type="button" onClick={() => { bindings.cancelBatchAnalysis(); setAnalysisSettled(true); }}>
                   Cancel and continue
                 </button>
@@ -818,8 +843,33 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
                   </button>
                 </div>
               </>
+            ) : bindings.analysisQueue.some((roomId) => bindings.capturedRoomIds.includes(roomId)) ? (
+              <>
+                <p className={flowStyles.cardLead} role="status">Analysis is ready to start.</p>
+                <div className={flowStyles.buttonRow}>
+                  <button
+                    className={flowStyles.button}
+                    type="button"
+                    data-testid="tour-analyze-start"
+                    onClick={() => {
+                      bindings.grantBatchConsent();
+                      bindings.startBatchAnalysis();
+                    }}
+                  >
+                    Start analysis
+                  </button>
+                  <button className={flowStyles.secondaryButton} type="button" data-testid="tour-analyze-continue" onClick={() => setAnalysisSettled(true)}>
+                    Continue without analysis
+                  </button>
+                </div>
+              </>
             ) : (
-              <p className={flowStyles.cardLead} role="status">Starting analysis.</p>
+              <>
+                <p className={flowStyles.cardLead} role="status">No filmed rooms are waiting for analysis.</p>
+                <button className={flowStyles.secondaryButton} type="button" data-testid="tour-analyze-continue" onClick={() => setAnalysisSettled(true)}>
+                  Continue
+                </button>
+              </>
             )}
           </div>
         )}
