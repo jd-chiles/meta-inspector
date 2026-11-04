@@ -1,6 +1,10 @@
 # Release record
 
-Status: Not ready (2026-11-04 mvp32 on dev + prod; field gates open — see latest entry)
+Status: Not ready (2026-11-04 mvp32 on dev + prod; VPS close-out opened — field gates open — see latest entry)
+## Close-out sprint opened: VPS + walkthroughkit.com — 2026-11-04 (owner-directed, 2h)
+
+Status stays **Not ready** (no domain serves yet). New OVH VPS `vps-27b87dbf` (15.204.81.189 / 100.125.105.36) + apex `walkthroughkit.com` is the production target for this close-out; Azure `metainspect-app.livelyriver-978b26d8.westus2.azurecontainerapps.io` (`mvp32` rev 0000024 Healthy) is rollback for 7 days per `docs/PRODUCTION_MVP_CLOSEOUT_2026-11-04.md`. `walkthroughkit.com` apex is NXDOMAIN today; `app.walkthroughkit.com` → `20.112.45.178` Disabled → TLS reset (verified `socket.getaddrinfo` + `az containerapp hostname list`). VPS `next-server` on :3100 serves `307` via `https://vps-27b87dbf-1.taile8712d.ts.net:3100` (tailnet-only, no 80/443, no Caddy yet). Disk 98% (70G/74G) blocks builds. Plan: VPS-01 disk <85%, VPS-02 Caddy + TLS for apex+www → 127.0.0.1:3100, VPS-03 cutover `APP_VERSION 33` + `APP_PUBLIC_ORIGIN=https://walkthroughkit.com`, VPS-04 owner DNS `A @ 15.204.81.189` + `CNAME www → apex`, VPS-05 `verify-sdd/lint/typecheck/unit/e2e/build` green, VPS-06 synthetic live + phone LTE proof, VPS-07 docs close-out. Voice fix (`/tmp/voicefix`, `APP_VERSION 34`, ~180 new voice clips) runs disjoint and merges after VPS-05. This entry is not a release promotion, task acceptance, or native SDD evidence.
+
 
 ## mvp32 segment+map restore + minimal cloud wire — 2026-11-04 (Muse Code)
 
