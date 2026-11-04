@@ -538,6 +538,38 @@ describe("Move-in Ready inspection domain", () => {
     }
   });
 
+  it("accepts an Approved decision with no note but still requires a D rationale", () => {
+    const approved = validateEvaluatorDecision({
+      status: "A",
+      evaluatorName: "Alex Morgan",
+      decidedAt: TIMESTAMP,
+      inPersonCheckAcknowledgment: IN_PERSON_ACKNOWLEDGMENT,
+      rationale: "",
+      evidence: [],
+      analysisIdentity: null,
+    });
+    expect(approved.ok).toBe(true);
+    const deficient = validateEvaluatorDecision({
+      status: "D",
+      evaluatorName: "Alex Morgan",
+      decidedAt: TIMESTAMP,
+      inPersonCheckAcknowledgment: IN_PERSON_ACKNOWLEDGMENT,
+      rationale: "   ",
+      evidence: [],
+      analysisIdentity: null,
+      deficiency: {
+        issueDescription: "Leak",
+        correction: "Fix",
+        completionDate: "2026-11-10",
+        reinspectionDate: "2026-11-11",
+      },
+    });
+    expect(deficient.ok).toBe(false);
+    if (!deficient.ok) {
+      expect(deficient.errors.join(" ")).toContain("rationale must be 1–1000 characters");
+    }
+  });
+
   it("rejects an AI-like evaluator decision with an extra model suggestion field", () => {
     const result = validateEvaluatorDecision({
       status: "A",

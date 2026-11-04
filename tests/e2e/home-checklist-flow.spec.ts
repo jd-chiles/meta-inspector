@@ -52,3 +52,19 @@ test("home leads through film into the requirement-by-requirement checklist", as
   await goToCapture(page);
   await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
 });
+
+test("home shows one entrance; starting over is a quiet link that enters the tour fresh", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
+  const home = page.getByTestId("inspection-home");
+  await expect(home.getByTestId("start-guided-tour")).toHaveText(/Start inspection/);
+  await expect(home.getByRole("button", { name: "Start over with a new inspection", exact: true })).toHaveCount(0);
+
+  await setupProfile(page, { pseudonym: "Staged Over Unit", funding: "lahsa", unitType: "studio" });
+  await page.getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Home", exact: true }).click();
+  await expect(home.getByTestId("start-guided-tour")).toHaveText(/Continue inspection/);
+  await home.getByRole("button", { name: "Start over with a new inspection", exact: true }).click();
+  await expect(page.getByTestId("guided-tour")).toBeVisible();
+  await expect(page.getByTestId("tour-start")).toBeVisible();
+});

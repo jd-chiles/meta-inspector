@@ -3199,9 +3199,11 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
                     >
                       {hasInspectionProgress ? "Continue inspection" : "Start inspection"} <ArrowRight size={17} aria-hidden="true" />
                     </button>
-                    <button className={styles.secondaryButton} type="button" onClick={() => void startNewInspection()}>
-                      {hasInspectionProgress ? "Start new inspection" : "New inspection"}
-                    </button>
+                    {hasInspectionProgress && (
+                      <button className={styles.linkButton} type="button" onClick={() => void startNewInspection()}>
+                        Start over with a new inspection
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

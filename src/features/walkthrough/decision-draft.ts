@@ -128,9 +128,10 @@ export function confirmNeedsDetails(proposal: ModelElementProposal | undefined):
  * Build a complete decision draft for one-tap confirm. The confirm tap is
  * the evaluator's in-person acknowledgment and plan review, so the caller
  * must show the suggestion (and the D plan) next to the button. Returns a
- * blocker instead of a draft when the tap cannot honestly decide: an empty
- * observation, a D without a complete suggested plan, or a D with no still
- * evidence. Fire safety confirms both sections 11a and 11b together.
+ * blocker instead of a draft when the tap cannot honestly decide: a D
+ * with an empty observation, a D without a complete suggested plan, or a
+ * D with no still evidence. Approvals never need a note. Fire safety
+ * confirms both sections 11a and 11b together.
  */
 export function buildConfirmDraft(
   elementId: MoveInReadyElementId,
@@ -141,7 +142,10 @@ export function buildConfirmDraft(
   const rationale = voiceNote && !prefilled.rationale.includes(voiceNote)
     ? `${prefilled.rationale}\n${voiceNote}`.slice(0, 1000)
     : prefilled.rationale.slice(0, 1000);
-  if (!rationale.trim()) {
+  // Approved items never require a note: one-tap confirm of an A
+  // succeeds even with empty observation text. D decisions must carry
+  // their deficiency note through the detail form.
+  if (!rationale.trim() && proposal.modelSuggestion === "D") {
     return { ok: false, reason: "The AI draft has no observation text. Assess it in the detail form." };
   }
   if (proposal.modelSuggestion === "D") {

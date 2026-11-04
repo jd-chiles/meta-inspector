@@ -690,7 +690,7 @@ test.describe("Move-in Ready mobile flow", () => {
     await openApp(page);
     await mkdir(path.join(process.cwd(), "artifacts/design-qa"), { recursive: true });
     await expect(page.getByRole("heading", { level: 1, name: "Inspection home" })).toBeVisible();
-    await page.getByRole("button", { name: "New inspection", exact: true }).click();
+    await page.getByTestId("start-guided-tour").click();
     await expect(page.getByTestId("guided-tour")).toBeVisible();
     await expect(page.getByTestId("tour-start")).toBeVisible();
     await setLahsaProfile(page);
@@ -954,7 +954,7 @@ test.describe("Move-in Ready mobile flow", () => {
     await expect(page.getByLabel("Unit pseudonym")).toHaveValue("");
     await expect(page.getByLabel("Funding type")).toHaveValue("unknown");
     await page.getByRole("button", { name: "Back to home", exact: true }).click();
-    await page.getByRole("button", { name: "New inspection", exact: true }).click();
+    await page.getByTestId("start-guided-tour").click();
     await expect(page.getByTestId("guided-tour")).toBeVisible();
     await expect(page.getByTestId("tour-start")).toBeVisible();
   });
@@ -1652,7 +1652,7 @@ test.describe("Move-in Ready mobile flow", () => {
         await page.getByRole("button", { name: "Profile", exact: true }).click();
         await expect(page.getByLabel("Unit pseudonym")).toHaveValue("");
         await page.getByRole("button", { name: "Back to home", exact: true }).click();
-        await page.getByRole("button", { name: "New inspection", exact: true }).click();
+        await page.getByTestId("start-guided-tour").click();
         await expect(page.getByTestId("guided-tour")).toBeVisible();
         await expect(page.getByTestId("tour-start")).toBeVisible();
         const deleted = await readStoredWalkthroughState(page, deletedSessionId!);

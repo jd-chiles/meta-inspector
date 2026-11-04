@@ -1174,8 +1174,14 @@ export function validateEvaluatorDecision(
     value.decidedAt,
   );
   if (!acknowledgment.ok) errors.push(...acknowledgment.errors);
-  if (!isNonEmptyString(value.rationale, 1000)) {
+  // Approved items never require a note: an empty rationale is valid for
+  // A. Deficient decisions must explain the deficiency.
+  if (value.status === "D" && !isNonEmptyString(value.rationale, 1000)) {
     errors.push("rationale must be 1–1000 characters");
+  }
+  if (value.status === "A" &&
+      (typeof value.rationale !== "string" || value.rationale.length > 1000)) {
+    errors.push("rationale must be 0–1000 characters");
   }
   let analysisIdentity: VideoAnalysisIdentity | null = null;
   if (value.analysisIdentity !== null) {

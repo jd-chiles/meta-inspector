@@ -376,6 +376,21 @@ describe("persistent clip save failures", () => {
     });
     store.close();
   });
+
+  it("reopens the connection and retries a failed write once before surfacing it", async () => {
+    const stale = Object.assign(new Error("The database connection is closing."), { name: "InvalidStateError" });
+    const firstDb = { put: vi.fn(async () => { throw stale; }), close: vi.fn() };
+    const secondDb = { put: vi.fn(async () => undefined), close: vi.fn() };
+    openDBMock.mockResolvedValueOnce(firstDb).mockResolvedValueOnce(secondDb);
+    const store = createVideoClipStore();
+
+    await store.put(clip());
+    expect(firstDb.put).toHaveBeenCalledTimes(1);
+    expect(secondDb.put).toHaveBeenCalledTimes(1);
+    expect(firstDb.close).toHaveBeenCalledTimes(1);
+    expect(openDBMock).toHaveBeenCalledTimes(2);
+    store.close();
+  });
 });
 
 function clip(overrides: Partial<Parameters<typeof createStoredVideoClip>[0]> = {}) {
