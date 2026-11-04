@@ -267,6 +267,8 @@ export interface EvidenceReference {
   frameIndex: number | null;
   /** SHA-256 of the actual extracted still bytes, lowercase hex. */
   stillHash: string;
+  /** Same-origin endpoint used to reload this verified cloud evidence still. */
+  sourceUrl?: string;
 }
 
 export type ProposalState = "draft-proposal" | "needs-human-check";
@@ -688,6 +690,7 @@ export function validateEvidenceReference(
     "timestampMs",
     "frameIndex",
     "stillHash",
+    "sourceUrl",
   ]);
   if (!hasOnlyKeys(value, allowed)) errors.push("evidence reference has unknown fields");
   if (typeof value.schemaVersion !== "number" || !Number.isSafeInteger(value.schemaVersion) || value.schemaVersion < 1) {
@@ -728,6 +731,10 @@ export function validateEvidenceReference(
   if (typeof value.stillHash !== "string" || !HASH_PATTERN.test(value.stillHash)) {
     errors.push("stillHash must be a lowercase SHA-256 digest");
   }
+  if (value.sourceUrl !== undefined && (typeof value.sourceUrl !== "string" ||
+      !/^\/api\/video\/jobs\/[A-Za-z0-9_-]{8,128}\/evidence\/\d{1,3}$/.test(value.sourceUrl))) {
+    errors.push("sourceUrl must be a same-origin cloud evidence path");
+  }
   if (errors.length) return { ok: false, errors };
   return {
     ok: true,
@@ -741,6 +748,7 @@ export function validateEvidenceReference(
       timestampMs: value.timestampMs as number,
       frameIndex: value.frameIndex as number | null,
       stillHash: value.stillHash as string,
+      ...(typeof value.sourceUrl === "string" ? { sourceUrl: value.sourceUrl } : {}),
     },
   };
 }

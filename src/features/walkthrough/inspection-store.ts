@@ -58,6 +58,8 @@ export interface PendingAnalysisIntent {
   videoId: string;
   videoRevision: number;
   videoHash: string;
+  analysisId?: string;
+  attempt?: number;
   catalogVersion: string;
   requestedAt: string;
 }
@@ -69,10 +71,24 @@ export interface StoredRoomClipIdentity {
   videoId: string;
   videoRevision: number;
   videoHash: string;
+  /** Analysis attempt that produced the current durable video job. */
+  analysisId?: string;
+  attempt?: number;
+  /** Durable cloud upload job that owns this exact source revision. */
+  jobId?: string;
   capturedAt: string;
   durationSeconds: number;
   sizeBytes: number;
   evidence: EvidenceReference[];
+}
+
+/** Upload-created job ID and identity seed retained if the browser closes before completion is acknowledged. */
+export interface PendingVideoUploadIdentity {
+  jobId: string;
+  videoId: string;
+  videoRevision: number;
+  analysisId: string;
+  attempt: number;
 }
 
 /**
@@ -120,6 +136,7 @@ export interface MoveInReadyInspection {
   selectedRoomId: MoveInReadyRoomId;
   completedPromptIdsByRoom: Partial<Record<MoveInReadyRoomId, MoveInReadyPromptId[]>>;
   clipIdentities: Partial<Record<MoveInReadyRoomId, StoredRoomClipIdentity>>;
+  pendingVideoJobsByRoom?: Partial<Record<MoveInReadyRoomId, PendingVideoUploadIdentity>>;
   /** v2 per-element live clip identities, keyed by element id. */
   elementClipIdentities: Partial<Record<MoveInReadyElementId, StoredRoomClipIdentity>>;
   /** v2 live tracking proof metadata, keyed by element id. */
@@ -416,6 +433,7 @@ export function createInitialInspectionRecord(
     selectedRoomId: "kitchen",
     completedPromptIdsByRoom: {},
     clipIdentities: {},
+    pendingVideoJobsByRoom: {},
     elementClipIdentities: {},
     liveProofs: {},
     proposals: {},
@@ -543,6 +561,9 @@ function validateStoredClipIdentityEntry(
     (rawIdentity.videoRevision as number) < 1 ||
     typeof rawIdentity.videoHash !== "string" ||
     !/^[0-9a-f]{64}$/.test(rawIdentity.videoHash) ||
+    (rawIdentity.jobId !== undefined && (typeof rawIdentity.jobId !== "string" || !/^[0-9a-f-]{36}$/.test(rawIdentity.jobId))) ||
+    (rawIdentity.analysisId !== undefined && (typeof rawIdentity.analysisId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(rawIdentity.analysisId))) ||
+    (rawIdentity.attempt !== undefined && (!Number.isSafeInteger(rawIdentity.attempt) || (rawIdentity.attempt as number) < 1)) ||
     typeof rawIdentity.capturedAt !== "string" ||
     !Number.isFinite(Date.parse(rawIdentity.capturedAt)) ||
     typeof rawIdentity.durationSeconds !== "number" ||
@@ -623,6 +644,7 @@ export function validateInspectionRecord(
     !isMoveInReadyRoomId(value.selectedRoomId) ||
     (value.completedPromptIdsByRoom !== undefined && !isRecord(value.completedPromptIdsByRoom)) ||
     !isRecord(value.clipIdentities) ||
+    (value.pendingVideoJobsByRoom !== undefined && !isRecord(value.pendingVideoJobsByRoom)) ||
     (value.elementClipIdentities !== undefined && !isRecord(value.elementClipIdentities)) ||
     (value.liveProofs !== undefined && !isRecord(value.liveProofs)) ||
     !isRecord(value.proposals) ||
@@ -649,6 +671,21 @@ export function validateInspectionRecord(
     (value.tourLanguage !== undefined && value.tourLanguage !== "en" && value.tourLanguage !== "es")
   ) {
     return { ok: false, message: "The saved inspection fields are incomplete or invalid." };
+  }
+
+  const pendingVideoJobsByRoom: MoveInReadyInspection["pendingVideoJobsByRoom"] = {};
+  if (value.pendingVideoJobsByRoom !== undefined) {
+    for (const [roomKey, rawPending] of Object.entries(value.pendingVideoJobsByRoom as Record<string, unknown>)) {
+      if (!isMoveInReadyRoomId(roomKey) || !isRecord(rawPending) ||
+          typeof rawPending.jobId !== "string" || !/^[0-9a-f-]{36}$/.test(rawPending.jobId) ||
+          typeof rawPending.videoId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(rawPending.videoId) ||
+          !Number.isSafeInteger(rawPending.videoRevision) || (rawPending.videoRevision as number) < 1 ||
+          typeof rawPending.analysisId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(rawPending.analysisId) ||
+          !Number.isSafeInteger(rawPending.attempt) || (rawPending.attempt as number) < 1) {
+        return { ok: false, message: "The saved inspection contains an invalid pending video upload." };
+      }
+      pendingVideoJobsByRoom[roomKey] = rawPending as unknown as PendingVideoUploadIdentity;
+    }
   }
 
   const completedPromptIdsByRoom: MoveInReadyInspection["completedPromptIdsByRoom"] = {};
@@ -762,6 +799,7 @@ export function validateInspectionRecord(
         selectedRoomId: value.selectedRoomId as MoveInReadyRoomId,
         completedPromptIdsByRoom,
         clipIdentities: value.clipIdentities as MoveInReadyInspection["clipIdentities"],
+        pendingVideoJobsByRoom: {},
         elementClipIdentities: (value.elementClipIdentities ?? {}) as MoveInReadyInspection["elementClipIdentities"],
         liveProofs: (value.liveProofs ?? {}) as MoveInReadyInspection["liveProofs"],
         proposals: {},
@@ -908,6 +946,7 @@ export function validateInspectionRecord(
       selectedRoomId: value.selectedRoomId as MoveInReadyRoomId,
       completedPromptIdsByRoom,
       clipIdentities: value.clipIdentities as MoveInReadyInspection["clipIdentities"],
+      pendingVideoJobsByRoom,
       elementClipIdentities: (value.elementClipIdentities ?? {}) as MoveInReadyInspection["elementClipIdentities"],
       liveProofs: (value.liveProofs ?? {}) as MoveInReadyInspection["liveProofs"],
       proposals,
