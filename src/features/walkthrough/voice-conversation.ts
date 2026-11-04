@@ -115,11 +115,12 @@ export const PLAYBACK_TIMEOUT_MESSAGE = "voice playback timed out";
  * the device fallback all speak ~30% slower than conversational so filming
  * keeps up. Timeout budgets assume this rate (roughly 10 chars/second).
  */
-export const SPEECH_PLAYBACK_RATE = 0.7;
-export const DEVICE_SPEECH_RATE = 0.75;
+export const SPEECH_PLAYBACK_RATE = 0.6;
+export const DEVICE_SPEECH_RATE = 0.65;
 
 export function playbackTimeoutMs(text: string): number {
-  return Math.max(17_000, Math.min(60_000, text.length * 160));
+  // Slower narration needs a longer ceiling, or clips get cut mid-sentence.
+  return Math.max(20_000, Math.min(75_000, text.length * 200));
 }
 
 function playAudioUrl(url: string, signal?: AbortSignal, timeoutMs: number = 12_000): Promise<void> {
@@ -277,7 +278,7 @@ export async function speakCueChain(
       }
     }
     if (signal.aborted) return;
-    await new Promise((resolveGap) => setTimeout(resolveGap, 600));
+    await new Promise((resolveGap) => setTimeout(resolveGap, 1000));
   }
 }
 

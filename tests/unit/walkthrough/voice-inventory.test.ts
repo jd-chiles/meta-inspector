@@ -108,6 +108,7 @@ describe("voice inventory contract", () => {
       evaluatorName: "Evaluator",
       roomIds,
       filmedRoomIds: roomIds,
+      analyzedRoomIds: roomIds,
       analyzedTotal: roomIds.length,
       resolvedDecisions: 0,
       nextUndecidedLabel: null,
@@ -152,6 +153,7 @@ describe("voice inventory contract", () => {
           ...base,
           roomIds: rooms,
           filmedRoomIds: rooms.slice(0, filmed),
+          analyzedRoomIds: rooms.slice(0, filmed),
           analyzedTotal: filmed,
         });
         expect(CLIPS).toContain(node.speak);
@@ -162,6 +164,7 @@ describe("voice inventory contract", () => {
         ...base,
         roomIds,
         filmedRoomIds: roomIds,
+      analyzedRoomIds: roomIds,
         analyzedTotal: roomIds.length,
         resolvedDecisions: resolved,
       });
