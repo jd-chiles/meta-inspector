@@ -4,7 +4,11 @@ import {
   recordsOfKind,
   type ResponsesEvent,
 } from "@meta-sam/parser";
+import { spawn } from "node:child_process";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   isMetaCallError,
   requireLiveConfig,
@@ -1249,6 +1253,45 @@ async function* readProviderEvents(response: Response, signal: AbortSignal): Asy
   }
 }
 
+const MOV_REMUX_TIMEOUT_MS = 120_000;
+
+/**
+ * Packet-copy a QuickTime upload into MP4. Meta's file API is MP4-only, but
+ * iPhone captures are MOV; remuxing here keeps the phone flow working without
+ * a decode/re-encode cost.
+ */
+async function remuxMovToMp4(bytes: Uint8Array): Promise<Uint8Array> {
+  const directory = await mkdtemp(join(tmpdir(), "walkthrough-mov-"));
+  const input = join(directory, "source.mov");
+  const output = join(directory, "normalized.mp4");
+  try {
+    await writeFile(input, bytes, { flag: "wx", mode: 0o600 });
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(process.env.FFMPEG_PATH?.trim() || "ffmpeg", [
+        "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+        "-i", input, "-map", "0:v:0", "-c:v", "copy", "-an",
+        "-movflags", "+faststart", output,
+      ], { stdio: ["ignore", "ignore", "pipe"] });
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        reject(new Error("MOV normalization timed out."));
+      }, MOV_REMUX_TIMEOUT_MS);
+      timer.unref();
+      child.once("error", () => { clearTimeout(timer); reject(new Error("Server-side video normalization is unavailable.")); });
+      child.once("close", (code) => {
+        clearTimeout(timer);
+        if (code === 0) resolve();
+        else reject(new Error("The uploaded MOV could not be normalized."));
+      });
+    });
+    const result = await readFile(output);
+    if (result.byteLength < 1) throw new Error("Normalized MP4 was empty.");
+    return new Uint8Array(result);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
 async function uploadVideo(
   baseUrl: string,
   apiKey: string,
@@ -1260,11 +1303,19 @@ async function uploadVideo(
   form.append("purpose", "user_data");
   form.append("expires_after[anchor]", "created_at");
   form.append("expires_after[seconds]", String(META_UPLOAD_EXPIRY_SECONDS));
-  form.append(
-    "file",
-    new Blob([upload.bytes.buffer as ArrayBuffer], { type: upload.video.mimeType }),
-    upload.video.container === "mov" ? "walkthrough.mov" : "walkthrough.mp4",
-  );
+  let uploadBytes = upload.bytes;
+  let uploadMime = upload.video.mimeType;
+  let uploadName = upload.video.container === "mov" ? "walkthrough.mov" : "walkthrough.mp4";
+  if (upload.video.container === "mov") {
+    try {
+      uploadBytes = await remuxMovToMp4(upload.bytes);
+    } catch {
+      throw new VideoSegmentError(422, "UNSUPPORTED_VIDEO", "This MOV could not be converted for analysis. Record the clip in the app or export an MP4.");
+    }
+    uploadMime = "video/mp4";
+    uploadName = "walkthrough.mp4";
+  }
+  form.append("file", new Blob([new Uint8Array(uploadBytes)], { type: uploadMime }), uploadName);
   let response: Response;
   try {
     response = await fetchImpl(`${baseUrl}/files`, {
@@ -2323,9 +2374,7 @@ export async function handleVideoSegmentRequest(request: Request, deps: Dependen
       const fetchImpl = deps.fetch ?? fetch;
       if (stage === "segment") {
         const upload = await readSegmentForm(form);
-        if (upload.video.container !== "mp4") {
-          throw new VideoSegmentError(415, "UNSUPPORTED_VIDEO", "Meta's current video upload API accepts MP4 only. Convert this MOV to MP4 before live analysis.");
-        }
+        // MOV is remuxed to MP4 at provider upload time (remuxMovToMp4).
         tracer = createAnalysisTracer(env, analysisTraceId(upload.identity), {
           stage: "segment",
           room: upload.room,
