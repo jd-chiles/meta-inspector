@@ -43,3 +43,13 @@ Seven commands remain configured in .sdd/config.json/04-verification.md. Codex r
 ## Authorization boundary
 
 The owner has authorized Codex implementation in this thread. Implement the active tasks and run their configured local checks. Do not hand-edit plugin-owned state/evidence, advance native SDD approval/stage, publish/deploy, or make live provider calls without separate authorization. Report native workflow gaps without stopping authorized local code work.
+
+## Close-out addendum — VPS `vps-27b87dbf` + `walkthroughkit.com` (2026-11-04, 2h)
+
+Operational cutover; not an SDD scope change. TASK-103→113 acceptance criteria and validator (`scripts/sdd-validation.mjs` expecting exactly TASK-103→113) are unchanged — VPS work is tracked in `docs/PRODUCTION_MVP_CLOSEOUT_2026-11-04.md` and `docs/PRODUCTION_DEPLOY.md`, not in `active-tasks.json`.
+
+**What changes for TASK-113 owners in this window:** `03-plan.md`, `HOSTING_OPTIONS.md`, `PRODUCTION_DEPLOY.md`, `PRODUCTION_MVP_ROADMAP.md`, `06-release.md`, `05-change-log.md` may be amended to record VPS + `walkthroughkit.com` as the production target (Azure stays rollback). No active-task list change, no requirement renumbering, no native `.sdd/state` edit.
+
+**Concurrency with `/tmp/voicefix`:** Voice inventory expansion owns `public/voice/*`, `public/voice/manifest.json`, `scripts/voice-inventory.mjs`, `tests/unit/walkthrough/voice-inventory.test.ts` — disjoint from VPS infra files (`Caddyfile`, `PRODUCTION_DEPLOY.md`, `HOSTING_OPTIONS.md`, close-out doc). Both may run; voice merges after VPS-05 green.
+
+**Owner gates that still block a `Ready` claim:** Same as `06-release.md` plus VPS disk <85% and `walkthroughkit.com` TLS (or documented tailnet-only deferral).

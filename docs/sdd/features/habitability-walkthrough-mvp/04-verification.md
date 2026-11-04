@@ -41,3 +41,11 @@ TASK-103, TASK-104, TASK-105 and TASK-106 depend on TASK-113. Both the configure
 The owner supplied staged/mock kitchen and bathroom clips on 2026-10-31 and authorized provider processing. The kitchen request timed out; the bathroom segment response was canceled before the browser saved it, so Muse mapping and the scorecard did not run. TASK-110 remains open pending a reviewable result and scoring for faucet/fan/lock/detector identity, element mapping, actual timestamps/stills, and indoor-light misses. The current clip set does not establish all gate cues and is about 32.8 seconds total versus the authored single-clip maximum of 30 seconds. Still-image or synthetic connectivity smoke cannot satisfy it. Physical iOS Safari/Android camera/codec/MOV tests remain separate from Chromium synthetic E2E. Recipient acceptance remains unresolved. The owner authorized a Muse Code implementation handoff on 2026-10-31; native SDD approval/evidence remains pending separately.
 
 No release claim until current executed checks, independent code/security/QA/gate verdicts, visual QA screenshots, real clip scoring, and device evidence exist. The owner's implementation handoff does not mark tasks accepted, update native SDD state, or authorize publishing, release promotion, or deployment.
+
+## Close-out VPS verification addendum — 2026-11-04
+
+Operational VPS `vps-27b87dbf` does not change requirement rows above. Additional observable gates for the close-out sprint (see `docs/PRODUCTION_MVP_CLOSEOUT_2026-11-04.md`):
+
+- `df -h /` <85% (disk triage), `curl -sI https://walkthroughkit.com` 307/200, `APP_PUBLIC_ORIGIN` matches apex
+- All seven configured checks run on the VPS tree and exact outputs pasted (no `|| true` masking)
+- `test:live` runs only with owner-authorized synthetic media; zero fixture-to-live equivalence claim

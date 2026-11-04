@@ -307,3 +307,15 @@ Production deploy: Azure Container Apps (metainspect-prod / metainspect-app, wes
 ## 2026-10-31
 
 Access gate replaced: Entra Easy Auth redirect unusable on iOS (Safari never loads the form_post handshake; Chrome iOS downloads it as a file). Production (image mvp4) now uses an in-app passcode gate: /unlock collects the shared passcode server-side (timing-safe, throttled), middleware requires the stateless HMAC cookie everywhere else. Easy Auth set to AllowAnonymous. Gate inert when INSPECTION_PASSCODE unset (local/CI). Verified on production: 307 to /unlock, 401 wrong code, 200 + cookie on correct code.
+
+## Close-out sprint opened: VPS + walkthroughkit.com — 2026-11-04 (owner-directed, 2h window)
+
+**Decision:** New OVH VPS `vps-27b87dbf` (15.204.81.189 / 100.125.105.36) + apex `walkthroughkit.com` is the production target; Azure `metainspect-app` (`20.112.45.178`, `app.walkthroughkit.com` Disabled) is rollback for 7 days. Not an SDD scope change — TASK-103→113 acceptance and `active-tasks.json` (= exactly TASK-103→113 per `scripts/sdd-validation.mjs`) unchanged.
+
+**Why:** 98% disk block, no 80/443 listener, apex NXDOMAIN, app binding Disabled→TLS reset (verified `python socket.getaddrinfo` + `az containerapp hostname list`). Tailnet serve `:3100` tailnet-only today; VPS needs Caddy + Let's Encrypt + `APP_PUBLIC_ORIGIN=https://walkthroughkit.com` + disk triage (<85%) + full verify suite before any `Ready` claim.
+
+**Plan:** `docs/PRODUCTION_MVP_CLOSEOUT_2026-11-04.md` (7 tasks VPS-01→07, stop conditions, rollback to `metainspect:mvp32`). `HOSTING_OPTIONS.md` now records VPS-vs-Azure decision; `PRODUCTION_MVP_ROADMAP.md` slice 7 and `PRODUCTION_DEPLOY.md` VPS runbook added; `03-plan.md`/`04-verification.md` close-out addenda added (no validator change).
+
+**Concurrency:** `/tmp/voicefix` (detached at `ccd71d5`, 10 tracked + ~180 voice clips, `APP_VERSION 34`) runs disjoint (`public/voice/*`, `scripts/voice-inventory.mjs`) and merges after VPS-05 green.
+
+**Deploy:** VPS still `mvp32` (`fe31f5d` + `ccd71d5`, `APP_VERSION 32`, `next-server` pid 414583 on :3100 → `307`). No domain serves walkthroughkit.com yet; no new `06-release.md` status flip in this commit — gate stays Not ready until VPS serves + checks + phone proof.

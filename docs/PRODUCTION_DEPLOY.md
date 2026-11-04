@@ -206,3 +206,105 @@ version still ships with the rollback image.
   `next.config.mjs`).
 - Single-region, no status page. Container logs are the audit trail for
   provider failures.
+
+## VPS production runbook — `walkthroughkit.com` (2026-11-04 close-out)
+
+**VPS:** `vps-27b87dbf` @ `15.204.81.189` (Debian 12, 1vCPU/7.6GiB/74GiB, 100.125.105.36 tailnet). **Domain:** `walkthroughkit.com` apex + `www` (DNS owner-controlled). **Azure rollback:** `metainspect-app.livelyriver-978b26d8.westus2.azurecontainerapps.io` (`mvp32` Healthy, rollback cmd in 06-release).
+
+### 1. Disk triage (do first — 98% → <85%)
+
+```sh
+df -h /
+sudo -S -p '' journalctl --vacuum-size=500M
+sudo -S -p '' apt clean
+rm -rf ~/workspace/meta-inspect/.next
+# NEVER delete node_modules blindly — run `npm ci` after
+# Prune old worktrees + Docker
+git worktree list | awk '{print $1}' | xargs -I{} echo {}  # audit
+sudo -S -p '' docker system prune -a --volumes -f  # only after verifying no prod container uses Docker
+```
+
+### 2. DNS (owner, 5 min)
+
+In registrar/Cloudflare zone for `walkthroughkit.com`:
+- `A @ 15.204.81.189` (TTL 300)
+- `CNAME www walkthroughkit.com` (or `A www 15.204.81.189`)
+- Remove/disable `app.walkthroughkit.com → 20.112.45.178` if retiring Azure apex, else keep as `Disabled` until verified
+Verify: `python3 -c "import socket; print(socket.getaddrinfo('walkthroughkit.com',None))"` → `15.204.81.189`
+
+### 3. Caddy reverse proxy + TLS (VPS)
+
+```sh
+sudo -S -p '' apt update && sudo -S -p '' apt install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo -S -p '' gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo -S -p '' tee /etc/apt/sources.list.d/caddy-stable.list
+sudo -S -p '' apt update && sudo -S -p '' apt install -y caddy
+```
+
+`sudo tee /etc/caddy/Caddyfile <<'CADDY'
+walkthroughkit.com, www.walkthroughkit.com {
+  encode gzip
+  reverse_proxy 127.0.0.1:3100 {
+    header_up Host {host}
+    header_up X-Real-IP {remote}
+  }
+  handle_path /healthz {
+    respond "ok" 200
+  }
+}
+# optional tailnet URL keeps working via tailscale serve
+CADDY
+sudo -S -p '' systemctl enable --now caddy
+sudo -S -p '' systemctl status caddy --no-pager
+curl -sI https://walkthroughkit.com | head
+curl -sI https://www.walkthroughkit.com | head
+```
+
+Firewall: OVH panel + `sudo ufw allow 80,443/tcp` (or `iptables -I INPUT -p tcp --dport 80 -j ACCEPT` etc.). Caddy auto-provisions Let's Encrypt; no cert copy needed.
+
+### 4. App env + process
+
+VPS already runs `next-server` on `:3100` via `npm run start --port 3100 -H 127.0.0.1` (pid 414583, Healthy 307). For cutover:
+
+```sh
+# bump version for this cutover
+# src/app-version.ts → "33" (deploy id mvp33)
+npm run build
+# update .env
+# APP_PUBLIC_ORIGIN=https://walkthroughkit.com
+# INSPECTION_PASSCODE=<restore or keep empty for tailnet-only — owner decides>
+# Keep META_API_KEY, FFMPEG_PATH, FISH_*, LANGFUSE_* as-is
+# restart
+pkill -f "next-server.*3100" || true
+npm run start --port 3100 -H 127.0.0.1 &
+# or systemd/pacemaker unit (preferred for 2h: keep manual, add unit after phone proof)
+```
+
+Verify: `curl -sI https://walkthroughkit.com` → `307 /unlock` (if passcode) or `200` with `X-Content-Type-Options: nosniff` etc.
+
+### 5. Checks (paste exact outputs)
+
+```sh
+node scripts/verify-sdd.mjs
+npm run lint
+npm run typecheck
+npm run test:unit
+npm run test:e2e
+npm run build
+```
+
+Live only if owner authorizes synthetic: `npm run test:live -- --self-test` then `SMOKE_VIDEO=/tmp/phone-like.mp4 npm run test:live`.
+
+### 6. Rollback
+
+- DNS: delete apex `A 15.204.81.189`, re-enable Azure `app.walkthroughkit.com` CNAME if needed
+- Azure prod: `az containerapp update -g metainspect-prod -n metainspect-app --image metainspectprod.azurecr.io/metainspect:mvp32` (Healthy rev 0000024)
+- VPS: `sudo systemctl stop caddy` + revert `APP_PUBLIC_ORIGIN` to ts.net URL
+
+### 7. Post-launch 7-day holds
+
+- Keep Azure `metainspect-dev` + `metainspect-app` running (do not delete RG)
+- Set cost/quota alerts (Azure + VPS bandwidth) + name ops owner
+- Re-prove with iOS + Android LTE, then re-file `06-release.md` as `Ready (VPS limited pilot)` or `Not ready` with remaining gaps
+
+See `docs/PRODUCTION_MVP_CLOSEOUT_2026-11-04.md` for the 2h task rail.
