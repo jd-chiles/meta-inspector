@@ -149,6 +149,7 @@ export function createCloudVideoClient(options: CloudVideoClientOptions = {}): C
         // An incomplete upload has not created a processable job. Best-effort
         // cancellation releases the pending object and invalidates its URL.
         void cancelJob(fetchImpl, created.jobId).catch(() => undefined);
+        if (error instanceof DOMException && error.name === "AbortError") throw error;
         throw error instanceof CloudVideoClientError
           ? error
           : new CloudVideoClientError("VIDEO_UPLOAD_FAILED", "The video could not be uploaded. Check your connection and try again.");

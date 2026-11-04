@@ -22,7 +22,13 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     if (authorized.status === "cancelled" || authorized.status === "cancel_requested") {
       throw new VideoJobHttpError(404, "JOB_NOT_FOUND", "The video job could not be found.");
     }
-    await recoverVideoJob(authorized.id);
+    try {
+      await recoverVideoJob(authorized.id);
+    } catch {
+      // Recovery is opportunistic: a status read must not fail because the
+      // dispatch queue or wake gateway is temporarily unavailable. The next
+      // poll and the worker maintenance scanner retry the dispatch.
+    }
     const job = await authorizedJob(request, context);
     const body: Record<string, unknown> = {
       ok: true, jobId: job.id, status: job.status, stage: job.stage, retryable: job.retryable,

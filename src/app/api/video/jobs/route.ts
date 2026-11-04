@@ -67,11 +67,22 @@ export async function POST(request: Request): Promise<Response> {
     const contentLength = media.contentLength;
     const upload = await createR2Storage().createUploadUrl({ contentType, contentLength });
     const id = randomUUID();
-    const job = await insertVideoJob({
-      id, sessionId: identity.sessionId, roomId: value.room, identity: { ...identity, expectedVideoSha256: null },
-      mediaObjectKey: upload.objectKey, mediaContentType: contentType, mediaContentLength: contentLength,
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-    });
+    let job;
+    try {
+      job = await insertVideoJob({
+        id, sessionId: identity.sessionId, roomId: value.room, identity: { ...identity, expectedVideoSha256: null },
+        mediaObjectKey: upload.objectKey, mediaContentType: contentType, mediaContentLength: contentLength,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      });
+    } catch (error) {
+      // A retried create with an already-registered identity seed is a stale
+      // client state, not a service outage. The orphaned presigned URL simply
+      // expires; the original job remains upload-pending until its TTL.
+      if (typeof error === "object" && error !== null && (error as { code?: unknown }).code === "23505") {
+        throw new VideoJobHttpError(409, "STALE_REQUEST", "This video version was already registered. Reload the room before uploading again.");
+      }
+      throw error;
+    }
     const seedIdentity = {
       sessionId: job.identity.sessionId, schemaVersion: job.identity.schemaVersion,
       videoId: job.identity.videoId, videoRevision: job.identity.videoRevision,

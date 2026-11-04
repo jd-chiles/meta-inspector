@@ -66,6 +66,14 @@ describe("video job creation", () => {
     }));
   });
 
+  it("reports an already-registered identity seed as a conflict instead of an outage", async () => {
+    mocks.insert.mockRejectedValueOnce(Object.assign(new Error("duplicate key value"), { code: "23505" }));
+    const response = await POST(new Request("https://app.test/api/video/jobs", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    }));
+    expect(response.status).toBe(409);
+  });
+
   it("rejects a non-next revision before creating an upload", async () => {
     const staleBody = { ...body, identity: { ...seed, videoRevision: 2 } };
     const response = await POST(new Request("https://app.test/api/video/jobs", {

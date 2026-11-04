@@ -159,6 +159,37 @@ describe("cloud video job client", () => {
     ]);
   });
 
+  it("rethrows a user-cancelled upload as AbortError after best-effort cleanup", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(JOB))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const client = createCloudVideoClient({
+      fetchImpl: fetchMock,
+      uploadImpl: async () => {
+        controller.abort();
+        throw new DOMException("The video upload was cancelled.", "AbortError");
+      },
+    });
+
+    const failure = await client.upload({
+      sessionId: "session-1",
+      roomId: "kitchen",
+      fileName: "kitchen.mp4",
+      contentType: "video/mp4",
+      video: VIDEO,
+      identity: IDENTITY,
+      signal: controller.signal,
+    }).then(() => null, (error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(DOMException);
+    expect((failure as DOMException).name).toBe("AbortError");
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/video/jobs",
+      "/api/video/jobs/job-1",
+    ]);
+  });
+
   it("rejects upload URLs outside the expected R2 endpoint before transmitting bytes", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({
       ...JOB,

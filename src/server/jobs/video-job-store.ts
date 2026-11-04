@@ -622,11 +622,16 @@ export async function getVideoEvidenceObject(id: string, stillId: string): Promi
 export async function getVideoEvidenceObjectByOrdinal(id: string, ordinal: number): Promise<{ objectKey: string; sha256: string; byteLength: number } | null> {
   if (!Number.isSafeInteger(ordinal) || ordinal < 0 || ordinal > 100) return null;
   const result = await getJobPool().query(
+    // Ordinals are assigned by the worker with a UTF-16 lexicographic sort of
+    // still ids, so this lookup must order identically. COLLATE "C" (byte
+    // order) matches that sort for identifier charset still ids regardless of
+    // the database's locale collation; a locale-aware ORDER BY could resolve
+    // an ordinal to a different still than the URL the worker wrote.
     `SELECT o.object_key, o.sha256, o.byte_length
      FROM video_analysis_job_objects o JOIN video_analysis_jobs j ON j.id=o.job_id
-     WHERE o.job_id=$1 AND o.object_kind='evidence' AND o.deleted_at IS NULL
+     WHERE o.job_id=$1 AND o.object_kind='evidence' AND o.deleted_at IS NULL AND o.still_id IS NOT NULL
        AND EXISTS (SELECT 1 FROM inspection_sessions s WHERE s.session_id=j.session_id AND s.deleted_at IS NULL)
-     ORDER BY o.still_id OFFSET $2 LIMIT 1`,
+     ORDER BY o.still_id COLLATE "C" OFFSET $2 LIMIT 1`,
     [id, ordinal],
   );
   const row = result.rows[0] as { object_key?: unknown; sha256?: unknown; byte_length?: unknown } | undefined;
