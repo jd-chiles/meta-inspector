@@ -447,7 +447,7 @@ describe("SAM video upload validation", () => {
   it("rejects unsupported signatures, malformed atoms, and clips longer than 30 seconds", () => {
     expect(() => validateVideoBytes(ascii("webm bytes"))).toThrow(/MP4 or MOV/);
     expect(() => validateVideoBytes(makeMp4().slice(0, 20))).toThrow(/incomplete|corrupt|truncated/i);
-    expect(() => validateVideoBytes(makeMp4(31_000, 2))).toThrow(/30 seconds/);
+    expect(() => validateVideoBytes(makeMp4(35_000, 2))).toThrow(/30 seconds/);
     expect(MAX_VIDEO_BYTES).toBe(60 * 1024 * 1024);
     expect(MAX_MULTIPART_BYTES).toBeGreaterThan(MAX_VIDEO_BYTES);
   });
@@ -1591,7 +1591,7 @@ describe("30-second analysis window (Sprint 0 REQ-S3)", () => {
   it("rejects a longer-than-30-seconds staged clip with no evidence at or beyond the cap", async () => {
     const { fetchImpl } = mockMetaFetch();
     const { response, body } = await segment(
-      { bytes: makeMp4(31_000, 2), identity: identityFor("over-cap") },
+      { bytes: makeMp4(35_000, 2), identity: identityFor("over-cap") },
       fetchImpl,
     );
     expect(response.status).toBe(413);

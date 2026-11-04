@@ -16,7 +16,12 @@ import {
 export const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
 export const MAX_MULTIPART_BYTES = MAX_VIDEO_BYTES + 128 * 1024;
 export const MAX_VIDEO_FRAMES = 15_000;
-export const MAX_VIDEO_DURATION_MS = ANALYSIS_CLIP_CAP_SECONDS * 1000;
+// The in-app recorder stops on a wall-clock timer, so the final frame's
+// sample duration can land the container a frame or two past the cap. Allow a
+// small tolerance; evidence at or beyond the analysis window is dropped later
+// anyway (meta-sam filters on ANALYSIS_CLIP_CAP_MS).
+export const MAX_VIDEO_DURATION_TOLERANCE_MS = 2_000;
+export const MAX_VIDEO_DURATION_MS = ANALYSIS_CLIP_CAP_SECONDS * 1000 + MAX_VIDEO_DURATION_TOLERANCE_MS;
 
 export type VideoContainer = "mp4" | "mov";
 
@@ -227,7 +232,7 @@ function parseVideoTrack(bytes: Uint8Array, moov: Box): {
     }
     const durationMs = Math.round((decodeTimestamp * 1000) / timescale);
     if (durationMs > MAX_VIDEO_DURATION_MS) {
-      throw new VideoSegmentError(413, "VIDEO_TOO_LONG", "The video must be 30 seconds or shorter.");
+      throw new VideoSegmentError(413, "VIDEO_TOO_LONG", `The video is ${(durationMs / 1000).toFixed(1)} seconds long; the limit is ${ANALYSIS_CLIP_CAP_SECONDS} seconds (with a ${MAX_VIDEO_DURATION_TOLERANCE_MS / 1000}s tolerance).`);
     }
     if (timestamps.length === 0 || durationMs <= 0) {
       throw new VideoSegmentError(422, "INVALID_VIDEO", "The video has no valid frame timing data.");

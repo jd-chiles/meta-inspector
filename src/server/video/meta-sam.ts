@@ -365,11 +365,15 @@ function logSegmentFailure(request: Request, error: VideoSegmentError): void {
   } catch {
     // Keep "unknown": the URL itself failed to parse.
   }
+  // Duration/validation messages carry measured numbers only (no media or
+  // identity), so they are safe to keep for diagnosis.
+  const detailed = error.code === "VIDEO_TOO_LONG" || error.code === "INVALID_VIDEO";
   console.error(JSON.stringify({
     event: "video-segment-failure",
     stage,
     status: error.status,
     code: error.code,
+    ...(detailed ? { detail: error.message } : {}),
   }));
 }
 
