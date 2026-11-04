@@ -560,8 +560,8 @@
   },
   {
     "id": "TASK-109",
-    "title": "Mobile design QA and preview refresh",
-    "description": "Documentation/QA only: compare Capture, Draft Review, and Sign-Off with the reference, record P0/P1/P2 findings and screenshots. Do not edit application code. Viewport implementation belongs to frontend TASK-107; Codex handles a Tailscale preview refresh only under the owner's existing request. Additional P0/P1 code defects require an explicitly owned frontend amendment and a QA rerun before pass.",
+    "title": "Public documentation and mobile design QA",
+    "description": "Create the portfolio/hackathon documentation front door and reconcile reader-facing claims against recorded evidence while preserving historical technical records. Compare Capture, Draft Review, and Sign-Off with the reference and record P0/P1/P2 findings and screenshots. Do not edit application code. Viewport implementation belongs to frontend TASK-107; Codex handles a Tailscale preview refresh only under the owner's existing request. Additional P0/P1 code defects require an explicitly owned frontend amendment and a QA rerun before pass.",
     "profile": "documentation",
     "difficulty": "medium",
     "rationale": "The QA profile is read-only in this tool policy; documentation is the closest writable profile for the task's existing design record and screenshot ownership. This is phone-first visual QA and owns no application source.",
@@ -574,7 +574,21 @@
       "TASK-108"
     ],
     "files": [
+      "README.md",
+      "CONTRIBUTING.md",
+      "LICENSE",
+      "THIRD_PARTY_NOTICES.md",
       "design-qa.md",
+      "docs/README.md",
+      "docs/PROJECT_OVERVIEW.md",
+      "docs/ARCHITECTURE.md",
+      "docs/DEVELOPMENT.md",
+      "docs/PRIVACY_AND_SAFETY.md",
+      "docs/HACKATHON.md",
+      "docs/STATUS.md",
+      "docs/PRODUCT_BRIEF.md",
+      "docs/RESEARCH.md",
+      "docs/DECISIONS.md",
       "artifacts/design-qa/capture-360.png",
       "artifacts/design-qa/capture-fit-390x844-layout.json",
       "artifacts/design-qa/capture-fit-360x640-layout.json",
@@ -595,11 +609,16 @@
       "artifacts/design-qa/signoff-final-390.jpg"
     ],
     "acceptance": [
+      "Publish a polished README and documentation index for hackathon judges, portfolio readers, and developers, with direct links to focused project, architecture, setup, privacy, status, and evaluation documentation.",
+      "Describe the long housing-assistance wait, avoidable apartment visits, and overworked or less-experienced case-manager context as product motivation, not measured prevalence or impact.",
+      "Label proposed address and SAM.gov pre-visit screening as unimplemented and unvalidated; do not claim it prevents wasted visits or changes voucher eligibility.",
+      "Reconcile current public-facing status with dated evaluation records, retain historical records, and distinguish fixture behavior, live connectivity, scored video evaluation, device checks, and recipient acceptance.",
+      "Add MIT licensing for project-authored code and identify bundled third-party assets without implying they share that license.",
       "Screenshots show Capture, Draft Review, and Sign-Off at phone width; Capture has an obvious current prompt and next-step action, and every required field remains reachable.",
       "At 360–959px, the review overview and focused assessment are separate states; the three phone navigation items remain visible and controls do not cover content.",
       "At 360×640 and 390×844, measure the vertical gap from the last visible Capture prompt/action to the top of the safe-area bottom navigation: the gap is at most 32 CSS px when content fits; if content exceeds the pane, only the main pane scrolls and no actionable control is obscured. Horizontal overflow is zero at both viewport sizes.",
       "At 960px and wider, desktop shows a sticky three-item navigation, side-by-side video/prompts, and a split, independently scrollable overview and selected assessment that fit the viewport.",
-      "Record P0/P1/P2 findings and screenshots only. If another P0/P1 code defect is found, Codex must create an explicitly owned frontend amendment to TASK-107, serialize shared-file edits, and require a QA rerun before a pass.",
+      "Record P0/P1/P2 findings and screenshots. If another P0/P1 code defect is found, Codex must create an explicitly owned frontend amendment to TASK-107, serialize shared-file edits, and require a QA rerun before a pass.",
       "The preview opens on the new capture-first flow and has an accurate live/fixture label."
     ],
     "checkIDs": [

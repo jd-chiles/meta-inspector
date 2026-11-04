@@ -95,7 +95,7 @@ export interface WalkthroughVideoCaptureProps {
 
 export const DEFAULT_ROOM_PROMPTS: Readonly<Record<string, readonly string[]>> = {
   kitchen: [
-    "Film one continuous take: run the faucet showing flow and drainage, pan the sink, counters, and outlets with the fan running, open the entry and test its lock, then show the smoke or CO detector and its indicator.",
+    "Film one continuous take: run the faucet showing flow and drainage, slowly pan the sink, counters, and outlets, then show the smoke or CO detector and its indicator. The front door and lock are covered in the hallway clip.",
   ],
   bathroom: [
     "Film one continuous take: run the faucet or shower showing flow and drainage, turn on the exhaust fan and show the vent, show the toilet and bath or shower and test the lock, then show the smoke or CO detector and its indicator.",
@@ -110,7 +110,7 @@ export const DEFAULT_ROOM_PROMPTS: Readonly<Record<string, readonly string[]>> =
     "Film one continuous take: pan slowly across the room and visible outlets, include the windows and any smoke or carbon monoxide detector, then show the entry and how its lock operates.",
   ],
   hallway: [
-    "Film one continuous take: walk the clear floor path from both ends, show the unit and common-area detectors with people out of frame, then show the unit entry and test its lock.",
+    "Film one continuous take: walk the clear floor path, show the front door and demonstrate its lock, then show the exit path, lighting, and hallway detector with people out of frame.",
   ],
   default: [
     "Film one continuous take: pan slowly to show the whole room and visible openings, hold steady on each fixture, then show the entry and how its lock operates if present.",

@@ -3094,10 +3094,10 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                   const decision = record.decisions[element.id];
                   const proposal = record.proposals[element.id];
                   const evidence = selectedEvidenceForView(element.id);
-                  const proposalEvidenceView = proposal?.evidence
+                  const proposalEvidenceViews = proposal ? proposal.evidence
                     .map((proposalReference) => evidence.find(({ reference }) => evidenceReferenceBaseKey(reference) === evidenceReferenceBaseKey(proposalReference)))
-                    .find((view): view is (typeof evidence)[number] => Boolean(view));
-                  const visibleEvidenceView = proposalEvidenceView ?? evidence[0];
+                    .filter((view): view is (typeof evidence)[number] => Boolean(view)) : [];
+                  const visibleEvidenceViews = proposalEvidenceViews.length > 0 ? proposalEvidenceViews : evidence.slice(0, 1);
                   const correctionStatus = decision.status === "D"
                     ? decision.deficiency.correction.trim() ? "Correction plan recorded" : "Correction plan needed"
                     : decision.status === "unreviewed" ? "No evaluator correction yet" : "No correction required";
@@ -3131,10 +3131,12 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
                           )}
                           {proposal && <p className={styles.helpText}>Pre-fill only. You still complete the in-person check and save your own decision below.</p>}
                         </div>
-                        {visibleEvidenceView ? <figure className={styles.proposalEvidenceFigure}>
-                          <Image src={visibleEvidenceView.src} width={160} height={120} unoptimized alt={`${roomLabel(visibleEvidenceView.reference.roomId)} source still at ${formatTimestamp(visibleEvidenceView.reference.timestampMs / 1000)}`} />
-                          <figcaption>{roomLabel(visibleEvidenceView.reference.roomId)} · {formatTimestamp(visibleEvidenceView.reference.timestampMs / 1000)}<small>{proposalEvidenceView ? "AI-linked still" : "Available still · not linked to draft"}</small></figcaption>
-                        </figure> : <p className={styles.proposalNoEvidence}>No verified source still linked to this draft.</p>}
+                        {visibleEvidenceViews.length > 0 ? <div className={styles.proposalEvidenceGallery} aria-label="Source stills for this item">
+                          {visibleEvidenceViews.map((view, index) => <figure className={styles.proposalEvidenceFigure} key={`${view.reference.stillId}:${index}`}>
+                            <Image src={view.src} width={160} height={120} unoptimized alt={`${roomLabel(view.reference.roomId)} source still at ${formatTimestamp(view.reference.timestampMs / 1000)}`} />
+                            <figcaption>{roomLabel(view.reference.roomId)} · {formatTimestamp(view.reference.timestampMs / 1000)}<small>{proposalEvidenceViews.length > 0 ? `AI-linked still ${index + 1} of ${proposalEvidenceViews.length}` : "Available still · not linked to draft"}</small></figcaption>
+                          </figure>)}
+                        </div> : <p className={styles.proposalNoEvidence}>No verified source still linked to this draft.</p>}
                       </section>
                       <div className={styles.elementBody}>
                         <section className={styles.criteriaPanel} aria-label={`${element.label} required in-person checks`}>

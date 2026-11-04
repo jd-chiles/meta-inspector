@@ -763,7 +763,7 @@ test.describe("Move-in Ready mobile flow", () => {
     await expect(promptRows).toHaveCount(1);
     await expect(page.getByRole("button", { name: /Mark filmed: Film one continuous take/, exact: false })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /View all \d+ prompts/ })).toHaveCount(0);
-    const kitchenPrompt = capture.getByText("Film one continuous take: run the faucet showing flow and drainage, pan the sink, counters, and outlets with the fan running, open the entry and test its lock, then show the smoke or CO detector and its indicator.", { exact: true });
+    const kitchenPrompt = capture.getByText("Film one continuous take: run the faucet showing flow and drainage, slowly pan the sink, counters, and outlets, then show the smoke or CO detector and its indicator. The front door and lock are covered in the hallway clip.", { exact: true });
     await expect(kitchenPrompt).toBeVisible();
     const promptTextMetrics = await kitchenPrompt.evaluate((element) => ({
       isClipped: element.scrollHeight > element.clientHeight,

@@ -359,6 +359,7 @@
 .proposalDecisionMeta { display: grid; gap: 2px; margin-top: 6px !important; padding-top: 5px; border-top: 1px solid #e0e6ec; color: #536171 !important; font-size: 0.68rem !important; font-weight: 700; }
 .proposalWarning { color: #714b09 !important; font-weight: 700; }
 .proposalEvidenceFigure { min-width: 0; margin: 0; border: 1px solid #d5dee7; border-radius: 7px; overflow: hidden; background: #fff; }
+.proposalEvidenceGallery { display: grid; gap: 6px; align-content: start; max-height: 280px; overflow-y: auto; }
 .proposalEvidenceFigure img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
 .proposalEvidenceFigure figcaption { padding: 4px 5px; color: #405066; font-size: 0.62rem; font-weight: 750; line-height: 1.25; }
 .proposalEvidenceFigure figcaption small { display: block; padding-top: 2px; color: #5b6b7d; font-size: 0.56rem; font-weight: 650; }

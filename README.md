@@ -1,51 +1,36 @@
 # Move-in Ready
 
-A mobile-first Habitability Walkthrough Companion for housing navigators and case managers. It guides an evaluator through short room videos, keeps visual model suggestions separate from the evaluator’s decisions, and prepares local files for the existing manual workflow.
+**A human-led, AI-assisted habitability walkthrough companion.**
 
-The in-scope form is LAHSA Habitability Standards Inspection Form 1083, FY 2022–23. The project owner confirmed that this is the form used and submitted in their workflow. The HMIS-ready PDF uses the unchanged official template and fills supported fields; participant/HMIS identity and unit address stay blank in the staged demo. The app does not submit to HMIS and provider acceptance is unverified.
+Move-in Ready helps housing navigators and case managers capture a staged unit walkthrough, review evidence-linked AI observations, and prepare local files for a manual habitability-inspection workflow.
 
-## Product workflow
+After a household has spent a long time waiting for housing assistance, finding an apartment can still mean repeated calls, visits, and paperwork. A unit may turn out not to meet the applicable requirements after a case manager and household have already invested scarce time. The walkthrough itself can also fall to staff who are carrying high caseloads and may not inspect units every day. Move-in Ready is designed to make that work easier to follow and review while keeping the evaluator responsible for every inspection decision.
 
-1. Start a staged-unit inspection with a pseudonym and choose the funding route. HUD-funded units receive an HQS-required notice; this app does not complete an HQS inspection.
-2. Capture or choose one short video for each room: kitchen, bathroom, bedroom/living area, and hallway. Follow the room prompts for fixtures such as faucets, fans, locks, and detectors.
-3. On an explicit analysis action, review timestamped stills and unreviewed model proposals against the 11 modeled Form 1083 elements.
-4. Record the evaluator’s separate A, D, or needs-human-check decision, deficiency details, and required sign-off.
-5. Generate a client-file PDF, a landlord fix-list PDF containing evaluator-confirmed deficiencies, a filled/flattened copy of the official LAHSA FY 2022–23 Form 1083 with appended evidence pages, and companion JSON. The staged demo leaves participant/HMIS identity and unit address blank, so the form is not case-ready. Download and handle those files outside the app; no HMIS submission or provider acceptance is claimed.
+> **Current scope:** This repository implements a guided Form 1083 walkthrough and local exports. Pre-visit address screening and SAM.gov lookups are a proposed direction only; they are not implemented or verified here. No measured time savings, voucher eligibility result, or provider acceptance is claimed.
 
-AI may propose an unreviewed A or D suggestion, but it cannot complete a manual check, record the evaluator’s decision, or determine the inspection result. Every proposed deficiency must be tied to an actual still from the current clip and its source timestamp. A missing or stale still means needs-human-check. The stills are decoded from the video; they are not generated or enhanced.
+## What it does
 
-## Implementation status and release gate
+- Guides a worker through kitchen, bathroom, bedroom/living area, and hallway video capture.
+- Uses Meta SAM 3.1 to identify candidate moments and Meta Muse Spark to draft observations from actual video stills.
+- Keeps AI observations separate from the worker’s inspection decisions. The worker reviews evidence, completes required checks, signs, and controls the final result.
+- Prepares local client-file and landlord-fix-list PDFs, a filled copy of the official LAHSA FY 2022–23 Form 1083 with evidence pages, and companion JSON.
+- Keeps clips, decisions, and signatures on the device. A live analysis request transfers the selected clip to the configured provider; provider retention follows current provider terms.
 
-The current source contains the three-step mobile flow, local video storage, a two-stage SAM/Muse video path, evaluator review and sign-off, and local export code. This describes code in the checkout, not passing verification, completed visual QA, provider accuracy, or field evaluation. The project brief and current SDD requirements are in [`docs/PRODUCT_BRIEF.md`](docs/PRODUCT_BRIEF.md) and [`docs/sdd/features/habitability-walkthrough-mvp/`](docs/sdd/features/habitability-walkthrough-mvp/). Historical photo-first code remains in the repository. Use the task plan and latest check output for implementation status; do not treat a fixture pass or an SDD document update as a completed live evaluation.
+AI output is a draft, not an inspection verdict. The app does not perform an HQS inspection, submit to HMIS, deliver files to a landlord, or claim that a recipient accepts its exports. Staged-demo identity and unit-address fields remain blank, so those exports are not case-ready.
 
-The required staged 30-second kitchen/bathroom test clip was not supplied. Until it is evaluated, SAM tracking across faucet, fan, lock, and detector; element mapping; timestamp/still coverage; and misses under normal indoor lighting are unvalidated. Do not claim product accuracy or prepare a result-based demo script from fixtures.
+## Screens
 
-## Video and model boundaries
+The screenshots show the empty/staged interface. They do not depict recorded room evidence, completed inspections, or provider results.
 
-- Browser capture, previews, local clips, and source-frame stills stay in local browser storage until the evaluator explicitly requests analysis.
-- Live video analysis is a server action. Supported MOV clips are normalized locally to MP4 using a size-bounded packet-copy remux. The browser sends the selected MP4 once to the same-origin segment route; the server validates its bytes and limits, uploads it once to Meta’s Files API with a requested expiry, and calls SAM 3.1 through the Responses streaming API using fixed, one-concept prompts. The server parses segmentation records and returns bounded geometry, frame references, and the source-video hash. SAM geometry is not a condition or inspection judgment.
-- During that segment request, the server verifies the clip hash and uses FFmpeg to decode the actual SAM candidate frames plus source context frames sampled at 1 fps. It caches only bounded JPEGs in the short-lived, one-time mapping lease. The later map request sends the video identity and signed candidate token only; it sends no video or still bytes, so the phone does not upload the clip a second time. Muse uses the server-derived frames for unreviewed Form 1083 proposals. If Meta Muse has an eligible provider failure, a configured Baseten Muse Spark Open key can enable a one-time mapping fallback; it receives the same stills and does not replace SAM. The UI discloses this provider transfer. `npm run test:live` now exercises one video segment request with the synthetic MP4 by default and maps only when SAM returns valid candidates; it disables the optional fallback and does not assess video quality. See [`docs/integration/FORM_1083_MAPPING.md`](docs/integration/FORM_1083_MAPPING.md) for implementation status and boundaries.
-- Live server-side frame verification requires FFmpeg with decoders for the accepted video codecs and an MJPEG encoder. The maintained server runtime is FFmpeg 9.0.2; `scripts/install-ffmpeg-runtime.sh` builds it from the signed upstream source release. Set server-only `FFMPEG_PATH` to its absolute executable path. The system FFmpeg on the current VPS is older and is only a fallback. FFmpeg is not shipped in the phone app.
-- Meta and Baseten keys, file IDs, and provider request/response bodies remain server-side. The browser never sends a provider URL for the server to fetch. Logs and exports must not contain credentials or raw provider bodies.
-- The browser video path uses Meta's `@meta-sam/video` with Mediabunny 1.63.0 for frame-aware WebCodecs decoding, bounded packet-copy remux, and timestamped still extraction, plus a native media/canvas fallback when a browser cannot decode the selected codec through WebCodecs. Mediabunny is pinned by npm override because the Meta wrapper pins an older exact release. No full-frame-rate ffmpeg WebAssembly transcode is added to the phone path.
-- A local delete removes local clips, stills, decisions, and signatures only. It does not claim to delete provider-side files or downloaded exports.
+| Capture | Review | Sign-off |
+|---|---|---|
+| ![Mobile video capture screen](artifacts/design-qa/capture-final-390.png) | ![Mobile draft review screen](artifacts/design-qa/review-final-390.png) | ![Mobile sign-off and export screen](artifacts/design-qa/signoff-final-390.png) |
 
-## Meta integration (Live Copilot v2)
-
-Synthetic staged-unit data only. No real client data, no live HMIS connection, no generated inspection photos: every still is decoded from a filmed clip.
-
-| Meta product | Job in v2, not a bolt-on |
-|---|---|
-| Muse Spark (Meta Model API) | Multimodal reasoning over server-derived 1 fps frames for strict-JSON Form 1083 drafts, citations, and fix-list ranking |
-| SAM 3.1 | Live 1 fps tracking of faucet, fan, lock, and detector during per-element capture (`/api/video/track`), plus room-clip segmentation |
-| Muse Code | Build agent for scaffolding and API routes |
-| Muse Image | Not used for inspection evidence, by design, to preserve trust in stills and clips |
-
-Baseten Muse Spark Open is a mapping-only fallback when Meta Muse has an eligible provider failure; it never replaces SAM. As of 2026-10-31 the demo ran against a little over $100 in Muse credits with Baseten untouched; per-element clips stay under 2 minutes total so tracking cost stays well below the long-video estimate.
+More phone and desktop captures and the visual QA notes are in [design-qa.md](design-qa.md).
 
 ## Run locally
 
-Node.js 22 is the project runtime.
+**Runtime:** Node.js 22.
 
 ```sh
 npm ci
@@ -53,21 +38,36 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Set `APP_ANALYSIS_MODE=fixture` for local fixture work. For live calls, set `APP_ANALYSIS_MODE=live` and provide `META_API_KEY` (or the documented `MODEL_API_KEY` alias) in a server-side environment file. Restart the server after changing environment variables. Never put a key in a `NEXT_PUBLIC_*` variable or commit a key file. The live video route fails closed when live mode or credentials are missing; it does not fall back to fixture video results.
+For local development, use `APP_ANALYSIS_MODE=fixture`; fixture responses are synthetic and must not be presented as live provider output. Live analysis requires a server-side `META_API_KEY` (or the documented `MODEL_API_KEY` alias), `APP_ANALYSIS_MODE=live`, and the documented FFmpeg runtime. Never expose provider keys through `NEXT_PUBLIC_*` variables or commit them. See [development setup](docs/DEVELOPMENT.md) for environment details.
 
-When a trusted reverse proxy serves the app on a different public origin, set `APP_PUBLIC_ORIGIN` to that exact HTTP(S) origin (scheme, host, and optional port only). This keeps same-origin protection working when the proxy forwards requests to a loopback address.
+## Verification status
 
-Each checkout or worktree reads its own environment files. A `.env` in a different checkout is not inherited by this app process.
+The codebase contains the guided capture, review, sign-off, provider routes, and local export flow. Recorded checks and live evaluation evidence are separate: a fixture or CI pass does not prove provider quality or field readiness. The scored two-room evaluation is documented separately from the still-open authored single-clip gate. Physical-device checks and recipient acceptance are also open.
 
-The live smoke loads local environment files through Next.js's environment loader without printing values. It requires `META_API_KEY`, starts the production server in live mode, and sends the bundled synthetic H.264 MP4 to `/api/video/segment` once. Set `SMOKE_VIDEO` only to an explicit safe, rights-cleared staged/mock-unit MP4. Muse mapping is sent at most once and only when SAM returns valid candidates; retries and the optional Baseten fallback are disabled. The smoke reports sanitized connectivity metadata and `videoQuality: not-assessed`; it does not satisfy the missing 30-second clip evaluation. Run `npm run build` first. `node tests/live/smoke.mjs --self-test` checks the runner offline without loading `.env` or reading media.
+See [current project status](docs/STATUS.md) for the evidence-based snapshot and [the video evaluation record](docs/evaluation/video-clip-gate.md) for the precise gate distinction.
 
-## Project references
+## Hackathon and portfolio story
 
-- [Product brief](docs/PRODUCT_BRIEF.md)
-- [Move-in Ready SDD request, requirements, design, plan, and verification](docs/sdd/features/habitability-walkthrough-mvp/)
-- [Form 1083 mapping and Meta integration contract](docs/integration/FORM_1083_MAPPING.md)
-- [Demo plan and evidence limits](docs/DEMO.md)
-- [Decisions and superseded directions](docs/DECISIONS.md)
-- [Codex review and CI notes](docs/REVIEW_AND_CI.md)
-- [LAHSA FY 2022–2023 Form 1083 listing](https://www.lahsa.org/documents?id=6886--tls-and-hn-fy-2022-2023-form-1083-habitability-standards-form.pdf)
-- [Meta Models](https://dev.meta.ai/docs/models), [SAM segmentation](https://dev.meta.ai/docs/sam/segmenting), and [SAM client libraries](https://dev.meta.ai/docs/sam/client-libraries)
+The project addresses the work around a housing walkthrough: households may have waited a long time for assistance, while case managers have limited time to identify a suitable unit and document its condition. The companion uses Meta SAM and Muse to help organize video evidence, then keeps the human evaluator in control of findings and sign-off.
+
+An earlier pre-inspection screening idea—checking an address and relevant SAM.gov records before arranging a visit—is **not part of the current app**. Its purpose, data sources, eligibility rules, and reliability need to be defined before it can be described as a capability. The project has no measured evidence yet that it saves staff time or prevents wasted visits.
+
+Read the [hackathon project narrative](docs/HACKATHON.md) for the problem, approach, Meta tooling, demo boundaries, and open questions.
+
+## Documentation
+
+- [Project overview and problem statement](docs/PROJECT_OVERVIEW.md)
+- [Architecture and data boundaries](docs/ARCHITECTURE.md)
+- [Local development and configuration](docs/DEVELOPMENT.md)
+- [Privacy, safety, and limitations](docs/PRIVACY_AND_SAFETY.md)
+- [Hackathon narrative](docs/HACKATHON.md)
+- [Documentation index](docs/README.md)
+- [Product brief](docs/PRODUCT_BRIEF.md) · [Decisions](docs/DECISIONS.md) · [Form 1083 integration contract](docs/integration/FORM_1083_MAPPING.md)
+
+## Project name
+
+The product name is **Move-in Ready**. The planned GitHub repository slug is `move-in-ready-walkthrough`; confirm that slug is available before changing the repository URL. “Meta-Inspect” is retained only as a technical or historical name where older records use it.
+
+## License and bundled materials
+
+Project-authored code is licensed under the MIT License. The official LAHSA form, bundled fonts, and generated voice assets have separate provenance or terms; see [third-party notices](THIRD_PARTY_NOTICES.md). Do not assume the project license changes their terms.

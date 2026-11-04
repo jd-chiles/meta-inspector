@@ -24,6 +24,7 @@ import {
   type MoveInReadyElementId,
   type MoveInReadyRoomType,
 } from "../../domain/move-in-ready";
+import { MOVE_IN_READY_ELEMENT_CRITERIA } from "../../domain/element-criteria";
 import { VIDEO_SAMPLE_TIMESTAMP_TOLERANCE_MS } from "../../domain/video-format";
 import { WALKTHROUGH_CLIENT_HEADER, WALKTHROUGH_CLIENT_ID } from "../../domain/walkthrough-client";
 import { VideoSegmentError } from "./errors";
@@ -128,7 +129,7 @@ export const VIDEO_PROMPTS: Readonly<Record<MoveInReadyRoomType, readonly FixedV
     { elementId: "demo-smoke-co", concept: "carbon monoxide detector" },
   ],
   hallway: [
-    { elementId: "demo-item-06", concept: "exit door" },
+    { elementId: "demo-item-07", concept: "front door lock" },
     { elementId: "demo-item-06", concept: "secondary exit" },
     { elementId: "demo-item-06", concept: "fire escape window" },
     { elementId: "demo-smoke-co", concept: "smoke detector" },
@@ -1385,8 +1386,12 @@ const MUSE_MAPPING_INSTRUCTIONS = [
   "You prepare unreviewed draft proposals from exact-seek still images extracted from a room video and fixed Segment Anything (SAM) candidate frames.",
   "Additional sample images are one-per-second room context and are listed by timestamp as sampleImageOrder. Use them only for context; cite only the supplied SAM candidate IDs as evidence.",
   "The catalog labels are the app's fixed element labels; they do not define a room-specific legal requirement.",
+  "The supplied checklist items are the app's illustrative interpretation of the review topics, not official form wording. Use them only to decide whether the visible candidate actually relates to an item.",
   "Use only candidate IDs provided in the input. A proposal's evidence candidates must all belong to its elementId.",
-  "Never invent an ID or cite a moment not included in the SAM candidates. Do not infer absence from SAM non-detection.",
+  "Inspect each candidate image against its element label and checklist items. Match only when the visible subject and context support that specific item; a generic room image is not evidence for every item.",
+  "Never invent an ID or cite a moment not included in the SAM candidates. Do not infer absence from SAM non-detection, and do not treat a detector's visible presence as proof it works.",
+  "Still images cannot prove operation, measurements, adequate quantity, safe access, structural soundness, sanitation, water quality, or any other physical test. Never describe those checks as passed. If the image does not support a narrow visual observation, omit that element.",
+  "Only describe details plainly visible in the exact cited candidate stills. Do not add inferred actions, flow, function, condition, or context from neighboring frames or sample images.",
   "If a tentative proposal cannot be supported by one or more supplied candidate frames, omit that element.",
   "The A/D value is only an unreviewed model suggestion for a human evaluator; it is never an inspection result or compliance judgment.",
   "Write a neutral, concise observation of visible details. Do not state a final verdict, compliance, deficiency, approval, safety conclusion, or that a physical test passed or failed.",
@@ -1400,7 +1405,16 @@ function museContext(mapping: ParsedMapping): Record<string, unknown> {
   return {
     room: mapping.room,
     currentDate: new Date().toISOString().slice(0, 10),
-    catalog: catalog.items.map((item) => ({ elementId: item.id, label: item.label })),
+    catalog: catalog.items.map((item) => ({
+      elementId: item.id,
+      label: item.label,
+      roomTypes: MOVE_IN_READY_ELEMENTS.find((element) => element.id === item.id)?.roomIds ?? [],
+      checklistItems: MOVE_IN_READY_ELEMENT_CRITERIA[item.id as MoveInReadyElementId].checklistItems,
+      humanChecks: item.manualChecks.map((check) => ({
+        instruction: check.instruction,
+        photoCannotEstablish: check.photoCannotEstablish,
+      })),
+    })),
     samCandidates: mapping.candidates.map(({ candidateId, elementId, concept, evidence }) => ({
       candidateId,
       elementId,

@@ -1,6 +1,6 @@
 # Research and validation ledger
 
-Updated October 26, 2026. Distinguish checked sources, reported experience, and unverified hypotheses in every pitch or submission.
+Historical research ledger, originally updated October 26, 2026. Distinguish checked sources, reported experience, and unverified hypotheses in every pitch or submission. Current product scope is documented in [PRODUCT_BRIEF.md](PRODUCT_BRIEF.md); this earlier ledger contains superseded scoping notes.
 
 ## Checked project references
 
@@ -13,13 +13,13 @@ Updated October 26, 2026. Distinguish checked sources, reported experience, and 
 
 ## Qualitative user evidence
 
-The owner reports conversations with case managers: high caseloads, competing work, added paperwork and tracking, limited walkthrough experience, and time burden. No sample size, dates, direct quotations, measured task times, error rates, or outcomes are documented. Treat as exploratory qualitative input only.
+The owner reports conversations with case managers: high caseloads, competing work, added paperwork and tracking, limited walkthrough experience, and time burden. The owner also describes households waiting a long time for assistance and avoidable time spent on units that later do not qualify. No sample size, dates, direct quotations, measured task times, error rates, or outcomes are documented. Treat this as exploratory qualitative context, not a prevalence or impact finding.
 
 ## Claims not cleared for external use
 
 Earlier brainstorming included claims that failure blocks subsidy payment for 30 days, approximately 50% of HACLA units need reinspection, standards churn causes inconsistent results, dual HQS/1083 workflows cause delays, and this tool could remove days from placements. The feasibility review could not independently substantiate these with form-specific evidence. Do not repeat them as facts or use them as quantified impact claims until authoritative, directly relevant sources are verified. County Rental Housing Habitability Program findings are a separate process and do not establish LAHSA Form 1083 policy.
 
-Likewise, earlier sketches proposed “all 11 items,” counts of camera-observable items, four physical tests, automatic deficiency labels, HMIS-ready packets, and broad inspection claims. The exact operative form was not available for independent field-level confirmation. These remain unverified; current scope is three or four items selected from a provider-confirmed form.
+Likewise, earlier sketches proposed “all 11 items,” counts of camera-observable items, four physical tests, automatic deficiency labels, HMIS-ready packets, and broad inspection claims. Those notes predate the October 29 owner-confirmed Form 1083 scope and the current 11-area product brief. Use the current brief and feature SDD for scope. Pre-visit address/SAM.gov screening is a proposed concept only; no implementation or validation is recorded.
 
 ## Open validation questions
 

@@ -57,7 +57,6 @@ export const ASSISTANT_FILMING_SCRIPTS: Record<MoveInReadyRoomType, readonly str
   kitchen: [
     "Recording. First, run the kitchen faucet and show the water flow and drainage.",
     "Now pan across the sink, counters, and outlets.",
-    "Open the entry door and test its lock.",
     "Finally, show the smoke or carbon monoxide detector and its indicator light.",
   ],
   bathroom: [
@@ -80,8 +79,8 @@ export const ASSISTANT_FILMING_SCRIPTS: Record<MoveInReadyRoomType, readonly str
   ],
   hallway: [
     "Recording. First, walk the full hallway showing the exit path.",
-    "Now show the exit door and any secondary exit or fire escape window.",
-    "Show the lighting along the path.",
+    "Now show the front door and demonstrate how its lock works.",
+    "Show the secondary exit or fire escape window and the lighting along the path.",
     "Finally, show the smoke or carbon monoxide detector.",
   ],
 };

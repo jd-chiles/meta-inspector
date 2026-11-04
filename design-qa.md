@@ -50,7 +50,7 @@ Profile remains a separate guided setup flow. HUD-funded and unknown-funding rec
 
 ## Remaining product and release gates
 
-- A consented, rights-cleared staged kitchen/bathroom video is still needed to evaluate live SAM/Muse tracking, element mapping, timestamps, and still quality. The 2026-10-29 synthetic-video smoke reached SAM but returned zero candidates, so Muse mapping and video quality were not tested. A separate historical still-image smoke does not validate the video workflow. The preview correctly says `Meta live · untested` for this video workflow.
+- The later [video evaluation record](docs/evaluation/video-clip-gate.md) supersedes the earlier status below: a two-room staged set was scored under an owner-authorized variance, while the authored single-clip gate remains open. Do not use this historical QA note as current provider-quality status.
 - Verify camera capture, codecs, safe areas, and recording on physical iOS Safari and Android devices.
 - Confirm exact Form 1083 field mapping and recipient acceptance. Exports remain local/manual; direct HMIS submission is not implemented.
 - Native SDD review/evidence has not been recorded for this worktree. No approval is inferred from local checks or screenshots.

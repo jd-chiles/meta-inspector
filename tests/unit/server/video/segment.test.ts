@@ -482,6 +482,7 @@ describe("POST /api/video/segment", () => {
       { elementId: "demo-smoke-co", concept: "carbon monoxide detector" },
     ]));
     expect(VIDEO_PROMPTS.hallway).toEqual(expect.arrayContaining([
+      { elementId: "demo-item-07", concept: "front door lock" },
       { elementId: "demo-item-06", concept: "secondary exit" },
       { elementId: "demo-item-06", concept: "fire escape window" },
       { elementId: "demo-smoke-co", concept: "carbon monoxide detector" },
@@ -852,6 +853,10 @@ describe("POST /api/video/segment", () => {
     expect(text.sampleImageOrder).toHaveLength((segmented.body.sampleTimestampsMs as number[]).length);
     expect(text.samCandidates).toHaveLength((segmented.body.candidates as VideoDraftSuggestion[]).length);
     expect(text.catalog).toHaveLength(11);
+    const waterItem = (text.catalog as Array<{ elementId: string; checklistItems: string[]; humanChecks: Array<{ photoCannotEstablish: boolean }> }>)
+      .find((item) => item.elementId === "demo-water-supply");
+    expect(waterItem?.checklistItems).toContain("Operate all faucets and confirm the water is working, hot, and clear.");
+    expect(waterItem?.humanChecks.some((check) => check.photoCannotEstablish)).toBe(true);
     const serializedMusePayload = JSON.stringify(payload);
     expect(serializedMusePayload).not.toContain(IDENTITY_BASE.sessionId);
     expect(serializedMusePayload).not.toContain(IDENTITY_BASE.videoId);

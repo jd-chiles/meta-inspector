@@ -1,6 +1,6 @@
 # Decisions and changes
 
-## Current decisions — October 29, 2026
+## Current product decisions — October 29, 2026
 
 1. Build the mobile-first Move-in Ready flow from the supplied product brief and three-screen reference: room video capture, draft review, and evaluator sign-off/export.
 2. Use the owner's confirmed LAHSA Form 1083 scope with 11 logical areas. Treat Fire Safety 11a unit detectors and 11b public/common-area detectors as independent decisions. Ask funding type first; route Housing Authority/voucher selections to an HQS-required notice and treat HUD-funded (CoC/ESG) as a Form 1083 path.
@@ -11,7 +11,8 @@
 7. Keep a pseudonym and staged/mock-unit data in the demo. Local deletion does not claim to remove provider-side files or downloaded exports.
 8. Keep the app's PWA shell local-first, but never cache clips, stills, provider requests, or keys in the service worker.
 9. Use the official Meta SAM parser/video packages plus Mediabunny for frame-aware video access and local, packet-copy MOV normalization. Do not use an in-browser full transcode; unsupported codecs get a clear conversion error. Keep 1-fps Muse sampling bounded to at most 30 stills per room.
-10. Treat the 30-second staged kitchen/bathroom clip scorecard as an open release gate. No test clip was attached, so segmentation tracking, Form 1083 mapping quality, evidence coverage, and indoor-light misses remain unvalidated. Test real iOS Safari and Android camera/codec/MOV behavior separately; Chromium tests do not establish device compatibility.
+10. Keep the authored 30-second single-clip scorecard as a separate open gate. A two-room staged evaluation was later recorded under an owner-authorized variance; it does not close the authored gate. See the dated [video evaluation record](evaluation/video-clip-gate.md) for scores, cautions, and unmeasured coverage. Test real iOS Safari and Android camera/codec/MOV behavior separately; Chromium tests do not establish device compatibility.
+11. Treat pre-visit address screening and SAM.gov lookup as a proposed product direction, not an implemented capability. Define the data source, matching rules, decision meaning, privacy, and evaluation before adding it to product requirements or making prevention claims.
 
 ## Superseded decisions
 

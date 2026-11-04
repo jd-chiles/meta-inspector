@@ -6,6 +6,12 @@ Updated October 29, 2026 from the owner-provided product brief and mobile concep
 
 Move-in Ready is a mobile-first Habitability Walkthrough Companion for housing navigators and case managers. It guides an evaluator through a staged unit video walkthrough, prepares evidence-linked draft observations for review, records the evaluator's own decisions, and creates local export files for the existing manual workflow.
 
+## Problem framing
+
+Households may wait a long time for housing assistance and still face a time-sensitive apartment search once assistance is available. Visits to units that later fail applicable requirements can consume time for both the household and case manager. The walkthrough and documentation also add work for case managers with heavy caseloads and varied inspection experience. This is the product's problem framing, informed by owner-reported practitioner conversations; this repository does not establish prevalence, measured time savings, or improved housing outcomes.
+
+The intended role of the AI companion is to make evidence capture and review easier to follow. It does not replace a qualified evaluator or make the inspection decision. A separate proposed direction is to explore pre-visit address and SAM.gov checks to identify possible unit concerns earlier. That screening is not in the current product scope or implementation; its data sources, matching rules, meaning, privacy, and reliability need definition before it can be presented as a capability.
+
 The form in scope is LAHSA Habitability Standards Inspection Form 1083, FY 2022–23. The project owner confirmed this is the form used and submitted in their workflow. LAHSA's [Housing Navigation page](https://www.lahsa.org/news?article=897-lahsa-housing-navigation-programs) and [Time-Limited Subsidy page](https://www.lahsa.org/news?article=896-lahsa-time-limited-subsidy-tls-) still link Form 1083 to the FY 2022–23 PDF (checked October 29, 2026); the owner/provider must confirm before the app claims no newer version exists. This confirmation does not establish that this app's export is accepted by LAHSA/provider staff or submitted to HMIS.
 
 ## User and job

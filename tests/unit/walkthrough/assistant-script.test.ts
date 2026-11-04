@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  filmingScriptForRoom,
   deriveAssistantNode,
   type AssistantScriptInput,
 } from "../../../src/features/walkthrough/assistant-script";
@@ -22,6 +23,11 @@ const base: AssistantScriptInput = {
 };
 
 describe("deriveAssistantNode", () => {
+  it("guides the entry lock in the hallway capture rather than the kitchen", () => {
+    expect(filmingScriptForRoom("kitchen").join(" ")).not.toMatch(/entry door|lock/i);
+    expect(filmingScriptForRoom("hallway").join(" ")).toMatch(/front door.*lock/i);
+  });
+
   it("starts with unit setup", () => {
     const node = deriveAssistantNode(base);
     expect(node.key).toBe("setup");
