@@ -7,10 +7,19 @@ import {
   RECORDER_STOP_MARGIN_MS,
   WALKTHROUGH_VIDEO_BITS_PER_SECOND,
 } from "../../../src/features/walkthrough/recorder-limits";
+import { getRoomVideoDurationLimitSeconds } from "../../../src/domain/video-duration";
 
 describe("in-page walkthrough recorder limits", () => {
-  it("keeps recording duration within the server's 30 second maximum", () => {
-    expect(getEffectiveRecordingDurationSeconds(45)).toBe(30);
+  it("honors the 30 second server ceiling and smaller room limits", () => {
+    expect(getRoomVideoDurationLimitSeconds("kitchen")).toBe(30);
+    expect(getRoomVideoDurationLimitSeconds("bathroom")).toBe(30);
+    expect(getRoomVideoDurationLimitSeconds("bedroom-2")).toBe(30);
+    expect(getRoomVideoDurationLimitSeconds("living-room")).toBe(30);
+    expect(getRoomVideoDurationLimitSeconds("hallway")).toBe(15);
+    expect(getRoomVideoDurationLimitSeconds("not-a-room")).toBeNull();
+    expect(getEffectiveRecordingDurationSeconds(75)).toBe(30);
+    expect(getEffectiveRecordingDurationSeconds(30)).toBe(30);
+    expect(getEffectiveRecordingDurationSeconds(15)).toBe(15);
     expect(getEffectiveRecordingDurationSeconds(12.5)).toBe(12.5);
     expect(getEffectiveRecordingDurationSeconds(Number.NaN)).toBe(30);
   });
@@ -18,6 +27,7 @@ describe("in-page walkthrough recorder limits", () => {
   it("stops before the duration boundary to leave room for the final encoded sample", () => {
     expect(RECORDER_STOP_MARGIN_MS).toBe(500);
     expect(getRecordingStopDelayMs(30)).toBe(29_500);
+    expect(getRecordingStopDelayMs(15)).toBe(14_500);
     expect(getRecordingStopDelayMs(2.25)).toBe(1_750);
     expect(getRecordingStopDelayMs(0.25)).toBe(0);
   });

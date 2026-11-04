@@ -630,7 +630,7 @@
   {
     "id": "TASK-110",
     "title": "Real staged-video evaluation gate",
-    "description": "Score the owner-supplied staged/mock kitchen and bathroom footage for faucet, fan, lock, and detector track identity, element mapping, actual timestamp/still coverage, and indoor-light misses. The 2026-10-31 attempts did not produce a reviewable result: kitchen timed out and bathroom was canceled before saving. The supplied clips total about 32.8 seconds and do not establish all cues under the current single-clip, 30-second gate. A gate pass requires qualifying footage and a completed scorecard or an explicit authorized SDD scope update.",
+    "description": "Score owner-supplied staged/mock room footage against the requested capture profile: kitchen up to 30s (slow-paced existing kitchen cues, no front door/lock), bathroom up to 30s, bedroom/living up to 30s, and hallway up to 15s (including front door/lock). Assess track identity, mapping against all 11 Form 1083 areas, source timestamp/still coverage and identity, and indoor-light misses. Preserve the 2026-10-31 attempt results as historical evidence. The revised profile has not been evaluated; the current synchronous route may still time out, so capture target does not imply hosted support. Gate pass requires a reviewable result and completed scorecard after the implementation limits are verified.",
     "profile": "documentation",
     "difficulty": "high",
     "rationale": "QA is read-only in this tool policy; documentation is the closest writable profile for the gate record. Provider video tracking and Form 1083 mapping cannot be validated by fixtures or still-image smoke tests.",
@@ -646,10 +646,11 @@
       "docs/evaluation/video-clip-gate.md"
     ],
     "acceptance": [
-      "The single evaluation clip is staged mock-unit footage with no tenant identity or personal data, is no more than 30 seconds, and visibly covers faucet, fan, lock, and detector cues.",
-      "Every required prompt and mapped item is scored against actual timestamps and decoded frames.",
-      "Misses and prompt decisions are recorded before any demo-script or mapping-quality claim.",
-    "No gate pass is submitted until a reviewable result covers the required cues and the scorecard is complete; fixtures and historical evidence do not satisfy this gate."
+      "Evaluation uses staged mock-unit footage with no tenant identity or personal data and follows room limits: kitchen <=30s, bathroom <=30s, bedroom/living <=30s, hallway <=15s.",
+      "Kitchen footage covers its current kitchen cues without the front door; hallway footage shows and operates the front-door lock. Every required prompt and each of the 11 mapped areas is scored against actual timestamps and decoded source frames.",
+      "Misses, image-to-item mismatches, unsupported observations, needs-human-check outcomes, and prompt decisions are recorded before any demo-script or mapping-quality claim.",
+      "The 30s kitchen route is separately verified against current server duration and hosting request limits; a local capture or fixture pass does not prove live support.",
+      "No gate pass is submitted until reviewable results cover the required room cues and mapping scorecard is complete; fixtures and historical evidence do not satisfy this gate."
     ],
     "checkIDs": [
       "docs"

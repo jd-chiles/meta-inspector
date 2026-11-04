@@ -32,6 +32,7 @@ import { fixListTier, reinspectionChecklist } from "./fix-list";
 import { SETUP_VOICE_QUESTIONS, TOUR_REPROMPTS, VOICE_ROOM_CHECKS } from "./voice-checks";
 import { filmingScriptForRoom } from "./assistant-script";
 import { parseRoomId } from "../../domain/move-in-ready";
+import { getRoomVideoDurationLimitSeconds } from "../../domain/video-duration";
 import { parseBathCount, parseUnitType, parseYesNo } from "./voice-parse";
 import { speakPrompt } from "./voice-conversation";
 import VoicePrompt, { type VoicePromptPhase } from "./voice-prompt";
@@ -264,7 +265,7 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
     if (node.kind !== "film-room" || !tourRecording || !speakOn) return;
     const cues = filmingScriptForRoom(node.roomId);
     const timers = cues.map((cue, index) =>
-      window.setTimeout(() => { setShotIndex(index); sayNow(cue); }, 1500 + index * 8000));
+      window.setTimeout(() => { setShotIndex(index); sayNow(cue); }, cueDelayMs(index, cues.length, getRoomVideoDurationLimitSeconds(node.roomId) ?? 30)));
     return () => {
       timers.forEach((timer) => window.clearTimeout(timer));
       setShotIndex(-1);
@@ -272,6 +273,14 @@ export default function GuidedTourView({ bindings }: { bindings: GuidedTourBindi
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodeKey, tourRecording, speakOn]);
+
+function cueDelayMs(index: number, cueCount: number, maxDurationSeconds: number): number {
+  if (cueCount <= 1) return 1_500;
+  // Leave a longer cue window for 30s rooms and finish hallway guidance
+  // earlier so the last prompt fits before the 15s recording stops.
+  const cueWindowFraction = maxDurationSeconds <= 15 ? 0.66 : 0.8;
+  return 1_500 + Math.round((index / (cueCount - 1)) * maxDurationSeconds * cueWindowFraction * 1_000);
+}
 
   const skipElement = useCallback((elementId: MoveInReadyElementId) => {
     setSkipped((current) => new Set(current).add(elementId));

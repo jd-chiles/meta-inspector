@@ -1,10 +1,10 @@
-# Move-in Ready
+# Walkthrough Kit
 
 **A human-led, AI-assisted habitability walkthrough companion.**
 
-Move-in Ready helps housing navigators and case managers capture a staged unit walkthrough, review evidence-linked AI observations, and prepare local files for a manual habitability-inspection workflow.
+Walkthrough Kit helps housing navigators and case managers capture a staged unit walkthrough, review evidence-linked AI observations, and prepare local files for a manual habitability-inspection workflow.
 
-After a household has spent a long time waiting for housing assistance, finding an apartment can still mean repeated calls, visits, and paperwork. A unit may turn out not to meet the applicable requirements after a case manager and household have already invested scarce time. The walkthrough itself can also fall to staff who are carrying high caseloads and may not inspect units every day. Move-in Ready is designed to make that work easier to follow and review while keeping the evaluator responsible for every inspection decision.
+After a household has spent a long time waiting for housing assistance, finding an apartment can still mean repeated calls, visits, and paperwork. A unit may turn out not to meet the applicable requirements after a case manager and household have already invested scarce time. The walkthrough itself can also fall to staff who are carrying high caseloads and may not inspect units every day. Walkthrough Kit is designed to make that work easier to follow and review while keeping the evaluator responsible for every inspection decision.
 
 > **Current scope:** This repository implements a guided Form 1083 walkthrough and local exports. Pre-visit address screening and SAM.gov lookups are a proposed direction only; they are not implemented or verified here. No measured time savings, voucher eligibility result, or provider acceptance is claimed.
 
@@ -44,6 +44,8 @@ For local development, use `APP_ANALYSIS_MODE=fixture`; fixture responses are sy
 
 The codebase contains the guided capture, review, sign-off, provider routes, and local export flow. Recorded checks and live evaluation evidence are separate: a fixture or CI pass does not prove provider quality or field readiness. The scored two-room evaluation is documented separately from the still-open authored single-clip gate. Physical-device checks and recipient acceptance are also open.
 
+Room capture is capped at 30 seconds for kitchen, bathroom, and bedroom/living room, and 15 seconds for hallway. The front door and lock are captured in the hallway. Staged footage must pass the live evaluation gate before AI analysis quality is called reliable.
+
 See [current project status](docs/STATUS.md) for the evidence-based snapshot and [the video evaluation record](docs/evaluation/video-clip-gate.md) for the precise gate distinction.
 
 ## Hackathon and portfolio story
@@ -66,7 +68,7 @@ Read the [hackathon project narrative](docs/HACKATHON.md) for the problem, appro
 
 ## Project name
 
-The product name is **Move-in Ready**. The planned GitHub repository slug is `move-in-ready-walkthrough`; confirm that slug is available before changing the repository URL. “Meta-Inspect” is retained only as a technical or historical name where older records use it.
+The product name is **Walkthrough Kit**. The GitHub repository currently uses the `meta-inspector` slug. The `walkthroughkit.com` domain is being purchased; do not treat it as a live public site until registration and deployment are confirmed. Older records may use “Meta-Inspect” as a technical or historical name.
 
 ## License and bundled materials
 

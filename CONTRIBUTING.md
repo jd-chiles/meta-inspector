@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in Move-in Ready. The repository handles inspection evidence and provider data, so contributions must preserve the distinction between model suggestions and evaluator decisions.
+Thanks for your interest in Walkthrough Kit. The repository handles inspection evidence and provider data, so contributions must preserve the distinction between model suggestions and evaluator decisions.
 
 ## Before changing code
 

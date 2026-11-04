@@ -60,8 +60,8 @@ const REPROMPTS = [
 const FILMING_CUES = [
   // ASSISTANT_FILMING_SCRIPTS, raw spoken form per room type.
   "Recording. First, run the kitchen faucet and show the water flow and drainage.",
-  "Now pan across the sink, counters, and outlets.",
-  "Open the entry door and test its lock.",
+  "Now pan slowly across the sink, counters, and outlets.",
+  "Show the kitchen ventilation fan running and hold the camera steady on it.",
   "Finally, show the smoke or carbon monoxide detector and its indicator light.",
   "Recording. First, run the bathroom faucet and show the flow and drainage.",
   "Now show the toilet, sink, and surfaces.",
@@ -72,8 +72,9 @@ const FILMING_CUES = [
   "Show the light fixtures and outlets.",
   "Recording. First, walk the living room showing walls and floors.",
   "Recording. First, walk the full hallway showing the exit path.",
-  "Now show the exit door and any secondary exit or fire escape window.",
-  "Show the lighting along the path.",
+  "Now show the front door and demonstrate how its lock works.",
+  "Show the secondary exit or fire escape window and the lighting along the path.",
+  "Finally, show the smoke or carbon monoxide detector.",
 ];
 
 /** Every static spoken string, deduplicated, in stable generation order. */

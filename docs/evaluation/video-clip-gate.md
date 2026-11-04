@@ -1,22 +1,37 @@
 # Staged video evaluation gate (REQ-003, REQ-004, REQ-011)
 
-Status: **open — the authored single-clip gate below is unchanged and
-unevaluated.** Under the owner-authorized two-room variance recorded in this
-file, both room sets have now produced reviewable SAM+Muse results and are
-scored (bathroom 2026-10-31, kitchen 2026-11-01). Synthetic test patterns
-and fixture responses cannot satisfy this gate.
+Status: **open — the current room-based capture profile below has not been
+evaluated.** Historical two-room results and the earlier single-clip gate are
+retained as historical evidence only; they do not prove the revised profile or
+all-11-area mapping quality. Synthetic test patterns and fixture responses
+cannot satisfy this gate.
 
 ## Required input
 
-The current authored gate requires one 30-second or shorter rights-cleared
-mock-unit clip that includes faucet flow and drainage, a running ventilation
-fan, a door lock, and a smoke or carbon-monoxide detector. Avoid people, tenant
-belongings, addresses, case records, and identifying details. The owner has
-authorized the supplied staged clips for provider evaluation. The supplied
-set contains separate kitchen and bathroom clips totaling about 32.8 seconds;
-their observed moments do not establish lock or detector coverage. Resolve
-this input mismatch with qualifying footage or an explicit SDD scope update;
-do not silently waive or reinterpret the gate.
+The current requested gate is a rights-cleared room-based mock-unit set with no
+people, tenant belongings, addresses, case records, or identifying details:
+kitchen up to 30 seconds; bathroom up to 30 seconds; bedroom/living area up to
+30 seconds; hallway up to 15 seconds. Kitchen is paced slowly through its
+existing faucet/sink, cooking/counter/outlet, and detector cues. Front door and
+lock are shown and operated in the hallway clip, not required in kitchen.
+Evaluate the actual source frames/timestamps and mapping against all 11 Form
+1083 areas, including wrong-image matches, unsupported observations, and
+normal-light misses. The historical supplied clips and their prior scores do
+not satisfy this revised gate.
+
+All room limits are now at or below 30 seconds, while analysis remains synchronous.
+The hosted path must still be exercised with the revised staged footage and scored
+for mapping quality; a local capture check alone is not live quality proof. Any
+provider evaluation requires fresh explicit authorization.
+
+## Owner-requested profile alignment — 2026-11-04
+
+The owner requested moving the front-door/lock demonstration out of kitchen
+and into hallway, slower kitchen cue pacing, and the room-specific capture
+targets above. This records the demo target only; it does not assert that the
+server supports those durations, that a new staged run occurred, or that
+SAM/Muse mapping accuracy has been established. Historical dated run records
+below remain unchanged.
 
 ## Owner-authorized evaluation variance — 2026-10-31 (two-room set)
 

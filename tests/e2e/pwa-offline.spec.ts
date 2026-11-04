@@ -138,7 +138,7 @@ test("the hydrated walkthrough saves and restores real local progress offline", 
     buffer: videoBytes,
   });
   await expect(page.getByText("Clip saved on this device. Review stills are frames from the video at the timestamps shown.")).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("button", { name: /Mark filmed: Film one continuous take/, exact: false }).click();
+  await page.getByRole("button", { name: /Mark filmed: Up to 30 seconds/, exact: false }).click();
   await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
   await expect.poll(() => readSavedProgress(page)).toMatchObject({
     pseudonym: "Offline Saved Unit 04",

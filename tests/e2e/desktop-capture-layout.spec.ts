@@ -34,7 +34,7 @@ test("desktop Capture uses five-tab navigation and places prompts beside the vid
   await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
   await expect(capture.getByRole("heading", { name: "Filming guide" })).toBeVisible();
   await expect(capture.getByRole("button", { name: "Upload video", exact: true })).toBeVisible();
-  await expect(capture.getByText("Film one continuous take: run the faucet showing flow and drainage, pan the sink, counters, and outlets with the fan running, open the entry and test its lock, then show the smoke or CO detector and its indicator.", { exact: true }).first()).toBeVisible();
+  await expect(capture.getByText("Up to 30 seconds. Move slowly: run the faucet and show drainage; pan the sink, counters and outlets; show the running fan and smoke/CO detector. Film the front door and lock in the hallway.", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Not filmed", { exact: true }).first()).toBeVisible();
 
   const geometry = await capture.evaluate((root) => {

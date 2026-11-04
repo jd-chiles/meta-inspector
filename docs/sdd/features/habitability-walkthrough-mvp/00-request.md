@@ -1,4 +1,4 @@
-# Move-in Ready — Product Brief v1 implementation request
+# Walkthrough Kit — Product Brief v1 implementation request
 
 Source: project-owner attachment `product-brief.pdf` (Meta Global AI Developer Hackathon, Oct 26–Nov 4, 2026) and `Photo 2.jpg` concept rendering, received 2026-10-29. The brief supersedes the October 29 photo-first workspace scope and its claim that video was later-phase.
 
@@ -23,10 +23,11 @@ The phone UI should follow the supplied white/blue three-screen concept: a room 
 - Use staged/mock-unit media and a pseudonym only. No real participant data or HMIS records.
 - Use Meta SAM 3.1 for per-room object tracking and Meta Muse Spark for element mapping. Sample actual source stills at 1 fps for Muse context, alongside SAM candidates. If Meta Muse has an eligible provider failure, allow the optional fixed-host Baseten Muse Spark Open mapping fallback only when `BASETEN_API_KEY` is configured; never use it for SAM, setup, validation, or output-schema errors. Standard/non-training configuration only. Hosted video is uploaded for processing with the shortest supported expiry; local deletion must not claim to revoke a provider upload.
 - Use browser-side WebCodecs/Mediabunny for actual timestamped still extraction and bounded MOV-to-MP4 packet-copy remux before the hosted video route. Do not re-encode MOV on the phone. Failed normalization preserves the previous clip and blocks live upload.
+- Demo capture profile: kitchen up to 30 seconds with slow, evenly paced guidance through the existing kitchen checks; bathroom up to 30 seconds; bedroom/living area up to 30 seconds; hallway up to 15 seconds. The kitchen guide covers faucet/sink, cooking and counter/outlet surfaces, and detector cues; move the front-door and lock demonstration to the hallway guide. These are requested capture targets, not verified upload/server limits.
 
 ## Build gate and current constraint
 
-The brief makes one real, 30-second kitchen/bathroom clip the evaluation gate before a demo script or claims about mapping quality. Score faucet/fan/lock/detector tracking, element mapping, timestamp/still coverage, and normal-light misses. No video clip was attached to this request. Implement the capture and fail-closed review/export workflow now, but keep the SAM/Muse mapping unvalidated and do not claim the gate passed until the owner supplies the clip and the scorecard is completed.
+The evaluation gate is a room-based staged/mock-unit set using the capture profile above. Score room cue tracking, evidence selection and mapping against all 11 Form 1083 areas, timestamp/still identity and coverage, and normal-light misses. The hallway owns the front-door/lock cue; kitchen no longer needs to show it. Preserve the exact human-decision boundary. Keep the room-based quality unvalidated until current staged footage and live processing are scored; do not claim the gate passed until a reviewable scorecard is complete.
 
 ## Explicit scope boundaries
 

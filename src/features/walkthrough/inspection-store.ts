@@ -2,6 +2,7 @@
 
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import catalogJson from "../../data/catalog.demo.json";
+import { ELEMENT_VIDEO_DURATION_SECONDS, getRoomVideoDurationLimitSeconds } from "../../domain/video-duration";
 
 import {
   LEGACY_DEFAULT_ROOM_IDS,
@@ -506,7 +507,9 @@ function validateStoredClipIdentityEntry(
     typeof rawIdentity.durationSeconds !== "number" ||
     !Number.isFinite(rawIdentity.durationSeconds) ||
     rawIdentity.durationSeconds <= 0 ||
-    rawIdentity.durationSeconds > 30 ||
+    rawIdentity.durationSeconds > (kind === "room"
+      ? (typeof rawIdentity.roomId === "string" ? getRoomVideoDurationLimitSeconds(rawIdentity.roomId) ?? 0 : 0)
+      : ELEMENT_VIDEO_DURATION_SECONDS) ||
     typeof rawIdentity.sizeBytes !== "number" ||
     !Number.isSafeInteger(rawIdentity.sizeBytes) ||
     rawIdentity.sizeBytes <= 0 ||

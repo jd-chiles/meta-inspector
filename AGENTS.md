@@ -1,6 +1,6 @@
 # Project instructions
 
-Build the Habitability Walkthrough Companion from docs/sdd/features/habitability-walkthrough-mvp/. Read the request, requirements and design before changing behavior. Product context is in docs/PRODUCT_BRIEF.md and docs/DECISIONS.md.
+Build the Walkthrough Kit habitability companion from docs/sdd/features/habitability-walkthrough-mvp/. Read the request, requirements and design before changing behavior. Product context is in docs/PRODUCT_BRIEF.md and docs/DECISIONS.md.
 
 ## Workflow
 

@@ -205,9 +205,13 @@ describe("deriveTourNode", () => {
 
   it("lists every shot on the room's filming list for the visible checklist", () => {
     const kitchenShots = filmRoomShots("kitchen").join(" ").toLowerCase();
-    for (const shot of ["faucet", "sink", "lock", "detector"]) {
+    for (const shot of ["faucet", "sink", "fan", "detector"]) {
       expect(kitchenShots).toContain(shot);
     }
+    expect(kitchenShots).not.toContain("lock");
+    const hallwayShots = filmRoomShots("hallway").join(" ").toLowerCase();
+    expect(hallwayShots).toMatch(/front door/);
+    expect(hallwayShots).toMatch(/lock/);
     const bathroomShots = filmRoomShots("bathroom").join(" ").toLowerCase();
     for (const shot of ["faucet", "toilet", "fan", "detector"]) {
       expect(bathroomShots).toContain(shot);

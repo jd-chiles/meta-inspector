@@ -1,6 +1,6 @@
 # Architecture
 
-Move-in Ready is a Next.js application with a local-first mobile walkthrough and server-side provider routes. The implementation details and API shapes remain documented in the [video mapping contract](integration/FORM_1083_MAPPING.md), [analysis contract](integration/ANALYZE_CONTRACT.md), and feature [design](sdd/features/habitability-walkthrough-mvp/02-design.md).
+Walkthrough Kit is a Next.js application with a local-first mobile walkthrough and server-side provider routes. The implementation details and API shapes remain documented in the [video mapping contract](integration/FORM_1083_MAPPING.md), [analysis contract](integration/ANALYZE_CONTRACT.md), and feature [design](sdd/features/habitability-walkthrough-mvp/02-design.md).
 
 ## Walkthrough data flow
 

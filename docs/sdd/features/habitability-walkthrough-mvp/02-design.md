@@ -1,4 +1,4 @@
-# Design — Move-in Ready video capture, draft review, and sign-off
+# Design — Walkthrough Kit video capture, draft review, and sign-off
 
 ## Product surface
 
@@ -57,7 +57,7 @@ Use pdf-lib to generate three separate self-contained local PDFs. Client-file ex
 
 | Path | Responsibility |
 |---|---|
-| src/app/page.tsx | Compact Move-in Ready shell and server-computed analysis mode |
+| src/app/page.tsx | Compact Walkthrough Kit shell and server-computed analysis mode |
 | src/features/walkthrough/move-in-ready-flow.tsx | Capture/review/sign-off/profile states, focused review/list/note screens, intake gate, local recovery |
 | src/features/walkthrough/video-capture.tsx | Camera/file capture, preview, room prompts and replacement |
 | src/features/walkthrough/video-store.ts | Versioned IndexedDB clips/stills/session |
@@ -77,4 +77,4 @@ This scope change advances the local inspection schema and catalog. Old image-on
 
 ## Verification focus
 
-Test the exact three-step experience at 360px and desktop; the 360×640/390×844 Capture fit, HUD gate, recording replacement/deletion identity, duration/byte/container bounds, MOV packet-copy remux and failure preservation, actual extracted frame timestamp identity, server-side source hash/frame decode and 1-fps sample validation, map requests with identity/token only, rejection of client-supplied stills/video, one-time lease release/expiry/capacity behavior, strict SAM/Muse output, fallback only on eligible Meta Muse provider errors, no-evidence-to-D downgrade, race/cancel behavior, human-only result derivation, signed completion gate, landlord D-only export, JSON/PDF parity, escaping, offline persistence, and non-leakage of provider secrets/file IDs. Include independent schemaVersion-only and catalogVersion-only mismatches and missing-version responses, plus invalidation after either version changes; no stale attachment/decision/sign-off or deleted-session restoration is allowed. A real 30-second staged clip is required before claiming the SAM-to-Form mapping gate passed.
+Test the exact three-step experience at 360px and desktop; the 360×640/390×844 Capture fit, HUD gate, recording replacement/deletion identity, room-specific duration bounds (kitchen, bathroom, and bedroom/living 30s; hallway 15s), byte/container bounds, MOV packet-copy remux and failure preservation, actual extracted frame timestamp identity, server-side source hash/frame decode and bounded full-clip sample coverage, map requests with identity/token only, rejection of client-supplied stills/video, one-time lease release/expiry/capacity behavior, strict SAM/Muse output, fallback only on eligible Meta Muse provider errors, no-evidence-to-D downgrade, race/cancel behavior, human-only result derivation, signed completion gate, landlord D-only export, JSON/PDF parity, escaping, offline persistence, and non-leakage of provider secrets/file IDs. Include independent schemaVersion-only and catalogVersion-only mismatches and missing-version responses, plus invalidation after either version changes; no stale attachment/decision/sign-off or deleted-session restoration is allowed. A scored room-based staged set, including hallway front-door/lock footage, is required before claiming the SAM-to-Form mapping gate passed. The current synchronous path may time out on hosted analysis; document and verify the actual room profile before claiming the path is reliable.

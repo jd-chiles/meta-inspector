@@ -439,10 +439,13 @@ describe("SAM video upload validation", () => {
     expect(caught).toMatchObject({ status: 413, code: "VIDEO_TOO_LARGE" });
   });
 
-  it("rejects unsupported signatures, malformed atoms, and clips longer than 30 seconds", () => {
+  it("accepts clips up to 30 seconds while allowing tighter room-specific validation caps", () => {
     expect(() => validateVideoBytes(ascii("webm bytes"))).toThrow(/MP4 or MOV/);
     expect(() => validateVideoBytes(makeMp4().slice(0, 20))).toThrow(/incomplete|corrupt|truncated/i);
-    expect(() => validateVideoBytes(makeMp4(31_000, 2))).toThrow(/30 seconds/);
+    expect(validateVideoBytes(makeMp4(30_000, 2)).durationMs).toBe(30_000);
+    expect(() => validateVideoBytes(makeMp4(30_100, 2))).toThrow(/30 seconds/);
+    expect(() => validateVideoBytes(makeMp4(31_000, 2), 30_000)).toThrow(/30 seconds/);
+    expect(() => validateVideoBytes(makeMp4(16_000, 2), 15_000)).toThrow(/15 seconds/);
     expect(MAX_VIDEO_BYTES).toBe(60 * 1024 * 1024);
     expect(MAX_MULTIPART_BYTES).toBeGreaterThan(MAX_VIDEO_BYTES);
   });
@@ -472,8 +475,10 @@ describe("POST /api/video/segment", () => {
   it("keeps PDF-supported visual concepts fixed and within the per-room candidate bound", () => {
     expect(Object.values(VIDEO_PROMPTS).every((prompts) => prompts.length <= 6)).toBe(true);
     expect(VIDEO_PROMPTS.kitchen).toEqual(expect.arrayContaining([
-      { elementId: "demo-item-10", concept: "refuse bin" },
+      { elementId: "demo-item-10", concept: "kitchen stove and refuse bin" },
       { elementId: "demo-smoke-co", concept: "carbon monoxide detector" },
+      { elementId: "demo-interior-air", concept: "kitchen ventilation fan" },
+      { elementId: "demo-item-05", concept: "wall surface" },
     ]));
     expect(VIDEO_PROMPTS.bathroom).toContainEqual({ elementId: "demo-smoke-co", concept: "carbon monoxide detector" });
     expect(VIDEO_PROMPTS.bedroom).toEqual(expect.arrayContaining([
@@ -633,10 +638,13 @@ describe("POST /api/video/segment", () => {
     retry.complete();
   });
 
-  it("creates a bounded one-frame-per-second source sample schedule", () => {
+  it("creates a bounded source sample schedule across clips up to 30 seconds", () => {
     expect(makeMuseSampleTimestamps(1_000)).toEqual([500]);
-    expect(makeMuseSampleTimestamps(2_500)).toEqual([500, 1_500, 2_250]);
+    expect(makeMuseSampleTimestamps(2_500)).toEqual([416, 1_249, 2_083]);
     expect(makeMuseSampleTimestamps(30_000)).toHaveLength(30);
+    const kitchenSamples = makeMuseSampleTimestamps(30_000);
+    expect(kitchenSamples).toHaveLength(30);
+    expect(kitchenSamples.at(-1)).toBeLessThan(30_000);
     expect(makeMuseSampleTimestamps(30_001)).toEqual([]);
   });
 

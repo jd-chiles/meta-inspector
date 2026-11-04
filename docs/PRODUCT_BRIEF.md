@@ -1,10 +1,10 @@
-# Product brief: Move-in Ready
+# Product brief: Walkthrough Kit
 
-Updated October 29, 2026 from the owner-provided product brief and mobile concept rendering.
+Updated November 4, 2026 from the owner-provided product brief and mobile concept rendering, with the Walkthrough Kit brand and room-specific video capture profile.
 
 ## Product
 
-Move-in Ready is a mobile-first Habitability Walkthrough Companion for housing navigators and case managers. It guides an evaluator through a staged unit video walkthrough, prepares evidence-linked draft observations for review, records the evaluator's own decisions, and creates local export files for the existing manual workflow.
+Walkthrough Kit is a mobile-first Habitability Walkthrough Companion for housing navigators and case managers. It guides an evaluator through a staged unit video walkthrough, prepares evidence-linked draft observations for review, records the evaluator's own decisions, and creates local export files for the existing manual workflow.
 
 ## Problem framing
 
@@ -23,7 +23,7 @@ The form in scope is LAHSA Habitability Standards Inspection Form 1083, FY 2022â
 ## Main workflow
 
 19: 1. Start a mock-unit inspection using a pseudonym and select funding type. Housing Authority or voucher selections are routed to an HQS-required notice and cannot be completed as Form 1083 in this app; HUD-funded CoC/ESG selections remain eligible for Form 1083 exports.
-2. Record or upload a short clip for kitchen, bathroom, bedroom/living area, and hallway. Prompts include operating the faucet, fan, door lock, and visible detector. Save each clip locally and preview, replace, or remove it.
+2. Record or upload a clip for each selected room: kitchen, bathroom, bedroom/living room up to 30 seconds, and hallway up to 15 seconds. Kitchen cues move slowly through fixtures and detectors; the front door and lock are covered in the hallway clip. Save each clip locally and preview, replace, or remove it.
 3. On an explicit connected action, submit a supported clip for server-side Meta SAM 3.1 segmentation and Meta Muse Spark mapping. If Meta Muse is unavailable and a Baseten key is configured, use Baseten-hosted Muse Spark Open for mapping fallback. Muse receives the SAM candidate stills and one original source still sampled near the center of each second, at 1 frame per second. Review timestamped evidence and unreviewed A/D suggestions across all 11 Form 1083 elements.
 4. The evaluator separately records A, D, or needs-human-check, corrects any suggestion, and completes required correction/reinspection fields. AI output never sets the inspection result.
 5. Sign and attest as the evaluator (and capture agency leadership sign-off when required). Generate three local PDFs: client-file copy, deficient-item-only landlord fix list, and a filled, flattened copy of the unchanged official LAHSA FY 2022â€“23 Form 1083 with appended evidence/continuation pages, plus JSON for the HMIS-ready record. The demo leaves participant/HMIS identity and unit address blank, so its form is not case-ready. Files are manually handled outside this app; provider acceptance is unverified and the app does not submit to HMIS.
@@ -41,7 +41,7 @@ The Form 1083 export requires evaluator agency name and landlord discussion YES/
 
 ## Technical and operational limits
 
-- Primary input is a single short video per room, captured in or uploaded from a mobile browser. MP4 is required by the Meta Files API. Compatible MOV files are normalized locally to MP4 with bounded packet-copy remuxing; the video and audio packets are copied without re-encoding, and the normalized bytes are then revalidated and used for preview, still extraction, hashing, storage, and any explicit upload. Unsupported MOV codecs fail with a clear message and keep the previous clip.
+- Primary input is one video per room, captured in or uploaded from a mobile browser. Room caps are kitchen, bathroom, and bedroom/living room 30 seconds, and hallway 15 seconds. MP4 is required by the Meta Files API. Compatible MOV files are normalized locally to MP4 with bounded packet-copy remuxing; the video and audio packets are copied without re-encoding, and the normalized bytes are then revalidated and used for preview, still extraction, hashing, storage, and any explicit upload. Unsupported MOV codecs fail with a clear message and keep the previous clip.
 - Browser capture, room prompts, previews, derived stills, worker decisions, and signatures are local-first in versioned IndexedDB. The service worker caches only the app shell.
 - Meta and optional Baseten credentials and raw provider responses remain server-side. The original room video is sent to Meta for SAM; SAM candidate stills plus 1-fps context stills may go to Meta Muse or, when its endpoint is unavailable and the optional fallback key is configured, Baseten Muse Spark Open. Provider files are temporary with expiry; deleting local data does not claim to delete provider-side copies or downloaded exports. Provider pricing and retention terms can change, so Profile points staff to current provider terms/dashboard rather than promising a fixed cost.
 - Fixture examples are explicitly synthetic. A fixture pass is never described as a live provider result.
@@ -49,7 +49,7 @@ The Form 1083 export requires evaluator agency name and landlord discussion YES/
 
 ## Evaluation gate
 
-Before claiming useful segmentation/mapping or preparing a demonstration script, evaluate one real staged 30-second kitchen/bathroom clip. Score faucet/fan/lock/detector track identity, Form 1083 element mapping, timestamp/still coverage, and misses in normal indoor lighting. Record misses and decisions before revising prompts. The clip was not included with the supplied brief, so this gate remains open until it is provided.
+Before claiming useful segmentation/mapping or preparing a demonstration script, evaluate the current room profile with rights-cleared staged footage. Score faucet/fan/lock/detector track identity, Form 1083 element mapping across all 11 areas, timestamp/still coverage, and misses in normal indoor lighting. Record misses and decisions before revising prompts. The gate remains open until the current footage and analysis are scored.
 
 ## Success measures
 

@@ -61,7 +61,16 @@ describe("stored room video validation", () => {
   it("rejects persisted clips outside the capture resource limits or with inconsistent blob metadata", () => {
     expect(validateStoredVideoClip(row({ sizeBytes: VIDEO_MAX_BYTES + 1, video: sizedBlob(VIDEO_MAX_BYTES + 1) }), { sessionId: SESSION_ID, roomId: ROOM_ID }).ok).toBe(false);
     expect(validateStoredVideoClip(row({ sizeBytes: 3 }), { sessionId: SESSION_ID, roomId: ROOM_ID }).ok).toBe(false);
-    expect(validateStoredVideoClip(row({ durationSeconds: 31 }), { sessionId: SESSION_ID, roomId: ROOM_ID }).ok).toBe(false);
+    expect(validateStoredVideoClip(row({ durationSeconds: 30 }), { sessionId: SESSION_ID, roomId: ROOM_ID }).ok).toBe(true);
+    expect(validateStoredVideoClip(row({ durationSeconds: 30.1 }), { sessionId: SESSION_ID, roomId: ROOM_ID }).ok).toBe(false);
+    const bathroomId = makeVideoClipId(SESSION_ID, "bathroom");
+    const bathroomRow = (durationSeconds: number) => row({ id: bathroomId, roomId: "bathroom", roomLabel: "Bathroom", durationSeconds });
+    expect(validateStoredVideoClip(bathroomRow(30), { sessionId: SESSION_ID, roomId: "bathroom" }).ok).toBe(true);
+    expect(validateStoredVideoClip(bathroomRow(31), { sessionId: SESSION_ID, roomId: "bathroom" }).ok).toBe(false);
+    const hallwayId = makeVideoClipId(SESSION_ID, "hallway");
+    const hallwayRow = (durationSeconds: number) => row({ id: hallwayId, roomId: "hallway", roomLabel: "Hallway", durationSeconds });
+    expect(validateStoredVideoClip(hallwayRow(15), { sessionId: SESSION_ID, roomId: "hallway" }).ok).toBe(true);
+    expect(validateStoredVideoClip(hallwayRow(15.1), { sessionId: SESSION_ID, roomId: "hallway" }).ok).toBe(false);
     expect(validateStoredVideoClip(row({ width: 4096, height: 4096 }), { sessionId: SESSION_ID, roomId: ROOM_ID }).ok).toBe(false);
     expect(validateStoredVideoClip(row({ stills: [still(1, new Blob(["late frame"], { type: "image/jpeg" }))] }), { sessionId: SESSION_ID, roomId: ROOM_ID }).ok).toBe(false);
     expect(validateStoredVideoClip(row({ stills: [still(0.5, sizedBlob(512 * 1024 + 1))] }), { sessionId: SESSION_ID, roomId: ROOM_ID }).ok).toBe(false);

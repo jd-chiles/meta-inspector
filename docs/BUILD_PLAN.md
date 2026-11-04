@@ -1,4 +1,4 @@
-# Build plan — Move-in Ready
+# Build plan — Walkthrough Kit
 
 For the current ordered path from implementation to a limited production MVP,
 see [`PRODUCTION_MVP_ROADMAP.md`](PRODUCTION_MVP_ROADMAP.md). The roadmap

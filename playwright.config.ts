@@ -1,5 +1,10 @@
 import { defineConfig } from "@playwright/test";
 
+const requestedPort = Number(process.env.PLAYWRIGHT_PORT);
+const testPort = Number.isInteger(requestedPort) && requestedPort >= 1024 && requestedPort <= 65_535
+  ? String(requestedPort)
+  : "3101";
+
 // Fixture-only browser acceptance: the production server under test boots with
 // APP_ANALYSIS_MODE=fixture and no Meta key, so no step can reach live
 // inference. Use a dedicated loopback port so Playwright never reuses the
@@ -9,7 +14,7 @@ export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 60_000,
   use: {
-    baseURL: "http://127.0.0.1:3101",
+    baseURL: `http://127.0.0.1:${testPort}`,
     // The upload/decode specs need real H.264 decoding, which the headless
     // shell lacks. Default to the full Playwright-managed Chromium build;
     // an explicit executable path still wins when provided.
@@ -18,8 +23,8 @@ export default defineConfig({
       : { launchOptions: { channel: "chromium" } }),
   },
   webServer: {
-    command: "npm run start -- --port 3101 -H 127.0.0.1",
-    url: "http://127.0.0.1:3101",
+    command: `npm run start -- --port ${testPort} -H 127.0.0.1`,
+    url: `http://127.0.0.1:${testPort}`,
     reuseExistingServer: false,
     timeout: 120_000,
     env: {

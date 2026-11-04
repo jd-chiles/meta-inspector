@@ -4,7 +4,7 @@
 
 For a household waiting a long time for housing assistance, receiving a voucher is not the end of the search. The household and case manager still have to find a suitable apartment and complete the work needed to document its condition. Visits to units that later fail the applicable requirements can consume scarce time. Walkthroughs also ask busy staff—some with limited inspection experience—to gather evidence and make careful, accountable judgments.
 
-Move-in Ready explores how a mobile companion can support that job. It guides a room-by-room video walkthrough, links draft observations to timestamped evidence, and prepares local files for the existing manual process. The evaluator remains responsible for decisions and sign-off.
+Walkthrough Kit explores how a mobile companion can support that job. It guides a room-by-room video walkthrough, links draft observations to timestamped evidence, and prepares local files for the existing manual process. The evaluator remains responsible for decisions and sign-off.
 
 ## Why Meta tools
 

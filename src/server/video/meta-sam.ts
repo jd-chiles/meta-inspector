@@ -26,6 +26,7 @@ import {
 } from "../../domain/move-in-ready";
 import { MOVE_IN_READY_ELEMENT_CRITERIA } from "../../domain/element-criteria";
 import { VIDEO_SAMPLE_TIMESTAMP_TOLERANCE_MS } from "../../domain/video-format";
+import { getRoomVideoDurationLimitSeconds, MAX_ROOM_VIDEO_DURATION_SECONDS } from "../../domain/video-duration";
 import { WALKTHROUGH_CLIENT_HEADER, WALKTHROUGH_CLIENT_ID } from "../../domain/walkthrough-client";
 import { VideoSegmentError } from "./errors";
 import {
@@ -98,9 +99,9 @@ export interface FixedVideoPrompt {
 export const VIDEO_PROMPTS: Readonly<Record<MoveInReadyRoomType, readonly FixedVideoPrompt[]>> = {
   kitchen: [
     { elementId: "demo-water-supply", concept: "water faucet" },
-    { elementId: "demo-item-10", concept: "kitchen stove" },
-    { elementId: "demo-item-10", concept: "refuse bin" },
+    { elementId: "demo-item-10", concept: "kitchen stove and refuse bin" },
     { elementId: "demo-smoke-co", concept: "carbon monoxide detector" },
+    { elementId: "demo-interior-air", concept: "kitchen ventilation fan" },
     { elementId: "demo-item-05", concept: "wall surface" },
     { elementId: "demo-item-11", concept: "countertop" },
   ],
@@ -529,11 +530,13 @@ export function videoPromptsForRoom(room: VideoRoom): readonly FixedVideoPrompt[
 
 /** One decoded source frame near the center of each second for Muse context. */
 export function makeMuseSampleTimestamps(durationMs: number): number[] {
-  if (!Number.isSafeInteger(durationMs) || durationMs < 1 || durationMs > 30_000) return [];
+  if (!Number.isSafeInteger(durationMs) || durationMs < 1 || durationMs > MAX_ROOM_VIDEO_DURATION_SECONDS * 1_000) return [];
+  const sampleCount = Math.min(30, Math.ceil(durationMs / 1_000));
   const timestamps: number[] = [];
-  for (let startMs = 0; startMs < durationMs; startMs += 1_000) {
-    const intervalMs = Math.min(1_000, durationMs - startMs);
-    timestamps.push(startMs + Math.floor(intervalMs / 2));
+  for (let index = 0; index < sampleCount; index += 1) {
+    const startMs = Math.floor((index * durationMs) / sampleCount);
+    const endMs = Math.floor(((index + 1) * durationMs) / sampleCount);
+    timestamps.push(startMs + Math.floor((endMs - startMs) / 2));
   }
   return timestamps;
 }
@@ -564,7 +567,11 @@ async function readSegmentForm(form: FormData): Promise<ParsedUpload> {
     throw new VideoSegmentError(422, "INVALID_VIDEO", "Choose a video file with content.");
   }
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const video = validateVideoBytes(bytes);
+  const roomDurationLimitSeconds = getRoomVideoDurationLimitSeconds(room);
+  if (roomDurationLimitSeconds === null) {
+    throw new VideoSegmentError(400, "INVALID_REQUEST", "Choose a supported walkthrough room.");
+  }
+  const video = validateVideoBytes(bytes, roomDurationLimitSeconds * 1_000);
   const sourceVideoSha256 = createHash("sha256").update(bytes).digest("hex");
   if (sourceVideoSha256 !== identity.expectedVideoSha256) {
     throw new VideoSegmentError(409, "STALE_REQUEST", "This video changed before analysis. Reload it and try again.");
@@ -627,7 +634,9 @@ function verifyCandidateToken(token: string, apiKey: string): CandidateTokenPayl
     parsed.expiresAt <= Date.now() || parsed.expiresAt > Date.now() + MAPPING_TOKEN_TTL_MS + 5_000 ||
     typeof parsed.room !== "string" || !isMoveInReadyRoomId(parsed.room) ||
     (parsed.container !== "mp4" && parsed.container !== "mov") ||
-    typeof durationMs !== "number" || !Number.isSafeInteger(durationMs) || durationMs < 1 || durationMs > 30_000 ||
+    typeof durationMs !== "number" || !Number.isSafeInteger(durationMs) || durationMs < 1 ||
+    getRoomVideoDurationLimitSeconds(parsed.room) === null ||
+    durationMs > (getRoomVideoDurationLimitSeconds(parsed.room) ?? 0) * 1_000 ||
     !Array.isArray(sampleTimestampsMs) ||
     sampleTimestampsMs.length !== expectedSampleTimestampsMs.length ||
     sampleTimestampsMs.some((value, index) => value !== expectedSampleTimestampsMs[index]) ||
@@ -670,6 +679,7 @@ function verifyCandidateToken(token: string, apiKey: string): CandidateTokenPayl
       !isMoveInReadyElementId(raw.elementId) || typeof raw.concept !== "string" || raw.concept.length > 80 ||
       !Number.isSafeInteger(evidence.frameIndex) || (evidence.frameIndex as number) < 0 ||
       !Number.isSafeInteger(evidence.timestampMs) || (evidence.timestampMs as number) < 0 ||
+      (evidence.timestampMs as number) >= (durationMs as number) ||
       !Number.isSafeInteger(evidence.objectOrdinal) || (evidence.objectOrdinal as number) < 0 ||
       !exactKeys(box, ["left", "top", "right", "bottom"]) ||
       ![box.left, box.top, box.right, box.bottom].every((number) =>

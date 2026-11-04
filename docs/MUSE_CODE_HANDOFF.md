@@ -1,51 +1,74 @@
-# Muse Code handoff — production MVP sprint
+# Muse Code handoff — Walkthrough Kit production MVP
 
 ## Handoff status
 
-The owner asked on 2026-10-31 for Muse Code to try to finish the sprint toward a production MVP. No Muse Code dispatcher/connector is available in this Codex session, so this document is a paste-ready handoff for the owner to open in Muse Code. It does not claim Muse Code has started or that any SDD task has passed.
+Prepared November 4, 2026 at the owner's request. This is a paste-ready handoff; it does not claim Muse Code has started or that any SDD task has been accepted.
 
-Repository: `/home/hermes/.codex/worktrees/11c3/meta-inspect`
+- **Repository:** `https://github.com/jd-chiles/meta-inspector`
+- **Working checkout:** `/home/hermes/.codex/worktrees/404a/meta-inspect`
+- **Branch:** `codex/docs-and-matching-quality`
+- **Product brand:** Walkthrough Kit
+- **Intended domain:** `walkthroughkit.com` is being purchased; do not assume it is registered or deployed.
 
-The shared checkout is heavily modified and uncommitted, and `git branch --show-current` returned no branch name. Do not reset, clean, checkout over, or rebase this worktree. Inspect `git status` and diffs first. Source and tests for most of the active task graph are already present; verify and repair them instead of rebuilding the app from scratch. All active tasks `TASK-103` through `TASK-113` are still unchecked in the authored plan.
-
-As of this handoff, no app dev server or Tailscale daemon is running. The app is not currently phone-accessible, and there is no production deployment. Start a local preview only if needed and keep it bound to the intended interface.
+Use the pushed branch and its final commit as the handoff baseline. Preserve the existing SDD ledger and all historical evaluation records. Muse Code is authorized by the project instructions to continue the remaining production-MVP work; this handoff is not an SDD approval, task acceptance, or native state transition.
 
 ## Read first
 
 1. `AGENTS.md`
 2. `docs/PRODUCTION_MVP_ROADMAP.md`
-3. `docs/PRODUCT_BRIEF.md` and `docs/DECISIONS.md`
-4. `docs/sdd/features/habitability-walkthrough-mvp/00-request.md` through `04-verification.md`
+3. `README.md`, `docs/PRODUCT_BRIEF.md`, and `docs/DECISIONS.md`
+4. `docs/sdd/features/habitability-walkthrough-mvp/00-request.md` through `04-verification.md`, plus `tasks.json`
 5. `docs/evaluation/video-clip-gate.md`, `docs/REVIEW_AND_CI.md`, and `design-qa.md`
 
-Follow `docs/sdd/features/habitability-walkthrough-mvp/03-plan.md` and `tasks.json` in dependency order. Keep requirement/task mappings current. The first implementation gate is TASK-113: validate the active graph and focused validator tests before accepting TASK-103–TASK-106. The main code areas already present include `src/features/walkthrough/`, `src/domain/`, `src/app/api/video/`, `src/server/video/`, `src/export/`, and their unit/browser tests.
+Use the current main checkout, not an older handoff path. Inspect branch/status and diffs before edits. Keep requirement/task mappings current. Start by confirming the active SDD graph and the exact handoff commit; do not rebuild completed work from scratch.
 
-## Latest real clip attempt
+## Implemented in the handoff branch
 
-The owner confirmed both clips were from a staged/mock unit and explicitly authorized their use with provider APIs. No raw clips or credentials belong in the repository.
+- Room-specific capture and validation limits: kitchen 30 seconds, bathroom 30, bedroom/living 30, hallway 15. The front door and lock are part of the hallway walkthrough. Element-only clips remain capped at 30 seconds.
+- Room duration policy is shared across browser capture, stored clips, analysis identity, server MP4 validation, signed mapping-token checks, response timestamp validation, and evidence-still extraction.
+- Kitchen voice guidance is spaced through the longer clip; hallway cues are scheduled early enough to finish before the 15-second recording stops.
+- Kitchen instructions cover faucet flow/drainage, sink/counters/outlets, the running fan, and smoke/CO detector. Front door/lock instructions and SAM prompts are in the hallway. The kitchen SAM prompt set still covers all 11 modeled elements by combining stove/refuse as one food-preparation prompt while retaining wall-surface, fan, and countertop prompts.
+- The review UI displays all linked source stills, and the mapper receives criteria/manual-check context for the 11 Form 1083 areas. This is implementation work, not evidence of improved accuracy; the authored clip gate remains required.
+- Active README, product brief, hackathon narrative, roadmap, and SDD docs use **Walkthrough Kit**. The GitHub slug remains `meta-inspector`; the new domain is not yet verified live.
+- Playwright can use an alternate port through `PLAYWRIGHT_PORT` to avoid interrupting an existing local preview.
 
-Metadata-stripped MP4 remuxes from the attempted run are still present on this
-host at `/tmp/kitchen-clean.mp4` and `/tmp/bathroom-clean.mp4` (about 43.3 MB
-and 15.7 MB). These are temporary files, not repository fixtures; verify they
-still exist before use. The owner's consent covers these clips, but any further
-provider request must be a fresh explicit analysis action after a code change,
-not a background or automatic retry.
+## Check results
 
-- Kitchen: live segment request returned HTTP 504 after approximately 210.9 seconds. No draft was substituted.
-- Bathroom: the segment endpoint returned HTTP 200 after approximately 92.6 seconds. The browser request was then canceled/aborted before the result was saved. The app did not perform Muse mapping and no review proposal or scorecard result was produced.
-- No automatic retry was made. Do not claim successful mapping or provider quality from the segment response alone.
-- Current footage is two room clips totaling approximately 32.8 seconds, while the authored evaluation gate requires one clip of no more than 30 seconds showing faucet, fan, lock, and detector. The observed frames show kitchen/bath fixtures, but do not establish lock/detector coverage. Keep the scorecard open and surface this scope/input mismatch rather than changing the gate silently.
+Fill this section from the final run on the pushed handoff commit. Never infer a check from an earlier snapshot.
 
-## Work order
+- `node scripts/verify-sdd.mjs`: passed on the current tree — 15 requirements, 11 active acyclic tasks, 7 named checks. This validates SDD structure only.
+- `npm run typecheck`: passed.
+- `npm run lint`: passed with three existing React hook warnings in `src/features/walkthrough/move-in-ready-flow.tsx` (lines 834, 943, 1015).
+- `npm run test:unit`: 475 passed, 3 skipped, 38 files passed.
+- `npm run build`: passed on the current tree; Next.js compiled, type-checked, generated all 11 static pages, and produced the route bundle. It emitted the same three React hook warnings noted above.
+- `PLAYWRIGHT_PORT=3111 npm run test:e2e`: passed, 43 tests in 3.0 minutes. The default port 3101 was already held by another preview, which was left running. Playwright's build emitted the three existing React hook warnings; browser tests used fixture data and made no live provider call.
+- `npm run test:live`: not run. No live provider quality claim is made.
 
-Use the ordered slices and exit criteria in `docs/PRODUCTION_MVP_ROADMAP.md`. Start with the current-tree baseline, then finish and verify the local worker walkthrough, repair the slow/cancelled video path, complete the real evidence evaluation, verify form/export acceptance, test physical phones, and close deployment/review gates. Keep the MVP local/manual for HMIS and LAHSA; there is no direct submission feature.
+## Critical remaining risk: hosted analysis latency
 
-Do not initiate further billed/live calls automatically. After a code fix, use local mocked tests first. Any new provider attempt must be a fresh explicit analysis action using the already-authorized staged/mock-unit footage and must be reported separately from fixture and CI checks. Do not use real participant/HMIS data.
+The browser and server now cap every room clip at 30 seconds or less, but the analysis route remains synchronous. A historical kitchen segment request returned HTTP 504 after about 211 seconds; a bathroom segmentation returned HTTP 200 after about 93 seconds but its browser request was canceled before saving. Muse mapping and quality scoring did not complete in that historical run. The `/api/video/segment` route's Next.js `maxDuration` is 160 seconds, and the hosted ingress may impose a separate deadline. Shortening kitchen capture to 30 seconds reduces input duration but does not prove hosted analysis completes within the request deadline.
+
+Do not auto-retry or make another billed provider request in the background. After local checks, ask the owner for a fresh, explicit live-analysis action using rights-cleared staged/mock-unit footage. Measure segmentation and mapping separately. If a 30-second room request exceeds the actual hosting deadline, propose a durable asynchronous job design and its SDD scope before changing architecture; do not merely raise a timeout beyond the platform limit.
+
+## Remaining production-MVP work
+
+1. Re-prove the revised kitchen, bathroom, bedroom/living, and hallway profile with staged clips. Include front-door/lock footage in hallway. Score timestamp/source-still identity, all 11 area mappings, false matches, misses, and normal indoor lighting. Keep the prior runs historical and separate.
+2. Determine whether a 30-second room clip can complete within the real hosted deadline. If not, design and scope durable asynchronous processing with cancellation, retry, replacement, deletion, and stale-result identity guarantees.
+3. Run the full fixture-only browser suite on the exact revision; record command, revision, result, skips, and remaining warnings.
+4. Complete physical iPhone Safari and Android Chrome LTE runs, including upload/MOV handling, offline recovery, replace/remove, review/sign-off, and opening all four downloaded files.
+5. Obtain receiver confirmation of the applicable Form 1083 version and documented manual-packet acceptance. Preserve uncertainty until a recipient reviewer actually responds.
+6. Close operational controls: current host configuration and cost controls, access/authentication, secrets, provider retention disclosures, deletion limits, monitoring, contact/escalation, provenance, and rollback.
+7. Obtain independent spec, plan, code, security, QA, and evidence-gate reviews. Use native SDD tools for any approvals/evidence; never hand-edit `.sdd/state` or `.sdd/evidence`.
+8. Keep release **Not ready** until the video gate, both phones, recipient acceptance, operational controls, reviews, and SDD evidence are complete.
+
+## Constraints
+
+- Mock-unit data only; never use tenant, HMIS, or real case data.
+- AI is an unreviewed observation. Human checks, decisions, signatures, and the final inspection result remain evaluator-only.
+- Keep provider keys and request bodies server-side. Local deletion must not claim provider-side deletion.
+- Do not claim measured time savings, avoided visits, accuracy, recipient acceptance, or production readiness without evidence.
+- Do not publish/deploy/promote a release as part of local verification. The current dirty/branch state should first be resolved and pushed as a reviewable change; release promotion stays separate.
 
 ## Paste-ready kickoff prompt
 
-> Finish the owner-authorized production-MVP sprint in `/home/hermes/.codex/worktrees/11c3/meta-inspect`. Read `AGENTS.md`, `docs/PRODUCTION_MVP_ROADMAP.md`, `docs/PRODUCT_BRIEF.md`, `docs/DECISIONS.md`, and the feature SDD request through verification plan before changing behavior. The checkout is shared, heavily dirty, and currently has no branch name; inspect status/diffs and preserve every existing change. Work through active tasks in dependency order, beginning with TASK-113 and its docs/focused-unit acceptance; most implementation files already exist, so audit and repair rather than scaffold again. Use mock-unit data only. Preserve exact media/session/schema/catalog identity across async work; AI text stays an unreviewed proposal, evaluator decisions/signature remain human-only, and exports remain local/manual. Latest real clip attempt: kitchen timed out with 504 at ~210.9s; bathroom segment returned 200 at ~92.6s but the browser request was canceled before saving; Muse mapping and quality scoring did not occur. Do not auto-retry or claim quality. Keep `.sdd/state` and `.sdd/evidence` untouched; do not fabricate task approvals, review, CI, provider, recipient, device, or release results. Run the configured checks on the current tree and report exact commands/outcomes. Do not publish or deploy; keep release Not ready until all roadmap gates are actually satisfied.
-
-## Completion report expected
-
-Return changed files, completed active task IDs with evidence, exact checks and results, remaining blockers, and any owner decision needed. Leave native SDD approval/evidence untouched unless its supported tools actually record it. Keep release status Not ready while any required quality, device, form/recipient, deployment, review, or native-evidence gate remains open.
+> Continue the owner-authorized Walkthrough Kit production-MVP sprint from the current `codex/docs-and-matching-quality` branch in `/home/hermes/.codex/worktrees/404a/meta-inspect`. Read `AGENTS.md`, `docs/PRODUCTION_MVP_ROADMAP.md`, `docs/PRODUCT_BRIEF.md`, `docs/DECISIONS.md`, and the feature SDD request through verification before editing. Preserve SDD state/evidence and historical evaluations. The current branch implements kitchen/bathroom/bedroom/living up to 30s and hallway up to 15s, slower kitchen cues, and front door/lock in hallway across capture, validation, storage, analysis timestamps, and still extraction. Re-run configured checks on the branch tip. Hosted analysis quality and latency are unproven: a historical kitchen request timed out at about 211s and the endpoint is synchronous with a 160s Next route budget. Do not auto-call providers; make another live run only after an explicit owner action. Complete current-profile staged-video scoring, physical-phone runs, recipient packet acceptance, operational controls, independent reviews, and native SDD evidence. Use mock-unit data only, keep human decisions/sign-off and local/manual exports, and keep release Not ready until every gate closes.

@@ -66,6 +66,7 @@ import {
   type VideoAnalysisIdentity,
 } from "../../domain/move-in-ready";
 import { MOVE_IN_READY_ELEMENT_CRITERIA } from "../../domain/element-criteria";
+import { getRoomVideoDurationLimitSeconds } from "../../domain/video-duration";
 import { WALKTHROUGH_CLIENT_HEADER, WALKTHROUGH_CLIENT_ID } from "../../domain/walkthrough-client";
 import {
   buildHmisReadyJson,
@@ -1043,11 +1044,16 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
   useEffect(() => {
     if (!recordingInProgress) return;
     const cues = filmingScriptForRoom(selectedRoomId);
+    const maxDurationMs = (getRoomVideoDurationLimitSeconds(selectedRoomId) ?? 30) * 1_000;
+    // Finish spoken cues well before short hallway recordings stop, while
+    // spreading kitchen guidance across most of its longer capture window.
+    const cueWindowFraction = maxDurationMs <= 15_000 ? 0.66 : 0.8;
+    const cueSpacingMs = cues.length > 1 ? Math.floor((maxDurationMs * cueWindowFraction) / (cues.length - 1)) : 0;
     const timers = cues.map((cue, index) =>
       window.setTimeout(() => {
         setRecordingCueIndex(index);
         if (assistantOpen && voiceOn) speakText(cue);
-      }, 800 + index * 7000));
+      }, 800 + index * cueSpacingMs));
     return () => {
       timers.forEach((timer) => window.clearTimeout(timer));
       setRecordingCueIndex(-1);
@@ -1547,7 +1553,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       });
       const segmentJson: unknown = await segmentResponse.json().catch(() => null);
       if (!segmentResponse.ok) throw new Error(readSafeApiError(segmentJson, segmentResponse.status));
-      const segmented = parseSegmentResponse(segmentJson, requestIdentity, roomId);
+      const segmented = parseSegmentResponse(segmentJson, requestIdentity, roomId, clip.durationSeconds);
       candidateTokenToRelease = segmented.candidateToken;
       pendingCancelRef.current.set(requestIdentity, segmented.candidateToken ?? null);
       if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion)) return;
@@ -1555,7 +1561,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       setAnalysisStatus("mapping");
       const uniqueTimes = [...new Set(segmented.candidates.map((candidate) => candidate.evidence.timestampMs))];
       if (uniqueTimes.length > MAX_CANDIDATE_STILLS) throw new Error("This analysis returned more still moments than the app can safely map at once.");
-      const stillTimestamps = makeRoomEvidenceTimestamps(clip.durationSeconds, uniqueTimes);
+      const stillTimestamps = makeRoomEvidenceTimestamps(roomId, clip.durationSeconds, uniqueTimes);
       const extracted: VideoStill[] = [];
       for (let offset = 0; offset < stillTimestamps.length; offset += MAX_STILLS_PER_DECODE) {
         const batch = await extractVideoStills(
@@ -1563,7 +1569,7 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
           stillTimestamps
             .slice(offset, offset + MAX_STILLS_PER_DECODE)
             .map((timestampMs) => timestampMs / 1000),
-          { maxDurationSeconds: 30 },
+          { maxDurationSeconds: getRoomVideoDurationLimitSeconds(roomId) ?? 30 },
         );
         extracted.push(...batch);
         if (!analysisIsCurrent(generation, controller, expectedSessionId, roomId, identity.videoId, identity.videoRevision, identity.videoHash, requestIdentity.schemaVersion, requestIdentity.catalogVersion)) return;
@@ -3670,7 +3676,7 @@ async function cancelPendingVideoMapping(identity: VideoIdentityFields, candidat
   }
 }
 
-function parseSegmentResponse(value: unknown, expected: VideoIdentityFields, room: MoveInReadyRoomId): ParsedSegmentResponse {
+function parseSegmentResponse(value: unknown, expected: VideoIdentityFields, room: MoveInReadyRoomId, durationSeconds: number): ParsedSegmentResponse {
   const root = recordObject(value, "The segmentation response was invalid.");
   if (root.ok !== true || root.stage !== "segmented" || root.humanReviewRequired !== true || root.conditionAssessment !== "not_assessed") throw new Error("The segmentation response did not match the expected review-only contract.");
   const models = recordObject(root.models, "The model identity was invalid.");
@@ -3680,9 +3686,13 @@ function parseSegmentResponse(value: unknown, expected: VideoIdentityFields, roo
   const media = recordObject(root.media, "The segmentation media reference was invalid.");
   if (!isExpectedMp4Media(media, expected.expectedVideoSha256)) throw new Error("The segmentation response did not match the selected MP4 bytes.");
   const hasMappingToken = typeof root.candidateToken === "string" && root.candidateToken.length >= 16 && root.candidateToken.length <= 48 * 1024;
+  const durationMs = Math.floor(durationSeconds * 1_000);
+  if (!Number.isSafeInteger(durationMs) || durationMs < 1 || durationMs > (getRoomVideoDurationLimitSeconds(room) ?? 0) * 1_000) {
+    throw new Error("The selected room clip duration is outside its supported range.");
+  }
   if (!Array.isArray(root.sampleTimestampsMs) || root.sampleTimestampsMs.length < 1 || root.sampleTimestampsMs.length > 30 ||
-      root.sampleTimestampsMs.some((timestamp, index) => typeof timestamp !== "number" || !Number.isSafeInteger(timestamp) || timestamp < 0 || timestamp >= 30_000 || (index > 0 && timestamp <= (root.sampleTimestampsMs as number[])[index - 1]!))) {
-    throw new Error("The segmentation response did not include a valid one-frame-per-second Muse sample schedule.");
+      root.sampleTimestampsMs.some((timestamp, index) => typeof timestamp !== "number" || !Number.isSafeInteger(timestamp) || timestamp < 0 || timestamp >= durationMs || (index > 0 && timestamp <= (root.sampleTimestampsMs as number[])[index - 1]!))) {
+    throw new Error("The segmentation response did not include a valid bounded Muse sample schedule.");
   }
       if (!Array.isArray(root.candidates) || root.candidates.length > 40) throw new Error("The segmentation response contains too many candidate moments.");
   const seen = new Set<string>();
@@ -3694,7 +3704,7 @@ function parseSegmentResponse(value: unknown, expected: VideoIdentityFields, roo
     if (!isMoveInReadyElementId(candidate.elementId) || typeof candidate.concept !== "string" || candidate.concept.length > 80) throw new Error("A segmentation candidate referenced an unsupported inspection element.");
     const evidence = recordObject(candidate.evidence, "A candidate source moment was invalid.");
     if (Object.keys(evidence).some((key) => !["frameIndex", "timestampMs", "objectOrdinal", "box", "samConfidence"].includes(key))) throw new Error("A candidate source moment included unsupported fields.");
-    if (!Number.isSafeInteger(evidence.frameIndex) || (evidence.frameIndex as number) < 0 || !Number.isSafeInteger(evidence.timestampMs) || (evidence.timestampMs as number) < 0 || (evidence.timestampMs as number) >= 30_000 || !Number.isSafeInteger(evidence.objectOrdinal) || (evidence.objectOrdinal as number) < 0) throw new Error("A candidate source frame was outside the allowed video bounds.");
+    if (!Number.isSafeInteger(evidence.frameIndex) || (evidence.frameIndex as number) < 0 || !Number.isSafeInteger(evidence.timestampMs) || (evidence.timestampMs as number) < 0 || (evidence.timestampMs as number) >= durationMs || !Number.isSafeInteger(evidence.objectOrdinal) || (evidence.objectOrdinal as number) < 0) throw new Error("A candidate source frame was outside the allowed video bounds.");
     const box = recordObject(evidence.box, "A candidate geometry was invalid.");
     if (Object.keys(box).some((key) => !["left", "top", "right", "bottom"].includes(key)) || ![box.left, box.top, box.right, box.bottom].every((part) => typeof part === "number" && Number.isFinite(part) && part >= 0 && part <= 100_000) || (box.left as number) >= (box.right as number) || (box.top as number) >= (box.bottom as number)) throw new Error("A candidate geometry was outside the supported image bounds.");
     if (evidence.samConfidence !== undefined && (typeof evidence.samConfidence !== "number" || evidence.samConfidence < 0 || evidence.samConfidence > 1)) throw new Error("A candidate confidence was invalid.");
@@ -4123,7 +4133,7 @@ function readSafeApiError(value: unknown, status: number): string {
         SETUP_REQUIRED: "Live video processing is not configured on this server.",
         INVALID_REQUEST: "The video request was invalid. Reload the room clip and try again.",
         VIDEO_TOO_LARGE: "The video exceeds the server’s 60 MiB upload limit.",
-        VIDEO_TOO_LONG: "Keep each room video to 30 seconds or less.",
+        VIDEO_TOO_LONG: "This room video is longer than its allowed recording time.",
         UNSUPPORTED_VIDEO: "Choose an MP4 or MOV video supported by the server.",
         INVALID_VIDEO: "The selected video could not be validated. Choose a different MP4 or MOV clip.",
         UNSUPPORTED_STILL: "A source still could not be validated. Retry with a different clip.",
@@ -4180,10 +4190,12 @@ function sameStoredClipSource(left: StoredVideoClip, right: StoredVideoClip): bo
 }
 
 function makeRoomEvidenceTimestamps(
+  roomId: MoveInReadyRoomId,
   durationSeconds: number,
   requiredTimestampMs: readonly number[],
 ): number[] {
-  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || durationSeconds > 30) {
+  const maxDurationSeconds = getRoomVideoDurationLimitSeconds(roomId);
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || maxDurationSeconds === null || durationSeconds > maxDurationSeconds) {
     throw new Error("The room clip duration is outside the supported still-extraction range.");
   }
   const durationMs = Math.floor(durationSeconds * 1000);

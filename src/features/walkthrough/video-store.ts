@@ -5,9 +5,9 @@ import { openDB, type DBSchema, type IDBPDatabase, type IDBPTransaction } from "
 import {
   sha256Blob,
   VIDEO_MAX_BYTES,
-  VIDEO_MAX_DURATION_SECONDS,
   type VideoStill,
 } from "./video-utils";
+import { ELEMENT_VIDEO_DURATION_SECONDS, getRoomVideoDurationLimitSeconds } from "../../domain/video-duration";
 
 export const VIDEO_CLIP_DB_NAME = "move-in-ready-video-clips";
 /** Increment for IndexedDB object-store/index layout changes. */
@@ -616,7 +616,7 @@ export function validateStoredVideoClip(
     typeof input.durationSeconds !== "number" ||
     !Number.isFinite(input.durationSeconds) ||
     input.durationSeconds <= 0 ||
-    input.durationSeconds > VIDEO_MAX_DURATION_SECONDS ||
+    input.durationSeconds > (getRoomVideoDurationLimitSeconds(expected.roomId) ?? 0) ||
     !isPositiveSafeInteger(input.width) ||
     !isPositiveSafeInteger(input.height) ||
     input.width * input.height > MAX_SOURCE_VIDEO_PIXELS ||
@@ -680,7 +680,7 @@ export function validateStoredElementClip(
     typeof input.durationSeconds !== "number" ||
     !Number.isFinite(input.durationSeconds) ||
     input.durationSeconds <= 0 ||
-    input.durationSeconds > VIDEO_MAX_DURATION_SECONDS ||
+    input.durationSeconds > ELEMENT_VIDEO_DURATION_SECONDS ||
     !isPositiveSafeInteger(input.width) ||
     !isPositiveSafeInteger(input.height) ||
     input.width * input.height > MAX_SOURCE_VIDEO_PIXELS ||

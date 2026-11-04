@@ -56,7 +56,8 @@ export interface AssistantScriptInput {
 export const ASSISTANT_FILMING_SCRIPTS: Record<MoveInReadyRoomType, readonly string[]> = {
   kitchen: [
     "Recording. First, run the kitchen faucet and show the water flow and drainage.",
-    "Now pan across the sink, counters, and outlets.",
+    "Now pan slowly across the sink, counters, and outlets.",
+    "Show the kitchen ventilation fan running and hold the camera steady on it.",
     "Finally, show the smoke or carbon monoxide detector and its indicator light.",
   ],
   bathroom: [

@@ -1,4 +1,4 @@
-# Implementation plan — Move-in Ready video walkthrough
+# Implementation plan — Walkthrough Kit video walkthrough
 
 ## Scope and safety baseline
 

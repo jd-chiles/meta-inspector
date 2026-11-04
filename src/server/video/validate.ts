@@ -177,7 +177,7 @@ function readTimingTable(bytes: Uint8Array, stts: Box, ctts?: Box): { durations:
   return { durations, offsets };
 }
 
-function parseVideoTrack(bytes: Uint8Array, moov: Box): {
+function parseVideoTrack(bytes: Uint8Array, moov: Box, maxDurationMs: number): {
   frameTimestampsMs?: readonly number[];
   durationMs?: number;
 } | undefined {
@@ -225,8 +225,8 @@ function parseVideoTrack(bytes: Uint8Array, moov: Box): {
       throw new VideoSegmentError(422, "INVALID_VIDEO", "The video frame timestamps are too close to map safely.");
     }
     const durationMs = Math.round((decodeTimestamp * 1000) / timescale);
-    if (durationMs > MAX_VIDEO_DURATION_MS) {
-      throw new VideoSegmentError(413, "VIDEO_TOO_LONG", "The video must be 30 seconds or shorter.");
+    if (durationMs > maxDurationMs) {
+      throw new VideoSegmentError(413, "VIDEO_TOO_LONG", `The video must be ${Math.floor(maxDurationMs / 1000)} seconds or shorter.`);
     }
     if (timestamps.length === 0 || durationMs <= 0) {
       throw new VideoSegmentError(422, "INVALID_VIDEO", "The video has no valid frame timing data.");
@@ -237,7 +237,7 @@ function parseVideoTrack(bytes: Uint8Array, moov: Box): {
 }
 
 /** Validate actual MP4/MOV container bytes and extract frame timestamps when available. */
-export function validateVideoBytes(bytes: Uint8Array): VideoMetadata {
+export function validateVideoBytes(bytes: Uint8Array, maxDurationMs = MAX_VIDEO_DURATION_MS): VideoMetadata {
   if (bytes.byteLength === 0) {
     throw new VideoSegmentError(422, "INVALID_VIDEO", "Choose a video file with content.");
   }
@@ -269,7 +269,10 @@ export function validateVideoBytes(bytes: Uint8Array): VideoMetadata {
     throw new VideoSegmentError(422, "INVALID_VIDEO", "The video container is incomplete or unsupported.");
   }
   const moov = topLevel.find((box) => box.type === "moov")!;
-  const track = parseVideoTrack(bytes, moov);
+  if (!Number.isSafeInteger(maxDurationMs) || maxDurationMs < 1 || maxDurationMs > MAX_VIDEO_DURATION_MS) {
+    throw new VideoSegmentError(400, "INVALID_REQUEST", "The room video duration limit is invalid.");
+  }
+  const track = parseVideoTrack(bytes, moov, maxDurationMs);
   if (track?.frameTimestampsMs && track.frameTimestampsMs.length > MAX_VIDEO_FRAMES) {
     throw new VideoSegmentError(413, "VIDEO_TOO_LONG", "The video contains more frames than this request supports.");
   }

@@ -12,8 +12,9 @@ import {
   MAX_FTYP_BOX_BYTES,
   QUICKTIME_BRAND,
 } from "../../domain/video-format";
+import { MAX_ROOM_VIDEO_DURATION_SECONDS } from "../../domain/video-duration";
 
-export const VIDEO_MAX_DURATION_SECONDS = 30;
+export const VIDEO_MAX_DURATION_SECONDS = MAX_ROOM_VIDEO_DURATION_SECONDS;
 export const VIDEO_MAX_BYTES = 60 * 1024 * 1024;
 export const VIDEO_ALLOWED_MIME_TYPES = [
   "video/mp4",

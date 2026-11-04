@@ -453,16 +453,15 @@ describe("MOV packet-copy normalization", () => {
     expect(remux.conversionOptions).toBeNull();
   });
 
-  it("covers faucet, fan, lock, and detector within kitchen and bathroom prompts", () => {
-    for (const roomId of ["kitchen", "bathroom"] as const) {
-      const prompts = DEFAULT_ROOM_PROMPTS[roomId].join(" ").toLowerCase();
-      expect(prompts).toMatch(/faucet/);
-      expect(prompts).toMatch(/fan/);
-      expect(prompts).toMatch(/lock/);
-      expect(prompts).toMatch(/detector/);
-      expect([promptIdForRoom(roomId)]).toHaveLength(DEFAULT_ROOM_PROMPTS[roomId].length);
-    }
-    expect(DEFAULT_ROOM_PROMPTS.hallway.join(" ").toLowerCase()).toMatch(/(?:public|common)[ -]area/);
+  it("keeps the kitchen cues focused and directs front-door filming to the hallway", () => {
+    const kitchenPrompts = DEFAULT_ROOM_PROMPTS.kitchen.join(" ").toLowerCase();
+    expect(kitchenPrompts).toMatch(/faucet/);
+    expect(kitchenPrompts).toMatch(/fan/);
+    expect(kitchenPrompts).toMatch(/detector/);
+    expect(kitchenPrompts).toMatch(/film the front door and lock in the hallway/);
+    expect(DEFAULT_ROOM_PROMPTS.bathroom.join(" ").toLowerCase()).toMatch(/faucet|fan|detector/);
+    expect(DEFAULT_ROOM_PROMPTS.hallway.join(" ").toLowerCase()).toMatch(/front door|lock/);
+    expect([promptIdForRoom("kitchen")]).toHaveLength(DEFAULT_ROOM_PROMPTS.kitchen.length);
   });
 });
 

@@ -24,6 +24,7 @@ import {
   promptIdForRoom,
   type MoveInReadyPromptId,
 } from "../../domain/move-in-ready";
+import { getRoomVideoDurationLimitSeconds } from "../../domain/video-duration";
 import styles from "./video-capture.module.css";
 import {
   VIDEO_ALLOWED_MIME_TYPES,
@@ -95,22 +96,22 @@ export interface WalkthroughVideoCaptureProps {
 
 export const DEFAULT_ROOM_PROMPTS: Readonly<Record<string, readonly string[]>> = {
   kitchen: [
-    "Film one continuous take: run the faucet showing flow and drainage, slowly pan the sink, counters, and outlets, then show the smoke or CO detector and its indicator. The front door and lock are covered in the hallway clip.",
+    "Up to 30 seconds. Move slowly: run the faucet and show drainage; pan the sink, counters and outlets; show the running fan and smoke/CO detector. Film the front door and lock in the hallway.",
   ],
   bathroom: [
-    "Film one continuous take: run the faucet or shower showing flow and drainage, turn on the exhaust fan and show the vent, show the toilet and bath or shower and test the lock, then show the smoke or CO detector and its indicator.",
+    "Film one continuous take, up to 30 seconds: move steadily through faucet or shower flow and drainage, the running exhaust fan, toilet and bath or shower, door lock, then smoke or CO detector.",
   ],
   bedroom: [
-    "Film one continuous take: show the room, windows, and visible openings, include the smoke or carbon monoxide detector in frame, then show the door and how its lock operates.",
+    "Film one continuous take, up to 30 seconds: move steadily across the room, windows and visible openings, then show the door and lock, heating or cooling equipment, outlets, and smoke or CO detector.",
   ],
   "bedroom-living": [
-    "Film one continuous take: pan the bedroom and living area showing floors and outlets, show the windows in both areas and visible openings, then show the detectors and operate the entry lock.",
+    "Film one continuous take, up to 30 seconds: pan the bedroom and living area, show windows and visible openings, then the entry lock, heating or cooling equipment, outlets, and detectors.",
   ],
   living: [
-    "Film one continuous take: pan slowly across the room and visible outlets, include the windows and any smoke or carbon monoxide detector, then show the entry and how its lock operates.",
+    "Film one continuous take, up to 30 seconds: pan slowly across the room, outlets and windows, then show the entry lock, heating or cooling equipment, and smoke or CO detector.",
   ],
   hallway: [
-    "Film one continuous take: walk the clear floor path, show the front door and demonstrate its lock, then show the exit path, lighting, and hallway detector with people out of frame.",
+    "Film one continuous take, up to 15 seconds: show the clear exit path and any secondary exit or fire escape, then the front door and lock, hallway lighting, and detector. Keep people out of frame.",
   ],
   default: [
     "Film one continuous take: pan slowly to show the whole room and visible openings, hold steady on each fixture, then show the entry and how its lock operates if present.",
@@ -142,7 +143,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
     prompts,
     completedPromptIds = [],
     onPromptCompletionChange,
-    maxDurationSeconds = VIDEO_MAX_DURATION_SECONDS,
+    maxDurationSeconds: requestedMaxDurationSeconds,
     maxFileBytes = VIDEO_MAX_BYTES,
     disabled = false,
     onRecordingStateChange,
@@ -153,7 +154,9 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
     controlRef,
     overlayCue = null,
   } = props;
-  const effectiveMaxDurationSeconds = getEffectiveRecordingDurationSeconds(maxDurationSeconds);
+  const effectiveMaxDurationSeconds = getEffectiveRecordingDurationSeconds(
+    requestedMaxDurationSeconds ?? getRoomVideoDurationLimitSeconds(roomId) ?? VIDEO_MAX_DURATION_SECONDS,
+  );
 
   const room = rooms.find((candidate) => candidate.id === roomId);
   const roomIndex = Math.max(0, rooms.findIndex((candidate) => candidate.id === roomId));

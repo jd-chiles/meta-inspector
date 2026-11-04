@@ -1,4 +1,4 @@
-# Move-in Ready: project overview
+# Walkthrough Kit: project overview
 
 ## The problem
 
@@ -10,7 +10,7 @@ These statements describe the product motivation and owner-reported context. The
 
 ## The approach
 
-Move-in Ready is a mobile-first companion for housing navigators and case managers. It guides a staged unit walkthrough across four rooms, organizes timestamped video evidence, and offers draft observations for a worker to review. The worker records the actual inspection decisions, required checks, corrections, and sign-off. The app can then prepare local files for the existing manual workflow.
+Walkthrough Kit is a mobile-first companion for housing navigators and case managers. It guides a staged unit walkthrough across four rooms, organizes timestamped video evidence, and offers draft observations for a worker to review. The worker records the actual inspection decisions, required checks, corrections, and sign-off. The app can then prepare local files for the existing manual workflow.
 
 The intended value is practical support: make the walkthrough easier to follow, reduce avoidable documentation friction, and help less-experienced staff see what still needs human attention. It does not replace a qualified evaluator or automate a housing decision.
 

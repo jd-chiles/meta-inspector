@@ -51,7 +51,7 @@ test("room prompt completion persists with a saved clip and stays room-specific"
   await expect(page.getByText("Not filmed", { exact: true }).first()).toBeVisible();
   const currentPrompt = page.locator('[data-testid="walkthrough-video-capture"] [aria-current="step"]');
   await expect(currentPrompt).toHaveCount(1);
-  await expect(currentPrompt).toContainText("Film one continuous take");
+  await expect(currentPrompt).toContainText("Up to 30 seconds");
   await expect(currentPrompt).toContainText("Film this take");
   await expect(currentPrompt).toHaveCSS("border-top-color", "rgb(143, 181, 227)");
   await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
@@ -60,7 +60,7 @@ test("room prompt completion persists with a saved clip and stays room-specific"
     buffer: videoBytes,
   });
   await expect(page.getByText(/Clip saved on this device\./)).toBeVisible({ timeout: 20_000 });
-  await page.getByRole("button", { name: /Mark filmed: Film one continuous take/, exact: false }).click();
+  await page.getByRole("button", { name: /Mark filmed: Up to 30 seconds/, exact: false }).click();
   await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
   await expect(page.locator('[data-testid="walkthrough-video-capture"] [aria-current="step"]')).toHaveCount(0);
 
@@ -69,8 +69,8 @@ test("room prompt completion persists with a saved clip and stays room-specific"
   await goToCapture(page);
   await selectRoom(page, "kitchen");
   await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
-  const filmedKitchenPrompt = page.getByRole("listitem").filter({ hasText: "Film one continuous take" });
-  await expect(filmedKitchenPrompt.getByRole("button", { name: /Undo filmed: Film one continuous take/, exact: false })).toBeVisible();
+  const filmedKitchenPrompt = page.getByRole("listitem").filter({ hasText: "Up to 30 seconds" });
+  await expect(filmedKitchenPrompt.getByRole("button", { name: /Undo filmed: Up to 30 seconds/, exact: false })).toBeVisible();
 
   await selectRoom(page, "bathroom");
   await expect(page.getByText("Not filmed", { exact: true }).first()).toBeVisible();
@@ -114,7 +114,7 @@ test("replacing a room clip clears the filmed mark", async ({ page }) => {
     buffer: videoBytes,
   });
   await expect(page.getByText(/Clip saved on this device\./)).toBeVisible({ timeout: 20_000 });
-  await page.getByRole("button", { name: /Mark filmed: Film one continuous take/, exact: false }).click();
+  await page.getByRole("button", { name: /Mark filmed: Up to 30 seconds/, exact: false }).click();
   await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
 
   await page.getByRole("button", { name: "Replace clip", exact: true }).click();
@@ -126,5 +126,5 @@ test("replacing a room clip clears the filmed mark", async ({ page }) => {
   await expect(page.getByText(/Clip saved on this device\./)).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("Not filmed", { exact: true }).first()).toBeVisible();
   const currentPrompt = page.locator('[data-testid="walkthrough-video-capture"] [aria-current="step"]');
-  await expect(currentPrompt).toContainText("Film one continuous take");
+  await expect(currentPrompt).toContainText("Up to 30 seconds");
 });
