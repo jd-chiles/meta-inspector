@@ -2,6 +2,20 @@
 
 This document records what can currently be previewed and what remains unverified. It is not a demo script. The supplied product brief requires the staged video clip to be evaluated and the miss list recorded before a demo script or mapping-quality claim is prepared.
 
+## Phase 0 freeze status — 2026-11-04
+
+Status only; not a demo script; no quality claim. Frozen base: `dev`
+at `96cb3c2` (after `d7065be`: `1bf0d85` deps, `7d9051e` Langfuse v6
+migration, `c1fb0ec` stills analysis stage + e2e refactor + batch cap
+3 + design-qa refresh, `96cb3c2` thin-client cloud port, dev-only
+unscoped). Baseline gates on frozen content: docs exit 0; lint 0
+errors + 2 pre-existing warnings; typecheck exit 0; unit 71 files,
+750 passed / 3 skipped. Build + full e2e pending (no result claimed).
+The stills analysis stage and the thin-client cloud port are present
+on `dev` as unscoped additions needing an SDD scope decision;
+production stays on the legacy path until the dev cloud path is
+phone-verified.
+
 ## Evidence boundaries
 
 - **Fixture flow:** labeled synthetic output proves only deterministic local behavior; it is not a provider result.
@@ -51,7 +65,7 @@ misses are listed in the demo notes."
 
 ## Remaining preview/release evidence
 
-- Production on 2026-11-02: `metainspect:mvp13` (revision `metainspect-app--0000015`, Healthy, 100% traffic) behind the pilot passcode gate. This is a limited pilot deployment, not a public launch.
+- Production per `docs/PRODUCTION_DEPLOY.md`: `metainspect:mvp23` (revision `metainspect-app--0000023`, Healthy) behind the pilot passcode gate. This is a limited pilot deployment, not a public launch. Deploy revisions for image tags mvp24–mvp27 are pending Phase 2 (see the runbook).
 - Re-verify one live room end to end from a physical phone on LTE after every redeploy (film, analysis, report, sign-off, export download).
 - Current local check results and visual-review limits are recorded in `docs/REVIEW_AND_CI.md` and `design-qa.md`.
 - Compare equivalent populated Capture, Draft Review, and Sign-Off & Export states with the supplied mobile reference.

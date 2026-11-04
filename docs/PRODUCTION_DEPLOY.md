@@ -27,6 +27,28 @@ Rollback: `az containerapp update -g metainspect-prod -n
 metainspect-app --image metainspectprod.azurecr.io/metainspect:mvp22`
 (prior healthy revision `metainspect-app--0000022`).
 
+Commit labels mvp24–mvp27 (from `git log` on `dev`; no image
+build or deploy records exist for them — committed but never
+deployed, covered by the Phase 2 tag instead):
+`9ec4c70` mvp24 (Nov 3: storage-cause naming in local-save failures,
+working retry + download on the failed clip),
+`6a9ef0e` mvp25 (Nov 3: network-first navigations + shell-v6,
+stale manifest spec fix),
+`20384ce` mvp26 (Nov 4: one safe stage/status/code record per
+video segment failure),
+`0660eb8` mvp27 (Nov 4: SAM.gov owner checks — exclusions parser
+fix, entity identity source, owner input, quota cache).
+Unreleased after mvp27: `da77301`, `89cb9eb`, `b17a3b9`,
+`96785bc`, `d7065be` (tour batch status, one-path voice guide,
+design-qa refresh, approvals/home-entrance fixes, version banner).
+Frozen `dev` commits after `d7065be` awaiting Phase 2 deploy notes:
+`1bf0d85` (deps: Langfuse v6 packages + pg/pg-boss + test:live
+switch), `7d9051e` (Langfuse v6 migration), `c1fb0ec` (stills
+analysis stage + e2e refactor + batch cap 3 + design-qa refresh),
+`96cb3c2` (thin-client cloud port, dev-only unscoped). Production
+stays on the mvp23 legacy path until the dev cloud path is
+phone-verified.
+
 Redeploy: build + push a new tag, `az containerapp update` with the
 app name, re-verify 307 + origin probes. Note: `.dockerignore` must
 keep excluding `.muse`/`.agents` — agent worktrees carry full

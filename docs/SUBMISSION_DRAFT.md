@@ -56,10 +56,13 @@ rejected packets delay move-ins by days.
 - Tracing: Langfuse instrumentation (one trace per analysis, span-per-
   phase, token usage) active on dev; eval dataset tooling included.
 
-## Measured results (verified 2026-11-03)
+## Measured results (gates verified 2026-11-04 on frozen dev 96cb3c2)
 
-- Gates: typecheck clean, lint 0 errors, unit 642 passed / 3 skipped
-  (55 files), browser e2e 47/47, live-smoke self-test 28/28.
+- Gates: docs exit 0, typecheck clean, lint 0 errors + 2
+  pre-existing warnings, unit 750 passed / 3 skipped (71 files).
+  Build + full browser e2e are pending on the frozen tree (the
+  2026-11-03 e2e 47/47 and live-smoke self-test 28/28 describe the
+  older tree and are not current).
 - Live provider proof: real SAM 3.1 segment call, correct abstention
   on fixture media (no hallucinated candidates).
 - Prod warm response 0.14 s; dev scale-to-zero cold start ~26 s,

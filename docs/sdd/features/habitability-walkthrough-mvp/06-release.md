@@ -1,6 +1,23 @@
 # Release record
 
-Status: Not ready (2026-11-02 mvp13 single-entrance + dashboard deployed; see latest entry)
+Status: Not ready (2026-11-04 Phase 0 freeze at dev 96cb3c2; see latest entry)
+
+## Phase 0 freeze — 2026-11-04 (Muse Code docs closure)
+
+Status stays Not ready. `dev` frozen at `96cb3c2` as the Phase 0
+baseline (after `d7065be`: `1bf0d85` deps, `7d9051e` Langfuse v6
+migration, `c1fb0ec` stills analysis stage + e2e refactor + batch cap
+3 + design-qa refresh, `96cb3c2` thin-client cloud port, dev-only
+unscoped). Baseline gates on frozen content: docs exit 0; lint 0
+errors + 2 pre-existing exhaustive-deps warnings; typecheck exit 0;
+unit 71 files, 750 passed / 3 skipped. Build + full e2e pending (no
+result claimed). The stills analysis stage and the thin-client cloud
+port are unscoped additions needing an explicit SDD scope decision
+before any release claim. Production stays on the legacy path until
+the dev cloud path is phone-verified. Deploy revisions for image tags
+mvp24–mvp27 are pending Phase 2. Docs-only record update: not task
+acceptance, native SDD evidence, or a release decision; no
+live/provider/device/recipient result claimed.
 
 ## mvp13 single-entrance + dashboard — 2026-11-02 (Muse Code)
 

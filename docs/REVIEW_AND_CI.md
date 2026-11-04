@@ -1,5 +1,29 @@
 # Codex review and CI
 
+## Phase 0 freeze status — 2026-11-04 (Muse Code docs closure)
+
+Frozen base: `dev` at `96cb3c2`. Commits on `dev` after `d7065be`
+are `1bf0d85` (deps: Langfuse v6 packages + pg/pg-boss + test:live
+switch), `7d9051e` (Langfuse v6 migration), `c1fb0ec` (stills
+analysis stage + e2e refactor + batch cap 3 + design-qa refresh,
+including one no-explicit-any lint fix in
+`tests/e2e/move-in-ready.spec.ts`), and `96cb3c2` (thin-client cloud
+port, dev-only unscoped).
+
+Baseline gates executed on the frozen content (observed 2026-11-04):
+
+- `node scripts/verify-sdd.mjs`: exit 0.
+- `npm run lint`: 0 errors, 2 pre-existing exhaustive-deps warnings.
+- `npm run typecheck`: exit 0.
+- `npm run test:unit`: 71 files, 750 passed / 3 skipped.
+- `npm run build` and full `npm run test:e2e`: pending (running in
+  parallel at freeze time; no result claimed).
+
+Docs-only record update: no code, test, config, or `.sdd/**` change.
+No task accepted; no native SDD approval, review, or evidence claimed;
+no live, provider, device, or recipient result claimed. Fixture
+results prove fixture behavior only. Release stays Not ready.
+
 ## Current status update — 2026-11-02 (mvp13 sprint)
 
 Commit `101a67f` (single-entrance tour, capture dashboard, live-proof

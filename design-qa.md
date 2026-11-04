@@ -1,5 +1,19 @@
 # Mobile workflow plan and design QA
 
+## Phase 0 freeze note — 2026-11-04
+
+Status note only; no new measurements or screenshots are claimed.
+Frozen base: `dev` at `96cb3c2`. Commit `c1fb0ec` landed a stills
+analysis stage, an e2e refactor, a batch cap of 3, and a design-qa
+refresh (including one no-explicit-any lint fix in
+`tests/e2e/move-in-ready.spec.ts`); commit `96cb3c2` added a
+thin-client cloud port (dev-only, unscoped). The measurements,
+screenshots, and check counts below describe the older builds they
+were taken on, not the frozen tree. Baseline gates on frozen content:
+docs exit 0; lint 0 errors + 2 pre-existing warnings; typecheck exit
+0; unit 71 files, 750 passed / 3 skipped; build + full e2e pending.
+Release stays Not ready.
+
 ## Product flow plan
 
 The app follows the supplied three-screen workflow:
