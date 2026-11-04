@@ -18,14 +18,18 @@ system-assigned identity + AcrPull (ACR admin stays off).
 Passcode-gated, live analysis mode. Prior healthy dev revision
 `metainspect-dev--0000013` (image `metainspect:mvp22`).
 
-Production: app `metainspect-app`, deployed 2026-11-03 from
-`origin/dev` (`634ba1f`, image `metainspect:mvp23`, revision
-`metainspect-app--0000023`, Healthy, minReplicas 1 warm). Same
-feature set as dev above; no Langfuse secrets on prod so tracing
-stays dormant there. Passcode-gated, live analysis mode.
+Production: app `metainspect-app`, deployed 2026-11-04 from
+`dev` (`ccd71d5`, image `metainspect:mvp32` sha256:9e59f88e…,
+revision `metainspect-app--0000024`, Healthy, minReplicas 1 warm).
+Segment+map live path, minimal cloud wire (dev-only backends
+unprovisioned), Langfuse v6 dormant (no keys on prod).
+Gate OPEN (owner-directed 2026-11-04, rev
+`metainspect-app--0000025`): `INSPECTION_PASSCODE` env + secret
+removed, root 200 unauthenticated. Spend exposure: anyone with
+the URL can trigger billed analysis — quota alerts REQUIRED.
 Rollback: `az containerapp update -g metainspect-prod -n
-metainspect-app --image metainspectprod.azurecr.io/metainspect:mvp22`
-(prior healthy revision `metainspect-app--0000022`).
+metainspect-app --image metainspectprod.azurecr.io/metainspect:mvp23`
+(prior healthy revision `metainspect-app--0000023`).
 
 ACR holds images mvp12–mvp31 (verified 2026-11-04). mvp24–mvp27
 match `dev` commit labels:
@@ -45,12 +49,26 @@ Prod never went past mvp23.
 Unreleased after mvp27: `da77301`, `89cb9eb`, `b17a3b9`,
 `96785bc`, `d7065be` (tour batch status, one-path voice guide,
 design-qa refresh, approvals/home-entrance fixes, version banner).
-Frozen `dev` commits after `d7065be` awaiting Phase 2 deploy notes:
-`1bf0d85` (deps: Langfuse v6 packages + pg/pg-boss + test:live
-switch), `7d9051e` (Langfuse v6 migration), `c1fb0ec` (stills
-analysis stage + e2e refactor + batch cap 3 + design-qa refresh),
-`96cb3c2` (thin-client cloud port, dev-only unscoped). Production
-stays on the mvp23 legacy path until the dev cloud path is
+mvp32 (2026-11-04, commit `ccd71d5`, digest sha256:9e59f88e…)
+deployed to dev (rev `metainspect-dev--0000025`, Healthy) and prod
+(rev `metainspect-app--0000024`, Healthy), replacing the unrecorded
+dev mvp31. Contents: frozen units `1bf0d85`/`7d9051e`/`c1fb0ec`/
+`96cb3c2`, Phase 1 fixes (`f16833f`), segment+map restore
+(`0616b48`), `APP_VERSION` 32. Pre-deploy gates on the tree:
+docs/lint(0 err)/typecheck/unit(760+3)/build/e2e(52) green.
+Local smoke: boots, 307 gate, headers, FFmpeg 9.0.2, non-root
+`app`. Live $0: dev/prod 307+manifest (prod warm 0.25 s),
+browser-origin video call passes the origin check, foreign Origin
+400s. Build note: ffmpeg.org unreachable, reused verified
+`/opt/ffmpeg` 9.0.2 bytes from local mvp31 (Dockerfile workaround
+reverted, tree clean). Dev passcode set then REMOVED same
+day (owner-directed, rev `metainspect-dev--0000027`, secret
+deleted); dev open, root 200. Dev warmed (minReplicas 1, rev
+`metainspect-dev--0000028`): root 0.1–0.3 s, was 44 s cold.
+OPEN: no cloud secrets on dev
+(`DATABASE_URL`/R2/wake token unprovisioned);
+migrate + cloud smoke blocked on the owner. Production stays on
+the legacy segment+map path until the dev cloud path is
 phone-verified.
 
 Redeploy: build + push a new tag, `az containerapp update` with the
@@ -155,6 +173,10 @@ version still ships with the rollback image.
   production container must always set it as a secret. Rotation is instant:
   changing the secret invalidates every issued cookie (the HMAC key is the
   passcode itself).
+- OVERRIDE 2026-11-04 (owner-directed, against the rule above): both
+  passcodes removed, dev + prod publicly reachable with no
+  authentication. Recorded as an open risk; reinstate the secrets to
+  close it. Billed-analysis endpoints are spend-exposed until then.
 - Pilot-grade only: one shared secret, no per-inspector identity, no
   server-side session revocation list. Decide before wider launch whether
   per-inspector keys are needed. Set Azure cost/quota alerts on the
