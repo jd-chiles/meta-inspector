@@ -1,5 +1,10 @@
 # Change log
 
+## SAM.gov owner checks live — November 4, 2026 (Muse Code)
+
+- The owner-supplied free `SAM_API_KEY` (Azure secret, server-side only) activates both federal legs: exclusions by owner name plus a new owner-identity source (registration status, UEI, registered-address-vs-property match). The pre-screen form gains an optional owner field; without a name both legs report skipped with the assessor-portal remedy. Live probes fixed a parser bug (the array key is `excludedEntity`, verified against api.sam.gov) and confirmed the entity record paths. A bounded 24 h process-local cache (5 min for transport failures) protects small personal-key daily quotas; 401/403 and 429 degrade with key/quota-specific remedies.
+- Verification: live exclusions + entities probes 2026-11-04 (valid key, real record shape); new server unit tests (identity match/multi-match/unknown-address, rejected-key and quota remedies, cache hit isolation, request owner passthrough, overlong-owner rejection) + pre-screen e2e asserts all nine sources. Full gates below.
+
 ## Voice walkthrough reliability — November 3, 2026 (Muse Code)
 
 Owner reported the guided voice sometimes read only the first filming prompt. Three defects: (1) cues raced fixed timers against playback and could be dropped; (2) iOS only lets an Audio element play from timers after it played inside a user gesture, so delayed cues were rejected; (3) the assistant-speech effect cleanup cancelled speech on every record-derived identity change, killing narration mid-take. Fix: recording start primes a shared playback element; tour and capture narration walk cues sequentially (next waits for the current one, a failed cue never blocks the rest); the harmful generic cleanup is removed. Verified: lint/typecheck clean, unit green, browser green (full counts in the session record). No REQ change; no task acceptance or native evidence.

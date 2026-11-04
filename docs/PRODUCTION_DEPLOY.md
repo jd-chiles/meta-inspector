@@ -46,6 +46,7 @@ docker run -d -p 3000:3000 \
   -e FISH_VOICE_ID=<owner voice id> \
   -e INSPECTION_PASSCODE=<pilot shared passcode> \
   -e APP_PUBLIC_ORIGIN=https://<app-fqdn> \
+  -e SAM_API_KEY=<server-side only, enables federal prescreen checks> \
   metainspect:<sha>
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000/
 ```

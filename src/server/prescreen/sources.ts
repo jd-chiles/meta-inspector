@@ -11,8 +11,9 @@
  * - HUD assisted multifamily properties nearby (no key)
  * - EPA TRI facilities by ZIP (no key)
  * - SAM.gov exclusions by owner name (free key, server env SAM_API_KEY;
- *   dormant until the key exists AND an owner name is available — parcel
- *   coverage for owner identity is unverified, so this reports skipped)
+ *   runs only when the key exists AND the user supplies an owner name)
+ * - SAM.gov entity identity by owner name (same key; registration status,
+ *   UEI, and whether the registered address matches the screened property)
  *
  * Each source builds a fixed allowlisted URL from validated inputs (the
  * client never supplies a URL), fetches with a bounded timeout, and parses
@@ -60,6 +61,8 @@ export interface PrescreenQuery {
   city: string;
   state: string;
   zip: string;
+  /** Optional owner name for the SAM.gov legs; absent means those report skipped. */
+  owner?: string;
 }
 
 /** Body-read budget: headers arriving must not let a trickling body hang the route. */
@@ -447,13 +450,142 @@ export async function queryEpaTri(
 }
 
 const SAM_HUMAN_URL = "https://open.gsa.gov/api/exclusions-api/";
+const SAM_ENTITY_HUMAN_URL = "https://open.gsa.gov/api/entity-api/";
 const ASSESSOR_PORTAL_URL = "https://portal.assessor.lacounty.gov/";
 
 /**
- * Federal exclusion check for the property owner. Dormant until two gates
- * clear: a free SAM.gov API key on the server (SAM_API_KEY) and an owner
- * name (parcel coverage unverified — see module note). Either missing
- * reports skipped with the exact remedy; nothing is guessed.
+ * Status-aware fetch for the key-gated SAM.gov legs. Unlike fetchJson it
+ * keeps the HTTP status so a rejected key (401/403) and an exhausted daily
+ * quota (429) degrade with their exact remedy instead of a generic failure.
+ * Status 0 means the request never got an answer (network/timeout).
+ */
+async function fetchSamJson(
+  url: string,
+  fetchImpl: FetchLike,
+  signal?: AbortSignal,
+): Promise<{ status: number; data: unknown }> {
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(url, { signal }, PRESCREEN_SOURCE_TIMEOUT_MS, fetchImpl as typeof fetch);
+  } catch {
+    return { status: 0, data: null };
+  }
+  if (!response.ok) return { status: response.status, data: null };
+  const text = await readBoundedText(response);
+  if (text === null) return { status: response.status, data: null };
+  try {
+    return { status: response.status, data: JSON.parse(text) as unknown };
+  } catch {
+    return { status: response.status, data: null };
+  }
+}
+
+/**
+ * Bounded process-local cache for SAM.gov answers. Personal API keys have
+ * small daily quotas, so repeat screens of the same owner name must not
+ * burn a request per search. Keyed by endpoint + normalized owner name;
+ * holds parsed display results only (never the key), evicts oldest-first,
+ * and is never persisted or logged. Negative transport outcomes cache
+ * briefly so a dead upstream does not burn quota in a retry loop.
+ */
+const SAM_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const SAM_CACHE_NEGATIVE_TTL_MS = 5 * 60 * 1000;
+const SAM_CACHE_MAX_ENTRIES = 200;
+const samResponseCache = new Map<string, { expiresAt: number; result: PrescreenSourceResult }>();
+
+function samCacheKey(endpoint: "exclusions" | "entities", ownerName: string): string {
+  return `${endpoint}\n${ownerName.trim().toLowerCase().slice(0, 100)}`;
+}
+
+/** Clears the SAM.gov response cache. Exported for tests only. */
+export function clearSamResponseCache(): void {
+  samResponseCache.clear();
+}
+
+function readSamCache(key: string): PrescreenSourceResult | null {
+  const hit = samResponseCache.get(key);
+  if (!hit) return null;
+  if (hit.expiresAt <= Date.now()) {
+    samResponseCache.delete(key);
+    return null;
+  }
+  return hit.result;
+}
+
+function writeSamCache(key: string, result: PrescreenSourceResult): void {
+  if (samResponseCache.size >= SAM_CACHE_MAX_ENTRIES) {
+    const oldest = samResponseCache.keys().next();
+    if (!oldest.done) samResponseCache.delete(oldest.value);
+  }
+  const ttl = result.status === "unavailable" ? SAM_CACHE_NEGATIVE_TTL_MS : SAM_CACHE_TTL_MS;
+  samResponseCache.set(key, { expiresAt: Date.now() + ttl, result });
+}
+
+function samTransportFailure(
+  base: { sourceUrl: string; records: Record<string, string>[] },
+  label: string,
+  status: number,
+): PrescreenSourceResult {
+  if (status === 401 || status === 403) {
+    return {
+      ...base,
+      status: "unavailable",
+      summary: `The server SAM.gov key was rejected, so the ${label} could not run.`,
+      detail: "Check that SAM_API_KEY on the server is current.",
+    };
+  }
+  if (status === 429) {
+    return {
+      ...base,
+      status: "unavailable",
+      summary: `The SAM.gov daily request limit is reached, so the ${label} could not run.`,
+      detail: "Quota resets daily; try again tomorrow.",
+    };
+  }
+  if (status === 0) {
+    return { ...base, status: "unavailable", summary: `SAM.gov did not answer the ${label}.`, detail: "Try again later." };
+  }
+  return {
+    ...base,
+    status: "unavailable",
+    summary: `The ${label} could not run right now.`,
+    detail: "SAM.gov did not return a usable response. Try again later.",
+  };
+}
+
+function samKeyGate(
+  base: { sourceUrl: string; records: Record<string, string>[] },
+  label: string,
+  apiKey: string | null,
+): PrescreenSourceResult | null {
+  if (apiKey && apiKey.trim().length > 0) return null;
+  return {
+    ...base,
+    status: "skipped",
+    summary: `${label} needs a free SAM.gov API key on the server.`,
+    detail: "Any registered SAM.gov user generates one free on Account Details; set it as SAM_API_KEY.",
+  };
+}
+
+function samOwnerGate(
+  base: { sourceUrl: string; records: Record<string, string>[] },
+  label: string,
+  ownerName: string | null,
+): PrescreenSourceResult | null {
+  if (ownerName && ownerName.trim().length > 0) return null;
+  return {
+    ...base,
+    status: "skipped",
+    summary: `${label} needs the property owner name.`,
+    detail: `Owner identity is not in a verified free API. Look it up at ${ASSESSOR_PORTAL_URL} first, then enter it with the address.`,
+  };
+}
+
+/**
+ * Federal exclusion check for the property owner. Runs only when two gates
+ * clear: a free SAM.gov API key on the server (SAM_API_KEY) and a
+ * user-supplied owner name. Either missing reports skipped with the exact
+ * remedy; nothing is guessed.
  */
 export async function querySamExclusion(
   ownerName: string | null,
@@ -462,43 +594,48 @@ export async function querySamExclusion(
   signal?: AbortSignal,
 ): Promise<PrescreenSourceResult> {
   const base = { sourceUrl: SAM_HUMAN_URL, records: [] as Record<string, string>[] };
-  if (!apiKey || apiKey.trim().length === 0) {
-    return {
-      ...base,
-      status: "skipped",
-      summary: "Federal exclusion check needs a free SAM.gov API key on the server.",
-      detail: "Any registered SAM.gov user generates one free on Account Details; set it as SAM_API_KEY.",
-    };
-  }
-  if (!ownerName || ownerName.trim().length === 0) {
-    return {
-      ...base,
-      status: "skipped",
-      summary: "Federal exclusion check needs the property owner name.",
-      detail: `Owner identity is not in a verified free API. Look it up at ${ASSESSOR_PORTAL_URL} first.`,
-    };
-  }
+  const label = "Federal exclusion check";
+  const keyGate = samKeyGate(base, label, apiKey);
+  if (keyGate) return keyGate;
+  const ownerGate = samOwnerGate(base, label, ownerName);
+  if (ownerGate) return ownerGate;
+  const name = (ownerName as string).trim();
+  const cacheKey = samCacheKey("exclusions", name);
+  const cached = readSamCache(cacheKey);
+  if (cached) return cached;
   const params = new URLSearchParams({
-    api_key: apiKey.trim(),
-    q: ownerName.trim().slice(0, 100),
+    api_key: (apiKey as string).trim(),
+    q: name.slice(0, 100),
     page: "0",
     size: "10",
   });
-  const data = await fetchJson(
+  const { status, data } = await fetchSamJson(
     `https://api.sam.gov/entity-information/v4/exclusions?${params.toString()}`,
     fetchImpl,
     signal,
   );
+  if (status !== 200 || data === null) {
+    const failure = samTransportFailure(base, "federal exclusion check", status);
+    writeSamCache(cacheKey, failure);
+    return failure;
+  }
   const root = typeof data === "object" && data !== null ? (data as Record<string, unknown>) : null;
   const total = root && typeof root.totalRecords === "number" ? root.totalRecords : null;
-  const records = root && Array.isArray(root.exclusionRecords) ? root.exclusionRecords : null;
+  // Verified live: the array key is excludedEntity.
+  const records = root && Array.isArray(root.excludedEntity)
+    ? root.excludedEntity
+    : root && Array.isArray(root.exclusionRecords) ? root.exclusionRecords : null;
   if (total === null || records === null) {
-    return { ...base, status: "unavailable", summary: "Federal exclusion check could not run right now.", detail: "SAM.gov did not return usable records. Try again later." };
+    const failure: PrescreenSourceResult = { ...base, status: "unavailable", summary: "Federal exclusion check could not run right now.", detail: "SAM.gov did not return usable records. Try again later." };
+    writeSamCache(cacheKey, failure);
+    return failure;
   }
   if (total === 0 || records.length === 0) {
-    return { ...base, status: "empty", summary: `No federal exclusions found matching "${ownerName.trim().slice(0, 60)}".` };
+    const empty: PrescreenSourceResult = { ...base, status: "empty", summary: `No federal exclusions found matching "${name.slice(0, 60)}".` };
+    writeSamCache(cacheKey, empty);
+    return empty;
   }
-  return {
+  const found: PrescreenSourceResult = {
     ...base,
     status: "ok",
     summary: `${total} federal exclusion ${total === 1 ? "record" : "records"} matching the owner name — verify identity before relying on it.`,
@@ -511,6 +648,127 @@ export async function querySamExclusion(
       };
     }),
   };
+  writeSamCache(cacheKey, found);
+  return found;
+}
+
+function normalizeAddressToken(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Compares a SAM.gov registered physical address against the screened
+ * property. "match" needs the street number plus street name on the
+ * registered line and, when the screen has a ZIP, the same 5-digit ZIP.
+ * Anything unparseable or missing is "unknown", never a guessed mismatch.
+ */
+function compareSamAddress(
+  physical: Record<string, unknown>,
+  street: string,
+  zip: string,
+): "match" | "different" | "unknown" {
+  const line = stringField(physical.addressLine1, 200);
+  if (!line) return "unknown";
+  const parsed = parseStreetAddress(street);
+  if (!parsed) return "unknown";
+  const flat = normalizeAddressToken(line);
+  const streetHit = flat.includes(normalizeAddressToken(parsed.number)) &&
+    flat.includes(normalizeAddressToken(parsed.name));
+  if (!streetHit) return "different";
+  const queryZip = zip.trim().slice(0, 5);
+  if (!/^\d{5}$/.test(queryZip)) return "match";
+  const entityZip = stringField(physical.zipCode, 10);
+  if (!entityZip) return "unknown";
+  return entityZip.startsWith(queryZip) ? "match" : "different";
+}
+
+/**
+ * SAM.gov entity identity for the property owner: registration status,
+ * UEI, and whether the registered physical address matches the screened
+ * property — the disambiguation signal for same-name entities. Same two
+ * gates as the exclusion check; an exclusion verdict never comes from
+ * this source (see querySamExclusion).
+ */
+export async function querySamEntity(
+  ownerName: string | null,
+  apiKey: string | null,
+  screen: { street: string; zip: string },
+  fetchImpl: FetchLike,
+  signal?: AbortSignal,
+): Promise<PrescreenSourceResult> {
+  const base = { sourceUrl: SAM_ENTITY_HUMAN_URL, records: [] as Record<string, string>[] };
+  const label = "Owner identity check";
+  const keyGate = samKeyGate(base, label, apiKey);
+  if (keyGate) return keyGate;
+  const ownerGate = samOwnerGate(base, label, ownerName);
+  if (ownerGate) return ownerGate;
+  const name = (ownerName as string).trim();
+  const cacheKey = samCacheKey("entities", name);
+  const cached = readSamCache(cacheKey);
+  if (cached) return cached;
+  const params = new URLSearchParams({
+    api_key: (apiKey as string).trim(),
+    legalBusinessName: name.slice(0, 100),
+  });
+  const { status, data } = await fetchSamJson(
+    `https://api.sam.gov/entity-information/v4/entities?${params.toString()}`,
+    fetchImpl,
+    signal,
+  );
+  if (status !== 200 || data === null) {
+    const failure = samTransportFailure(base, "owner identity check", status);
+    writeSamCache(cacheKey, failure);
+    return failure;
+  }
+  const root = typeof data === "object" && data !== null ? (data as Record<string, unknown>) : null;
+  const total = root && typeof root.totalRecords === "number" ? root.totalRecords : null;
+  const records = root && Array.isArray(root.entityData) ? root.entityData : null;
+  if (total === null || records === null) {
+    const failure: PrescreenSourceResult = { ...base, status: "unavailable", summary: "Owner identity check could not run right now.", detail: "SAM.gov did not return usable records. Try again later." };
+    writeSamCache(cacheKey, failure);
+    return failure;
+  }
+  if (total === 0 || records.length === 0) {
+    const empty: PrescreenSourceResult = { ...base, status: "empty", summary: `No SAM.gov entity registration found matching "${name.slice(0, 60)}".` };
+    writeSamCache(cacheKey, empty);
+    return empty;
+  }
+  const rows = records.map((row) => (typeof row === "object" && row !== null ? (row as Record<string, unknown>) : {}));
+  const verdicts = rows.map((row) => {
+    const core = row.coreData as Record<string, unknown> | undefined;
+    const physical = core && typeof core.physicalAddress === "object" && core.physicalAddress !== null
+      ? (core.physicalAddress as Record<string, unknown>)
+      : {};
+    return compareSamAddress(physical, screen.street, screen.zip);
+  });
+  const bestIndex = verdicts.includes("match") ? verdicts.indexOf("match") : 0;
+  const best = rows[bestIndex] ?? {};
+  const registration = (typeof best.entityRegistration === "object" && best.entityRegistration !== null
+    ? (best.entityRegistration as Record<string, unknown>)
+    : {});
+  const legalName = stringField(registration.legalBusinessName, 120) ?? name.slice(0, 60);
+  const regStatus = stringField(registration.registrationStatus, 40) ?? "status unknown";
+  const expires = stringField(registration.registrationExpirationDate, 10);
+  const addressVerdict = verdicts[bestIndex] ?? "unknown";
+  const addressText = addressVerdict === "match"
+    ? "registered address matches this property"
+    : addressVerdict === "different"
+      ? "registered address differs from this property"
+      : "address comparison unavailable";
+  const found: PrescreenSourceResult = {
+    ...base,
+    status: "ok",
+    summary: `SAM.gov registration for "${legalName}" — ${regStatus}${expires ? `, current through ${expires}` : ""}; ${addressText}${total > 1 ? `; ${total} registrations match this name, closest shown` : ""}. Verify identity before relying on it.`,
+    records: [{
+      name: legalName.slice(0, 80),
+      uei: stringField(registration.ueiSAM, 20) ?? "—",
+      status: regStatus.slice(0, 40),
+      address: addressVerdict,
+      exclusionFlag: stringField(registration.exclusionStatusFlag, 4) ?? "—",
+    }],
+  };
+  writeSamCache(cacheKey, found);
+  return found;
 }
 
 const OPENFEMA_HUMAN_URL = "https://www.fema.gov/about/reports-and-data/openfema";

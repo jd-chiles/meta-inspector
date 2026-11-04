@@ -1,8 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import { parseStreetAddress, streetPrefixFor } from "../../../src/server/prescreen/address";
 import { fixturePrescreen, handlePrescreenRequest, runPrescreen } from "../../../src/server/prescreen/pipeline";
-import type { FetchLike } from "../../../src/server/prescreen/sources";
+import {
+  clearSamResponseCache,
+  querySamEntity,
+  querySamExclusion,
+  type FetchLike,
+} from "../../../src/server/prescreen/sources";
 
 function request(
   body: unknown,
@@ -89,7 +94,7 @@ const HUD_OK = {
 const TRI_OK = [{ facility_name: "WESTERN BRASS WORKS", tri_facility_id: "90012WSTRN1440N" }];
 const SAM_OK = {
   totalRecords: 1,
-  exclusionRecords: [{ name: "SMITH CONSTRUCTION", exclusionType: "Ineligible (Proceedings Completed)", effectiveDate: "2024-01-15" }],
+  excludedEntity: [{ name: "SMITH CONSTRUCTION", exclusionType: "Ineligible (Proceedings Completed)", effectiveDate: "2024-01-15" }],
 };
 
 function fullLiveFetch(): FetchLike {
@@ -234,6 +239,128 @@ describe("prescreen pipeline", () => {
   });
 });
 
+describe("SAM owner checks", () => {
+  beforeEach(() => {
+    clearSamResponseCache();
+  });
+
+  function entityRow(name: string, line1: string | null, zip: string | null) {
+    return {
+      entityRegistration: {
+        legalBusinessName: name,
+        ueiSAM: "TESTUEI1234",
+        registrationStatus: "Active",
+        registrationExpirationDate: "2027-01-01",
+        exclusionStatusFlag: "N",
+      },
+      coreData: {
+        physicalAddress: line1 === null
+          ? {}
+          : { addressLine1: line1, city: "LOS ANGELES", stateOrProvinceCode: "CA", zipCode: zip },
+      },
+    };
+  }
+
+  function samFetch(exclusions: unknown, entities: unknown, seen: string[] = []): FetchLike {
+    const answer = (value: unknown): Response => {
+      if (value instanceof Error) throw value;
+      if (typeof value === "number") return jsonResponse(null, value);
+      return jsonResponse(value);
+    };
+    return async (input: string) => {
+      seen.push(input);
+      if (input.includes("geocoding.geo.census.gov")) return jsonResponse(GEOCODE_OK);
+      if (input.includes("/exclusions")) return answer(exclusions);
+      if (input.includes("/entities")) return answer(entities);
+      return jsonResponse(null, 404);
+    };
+  }
+
+  const EXCLUSIONS_EMPTY = { totalRecords: 0, excludedEntity: [] };
+
+  it("verifies owner identity with registration status and address match", async () => {
+    const report = await runPrescreen({ ...QUERY, owner: "Spring Street Holdings" }, {
+      fetchImpl: samFetch(EXCLUSIONS_EMPTY, {
+        totalRecords: 1,
+        entityData: [entityRow("SPRING STREET HOLDINGS LLC", "200 N SPRING ST", "90012")],
+      }),
+      samApiKey: "free-key",
+    });
+    expect(report.sources.sam.status).toBe("empty");
+    expect(report.sources.samEntity.status).toBe("ok");
+    expect(report.sources.samEntity.summary).toContain("matches this property");
+    expect(report.sources.samEntity.records[0]).toMatchObject({ uei: "TESTUEI1234", status: "Active", address: "match" });
+  });
+
+  it("picks the address-matching registration among same-name entities", async () => {
+    const report = await runPrescreen({ ...QUERY, owner: "Common Name Corp" }, {
+      fetchImpl: samFetch(EXCLUSIONS_EMPTY, {
+        totalRecords: 2,
+        entityData: [
+          entityRow("COMMON NAME CORP", "8700 HOUSTON RD", "78521"),
+          entityRow("COMMON NAME CORP", "200 N SPRING ST", "90012"),
+        ],
+      }),
+      samApiKey: "free-key",
+    });
+    expect(report.sources.samEntity.status).toBe("ok");
+    expect(report.sources.samEntity.summary).toContain("2 registrations match this name, closest shown");
+    expect(report.sources.samEntity.records[0].address).toBe("match");
+  });
+
+  it("reports unknown instead of guessing when the registration has no usable address", async () => {
+    const report = await runPrescreen({ ...QUERY, owner: "No Address Inc" }, {
+      fetchImpl: samFetch(EXCLUSIONS_EMPTY, {
+        totalRecords: 1,
+        entityData: [entityRow("NO ADDRESS INC", null, null)],
+      }),
+      samApiKey: "free-key",
+    });
+    expect(report.sources.samEntity.status).toBe("ok");
+    expect(report.sources.samEntity.summary).toContain("address comparison unavailable");
+    expect(report.sources.samEntity.records[0].address).toBe("unknown");
+  });
+
+  it("degrades a rejected key and exhausted quota with exact remedies", async () => {
+    const keyRejected = await querySamExclusion("Key Test LLC", "stale-key", samFetch(401, EXCLUSIONS_EMPTY));
+    expect(keyRejected.status).toBe("unavailable");
+    expect(keyRejected.summary).toContain("key was rejected");
+    expect(keyRejected.detail).toContain("SAM_API_KEY");
+
+    const quotaOut = await querySamEntity("Quota Test LLC", "free-key", { street: QUERY.street, zip: QUERY.zip }, samFetch(EXCLUSIONS_EMPTY, 429));
+    expect(quotaOut.status).toBe("unavailable");
+    expect(quotaOut.summary).toContain("daily request limit");
+  });
+
+  it("serves repeat owner screens from cache without refetching either leg twice", async () => {
+    const seen: string[] = [];
+    const fetchImpl = samFetch(EXCLUSIONS_EMPTY, {
+      totalRecords: 0,
+      entityData: [],
+    }, seen);
+    await querySamExclusion("Cache Test LLC", "free-key", fetchImpl);
+    await querySamExclusion("Cache Test LLC", "free-key", fetchImpl);
+    await querySamEntity("Cache Test LLC", "free-key", { street: QUERY.street, zip: QUERY.zip }, fetchImpl);
+    await querySamEntity("Cache Test LLC", "free-key", { street: QUERY.street, zip: QUERY.zip }, fetchImpl);
+    expect(seen.filter((url) => url.includes("/exclusions"))).toHaveLength(1);
+    expect(seen.filter((url) => url.includes("/entities"))).toHaveLength(1);
+  });
+
+  it("passes the request owner through to the SAM legs and rejects an overlong owner", async () => {
+    const fetchImpl = samFetch(SAM_OK, { totalRecords: 0, entityData: [] });
+    const live = await handlePrescreenRequest(request({ ...QUERY, owner: "Smith Construction" }), {
+      mode: "live",
+      fetchImpl,
+      samApiKey: "free-key",
+    });
+    expect(live.status).toBe(200);
+    expect(live.body).toMatchObject({ sources: { sam: { status: "ok" }, samEntity: { status: "empty" } } });
+
+    const overlong = await handlePrescreenRequest(request({ ...QUERY, owner: "x".repeat(101) }), { mode: "live", fetchImpl });
+    expect(overlong.status).toBe(400);
+  });
+});
+
 describe("prescreen fixture", () => {
   it("returns a deterministic labeled report without network", () => {
     const first = fixturePrescreen(QUERY);
@@ -243,6 +370,7 @@ describe("prescreen fixture", () => {
     expect(first.fixtureNotice).toBe("Sample pre-screen — not live public records.");
     expect(first.sources.flood.status).toBe("ok");
     expect(first.sources.lahd.status).toBe("empty");
+    expect(first.sources.samEntity.status).toBe("skipped");
   });
 });
 

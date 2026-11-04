@@ -22,6 +22,7 @@ import {
   queryLadbsCases,
   queryLahdViolations,
   queryLeadIndex,
+  querySamEntity,
   querySamExclusion,
   type FetchLike,
   type PrescreenQuery,
@@ -43,6 +44,7 @@ export interface PrescreenReport {
     hudAssisted: PrescreenSourceResult;
     epaTri: PrescreenSourceResult;
     sam: PrescreenSourceResult;
+    samEntity: PrescreenSourceResult;
   };
   fixtureNotice?: string;
 }
@@ -51,7 +53,7 @@ export interface PrescreenPipelineDeps {
   fetchImpl?: FetchLike;
   /** Server-only free SAM.gov key; absent means the SAM source reports skipped. */
   samApiKey?: string | null;
-  /** Owner name for the SAM check; null until a parcel source verifies. */
+  /** Owner name for the SAM checks; overrides the query owner when set (tests). */
   ownerName?: string | null;
 }
 
@@ -70,13 +72,17 @@ function boundedString(value: unknown, maxLength: number): string | null {
 function parseRequest(value: unknown): PrescreenQuery | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
-  if (Object.keys(record).some((key) => !["street", "city", "state", "zip"].includes(key))) return null;
+  if (Object.keys(record).some((key) => !["street", "city", "state", "zip", "owner"].includes(key))) return null;
   const street = boundedString(record.street, 200);
   if (!street) return null;
   const city = boundedString(record.city, 100) ?? "";
   const state = boundedString(record.state, 100) ?? "";
   const zip = boundedString(record.zip, 20) ?? "";
-  return { street, city, state, zip };
+  // An overlong owner name rejects the request instead of silently
+  // dropping to skipped, so the sender knows the name never ran.
+  if (record.owner !== undefined && boundedString(record.owner, 100) === null) return null;
+  const owner = boundedString(record.owner, 100) ?? "";
+  return { street, city, state, zip, owner };
 }
 
 /** Deterministic canned report for fixture mode and tests. Labeled, never live. */
@@ -139,6 +145,13 @@ export function fixturePrescreen(query: PrescreenQuery): PrescreenReport {
         records: [],
         sourceUrl: "https://open.gsa.gov/api/exclusions-api/",
       },
+      samEntity: {
+        status: "skipped",
+        summary: "Owner identity check needs a free SAM.gov API key on the server.",
+        detail: "Any registered SAM.gov user generates one free on Account Details; set it as SAM_API_KEY.",
+        records: [],
+        sourceUrl: "https://open.gsa.gov/api/entity-api/",
+      },
     },
   };
 }
@@ -173,10 +186,13 @@ export async function runPrescreen(
         hudAssisted: skipped("Address could not be located, so the assisted-housing lookup was skipped."),
         epaTri: skipped("Address could not be located, so the emissions lookup was skipped."),
         sam: skipped("Address could not be located, so the exclusion check was skipped."),
+        samEntity: skipped("Address could not be located, so the owner identity check was skipped."),
       },
     };
   }
-  const [ladbs, lahd, flood, lead, disasters, hudAssisted, epaTri, sam] = await Promise.all([
+  const samApiKey = deps.samApiKey !== undefined ? deps.samApiKey : (process.env.SAM_API_KEY ?? null);
+  const ownerName = deps.ownerName !== undefined ? deps.ownerName : (query.owner?.trim() ? query.owner : null);
+  const [ladbs, lahd, flood, lead, disasters, hudAssisted, epaTri, sam, samEntity] = await Promise.all([
     queryLadbsCases(query, fetchImpl, signal),
     queryLahdViolations(query, fetchImpl, signal),
     queryFloodZone(hit, fetchImpl, signal),
@@ -184,7 +200,8 @@ export async function runPrescreen(
     queryDisasters(hit.state ?? query.state.slice(0, 2).toUpperCase(), fetchImpl, signal),
     queryHudAssisted(hit, fetchImpl, signal),
     queryEpaTri(query.zip, fetchImpl, signal),
-    querySamExclusion(deps.ownerName ?? null, deps.samApiKey !== undefined ? deps.samApiKey : (process.env.SAM_API_KEY ?? null), fetchImpl, signal),
+    querySamExclusion(ownerName, samApiKey, fetchImpl, signal),
+    querySamEntity(ownerName, samApiKey, { street: query.street, zip: query.zip }, fetchImpl, signal),
   ]);
   return {
     mode: "live",
@@ -192,7 +209,7 @@ export async function runPrescreen(
     coords: { lat: hit.lat, lon: hit.lon },
     tract: hit.tract,
     county: hit.county,
-    sources: { ladbs, lahd, flood, lead, disasters, hudAssisted, epaTri, sam },
+    sources: { ladbs, lahd, flood, lead, disasters, hudAssisted, epaTri, sam, samEntity },
   };
 }
 

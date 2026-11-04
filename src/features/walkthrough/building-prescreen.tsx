@@ -5,9 +5,10 @@
  * labeled example; any other address runs the free public-record pipeline
  * (Census geocode, then LADBS cases, LAHD violations, FEMA flood, HUD lead
  * index, OpenFEMA disasters, HUD assisted housing, and EPA emissions in
- * parallel — all keyless — plus a key-gated SAM exclusion check). The query is
- * never persisted: it lives in component state, is sent only to the
- * same-origin /api/prescreen route, and never enters the inspection record.
+ * parallel — all keyless — plus key-gated SAM.gov exclusion and owner-identity
+ * checks that run only when an owner name is entered. The query is never
+ * persisted: it lives in component state, is sent only to the same-origin
+ * /api/prescreen route, and never enters the inspection record.
  */
 import { useRef, useState } from "react";
 
@@ -57,6 +58,7 @@ interface PrescreenReport {
     hudAssisted: SourceResult;
     epaTri: SourceResult;
     sam: SourceResult;
+    samEntity: SourceResult;
   };
   fixtureNotice?: string;
 }
@@ -104,13 +106,14 @@ function parseReport(value: unknown): PrescreenReport | null {
   const hudAssisted = parseSource(sources.hudAssisted);
   const epaTri = parseSource(sources.epaTri);
   const sam = parseSource(sources.sam);
-  if (!ladbs || !lahd || !flood || !lead || !disasters || !hudAssisted || !epaTri || !sam) return null;
+  const samEntity = parseSource(sources.samEntity);
+  if (!ladbs || !lahd || !flood || !lead || !disasters || !hudAssisted || !epaTri || !sam || !samEntity) return null;
   return {
     mode: record.mode,
     matchedAddress: record.matchedAddress.slice(0, 300),
     tract: typeof record.tract === "string" ? record.tract : null,
     county: typeof record.county === "string" ? record.county : null,
-    sources: { ladbs, lahd, flood, lead, disasters, hudAssisted, epaTri, sam },
+    sources: { ladbs, lahd, flood, lead, disasters, hudAssisted, epaTri, sam, samEntity },
     fixtureNotice: typeof record.fixtureNotice === "string" ? record.fixtureNotice : undefined,
   };
 }
@@ -124,6 +127,7 @@ const SOURCE_META: Array<{ key: keyof PrescreenReport["sources"]; title: string 
   { key: "epaTri", title: "Nearby emissions" },
   { key: "disasters", title: "Disaster history" },
   { key: "sam", title: "Federal exclusions" },
+  { key: "samEntity", title: "Owner identity" },
 ];
 
 function statusLabel(status: SourceStatus): string {
@@ -140,6 +144,7 @@ export default function BuildingPrescreen(): React.JSX.Element {
   const [city, setCity] = useState("Los Angeles");
   const [state, setState] = useState("CA");
   const [zip, setZip] = useState("");
+  const [owner, setOwner] = useState("");
   const [decision, setDecision] = useState<PrescreenDecision>({ kind: "empty" });
   const [report, setReport] = useState<PrescreenReport | null>(null);
   const [pending, setPending] = useState(false);
@@ -156,7 +161,13 @@ export default function BuildingPrescreen(): React.JSX.Element {
       const response = await fetch("/api/prescreen", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ street: street.trim(), city: city.trim(), state: state.trim(), zip: zip.trim() }),
+        body: JSON.stringify({
+          street: street.trim(),
+          city: city.trim(),
+          state: state.trim(),
+          zip: zip.trim(),
+          ...(owner.trim() ? { owner: owner.trim() } : {}),
+        }),
       });
       const body = (await response.json()) as unknown;
       if (sequence !== requestRef.current) return;
@@ -229,6 +240,16 @@ export default function BuildingPrescreen(): React.JSX.Element {
           autoComplete="off"
           inputMode="numeric"
           onChange={(event) => setZip(event.currentTarget.value)}
+        />
+        <label htmlFor="prescreen-owner">Owner name (optional, enables the federal checks)</label>
+        <input
+          id="prescreen-owner"
+          data-testid="prescreen-owner"
+          value={owner}
+          maxLength={100}
+          autoComplete="off"
+          placeholder="As listed with the county assessor"
+          onChange={(event) => setOwner(event.currentTarget.value)}
         />
         <button type="submit" data-testid="prescreen-check" disabled={pending}>
           {pending ? "Checking…" : "Check building"}
