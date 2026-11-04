@@ -266,6 +266,24 @@ the provider dashboard against the $10 approval. No clip bytes,
 credentials, file IDs, tokens, or provider bodies are recorded here
 or in the repository.
 
+## Run record — 2026-11-04 mvp32 synthetic connectivity probe (Muse Code)
+
+Method: direct same-origin route call (multipart stage=segment)
+against `metainspect-dev--0000028` (image `metainspect:mvp32`),
+synthetic H.264 test-pattern fixture (NOT staged footage), no
+browser, no retries. Owner-authorized as a connectivity check
+after the staged clips were found missing from `/tmp`.
+
+Result: segment HTTP 200 in 5.8 s with 0 candidates — correct
+abstention on a test pattern, no hallucinated fixtures. No map
+call (none eligible), no lease left behind. Connectivity only
+(`videoQuality: not-assessed`); not tracking/mapping evidence
+and not the staged gate. The staged kitchen/bathroom clips no
+longer exist on this host; quality re-proof awaits owner
+resupply. Spend: one segment call, no map spend; owner confirms
+on the provider dashboard. No clip bytes, credentials, file IDs,
+tokens, or provider bodies are recorded here or in the repo.
+
 ## Room-set scorecard (owner variance)
 
 Scored from served still bytes (SHA-256-verified), segment/map payloads, and

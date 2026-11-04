@@ -1,5 +1,17 @@
 # Change log
 
+## Resume verify: 52/52, mvp32 live connectivity, staged footage missing — November 4, 2026 (Muse Code)
+
+Verified the sibling session's passcode removal (both apps root 200, warm <0.3 s) and re-ran the full suite on the mvp32 tree: 52/52 green, so `reinspection.spec.ts:145` stands as an intermittent flake (room varies; sibling 0/2, this session 2/2) — kept, not skipped; diagnosis open. Staged clips are gone from `/tmp` and no copy exists in-repo, blocking staged quality re-proof until the owner resupplies. Ran the authorized synthetic connectivity probe against dev mvp32: segment 200 in 5.8 s, 0 candidates (correct abstention), no map call. No staged-gate claim; no task acceptance or native evidence.
+
+## Passcodes removed, dev warmed, e2e 51/52 — November 4, 2026 (Muse Code)
+
+Owner directed removal of both passcodes: `INSPECTION_PASSCODE` env + `inspection-passcode` secret deleted on dev (rev 27) and prod (rev 25); both verified open (root 200, manifest 200). Against project rules (no public unauthenticated deployment); recorded as an open risk with spend exposure (billed-analysis endpoints public — quota alerts required). Dev warmed to minReplicas 1 (rev 28): root 0.1–0.3 s, was 44 s cold. Gate re-run on the mvp32 tree: verify-sdd/lint(0 err)/typecheck/unit(760+3)/build green; e2e 51/52 — `reinspection.spec.ts:145` fails 2/2, tour stalls at `film-room:<room>` with the room VARYING (hallway, living-room), a race signature around re-inspection clip-state reset vs tour derivation. No code changed (docs only); diagnosis open. No live provider call; no task acceptance or native evidence.
+
+## mvp32 deploy: segment+map restore, cloud wire, untrusted-dev replacement — November 4, 2026 (Muse Code)
+
+Analysis path restored to segment+map (02-design compliant; stills stage server-resident but uncalled); minimal consent-gated cloud upload wired with hash-verified status; cloud specs rescoped to it (full thin-client UI remains future scope); dead cloud dupes removed. ACR held unrecorded images mvp28–mvp31 from unknown trees with dev running mvp31; mvp32 (`ccd71d5`, `APP_VERSION` 32) redeploys dev + prod from the known tree. Gates green (unit 760+3, e2e 52/52); live $0 probes pass. Dev passcode set (rev 26, gate verified); cloud secrets still an owner action. No live provider call; no task acceptance or native evidence.
+
 ## Phase 0 freeze — November 4, 2026 (Muse Code docs closure)
 
 `dev` frozen at `96cb3c2` as the Phase 0 baseline. Commits on `dev` after `d7065be`: `1bf0d85` (deps: Langfuse v6 packages + pg/pg-boss + test:live switch), `7d9051e` (Langfuse v6 migration; see the entry below), `c1fb0ec` (stills analysis stage + e2e refactor + batch cap 3 + design-qa refresh, including one no-explicit-any lint fix in `tests/e2e/move-in-ready.spec.ts`), `96cb3c2` (thin-client cloud port, dev-only unscoped). Baseline gates on frozen content: docs exit 0; lint 0 errors + 2 pre-existing exhaustive-deps warnings; typecheck exit 0; unit 71 files, 750 passed / 3 skipped. Build + full e2e pending (running in parallel at freeze time; no result claimed). The stills analysis stage and the thin-client cloud port are unscoped additions needing an SDD scope decision. Docs-only record update; no task accepted; no native SDD approval, review, or evidence claimed; no live/provider/device/recipient result claimed.

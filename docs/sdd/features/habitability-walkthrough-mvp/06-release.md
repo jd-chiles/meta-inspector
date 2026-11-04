@@ -1,6 +1,28 @@
 # Release record
 
-Status: Not ready (2026-11-04 Phase 0 freeze at dev 96cb3c2; see latest entry)
+Status: Not ready (2026-11-04 mvp32 on dev + prod; field gates open — see latest entry)
+
+## mvp32 segment+map restore + minimal cloud wire — 2026-11-04 (Muse Code)
+
+Status stays Not ready. Deployed `ccd71d5` as
+`metainspectprod.azurecr.io/metainspect:mvp32`
+(sha256:9e59f88e…) to dev (rev `metainspect-dev--0000025`)
+and prod (rev `metainspect-app--0000024`), both Healthy.
+Restores the SDD segment+map live path (stills server code
+present but uncalled), adds the consent-gated manual cloud
+upload wire, and replaces the unrecorded dev mvp31 of unknown
+provenance. Pre-deploy gates green: docs, lint 0 errors,
+typecheck, unit 760 passed / 3 skipped, build, e2e 52/52.
+Live $0: 307 gate + manifest on prod, origin accept/reject
+pair on dev. No live provider call in this entry.
+Remaining: passcodes REMOVED owner-directed 2026-11-04
+(dev rev 28 open + warm, prod rev 25 open — public, no auth,
+spend-exposed); cloud services unprovisioned,
+staged-footage quality re-proof (mvp32 connectivity proven
+synthetic 200/0-candidates; staged clips missing), owner LTE
+phone run, recipient acceptance, custom domain, quota alerts,
+ops owner, native evidence. Not task acceptance or a release
+decision.
 
 ## Phase 0 freeze — 2026-11-04 (Muse Code docs closure)
 
