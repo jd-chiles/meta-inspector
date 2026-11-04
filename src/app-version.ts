@@ -3,4 +3,4 @@
  * Bump this in the same commit as every deploy image tag
  * (metainspect:mvp<N>) so on-device builds are always identifiable.
  */
-export const APP_VERSION = "31";
+export const APP_VERSION = "32";
