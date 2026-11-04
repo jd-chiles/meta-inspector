@@ -331,6 +331,26 @@ function failure(error: VideoSegmentError): Response {
   return jsonResponse(body, error.status);
 }
 
+/**
+ * Single server-side record for every segment/map/cancel failure. Status
+ * and stable code only — no media, identity, key material, provider
+ * bodies, or user data — so container logs stay useful and safe.
+ */
+function logSegmentFailure(request: Request, error: VideoSegmentError): void {
+  let stage = "unknown";
+  try {
+    stage = new URL(request.url).searchParams.get("stage") ?? "unknown";
+  } catch {
+    // Keep "unknown": the URL itself failed to parse.
+  }
+  console.error(JSON.stringify({
+    event: "video-segment-failure",
+    stage,
+    status: error.status,
+    code: error.code,
+  }));
+}
+
 function jsonResponse(body: unknown, status: number): Response {
   const serialized = JSON.stringify(body);
   if (Buffer.byteLength(serialized, "utf8") > MAX_JSON_RESPONSE_BYTES) {
@@ -2168,8 +2188,11 @@ export async function handleVideoSegmentRequest(request: Request, deps: Dependen
       deadline.dispose();
     }
   } catch (error) {
-    if (error instanceof VideoSegmentError) return failure(error);
-    return failure(new VideoSegmentError(502, "PROVIDER_FAILURE", "Video processing could not be completed."));
+    const normalized = error instanceof VideoSegmentError
+      ? error
+      : new VideoSegmentError(502, "PROVIDER_FAILURE", "Video processing could not be completed.");
+    logSegmentFailure(request, normalized);
+    return failure(normalized);
   } finally {
     processingLease?.release();
     if (tracer) await tracer.flush();

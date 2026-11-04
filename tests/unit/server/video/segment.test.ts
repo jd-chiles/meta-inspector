@@ -520,6 +520,27 @@ describe("POST /api/video/segment", () => {
     }
   });
 
+  it("logs one safe failure record with stage, status, and code for every rejected request", async () => {
+    const first = claimVideoProcessing();
+    const second = claimVideoProcessing();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await handleVideoSegmentRequest(requestFor({ stage: "segment" }), { env: LIVE_ENV });
+      expect(response.status).toBe(429);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(errorSpy.mock.calls[0]?.[0]))).toEqual({
+        event: "video-segment-failure",
+        stage: "segment",
+        status: 429,
+        code: "PROCESSING_BUSY",
+      });
+    } finally {
+      errorSpy.mockRestore();
+      first.release();
+      second.release();
+    }
+  });
+
   it("rejects oversized streamed multipart bytes even when Content-Length is understated", async () => {
     const form = new FormData();
     form.append("stage", "map");
