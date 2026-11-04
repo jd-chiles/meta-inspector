@@ -245,9 +245,11 @@ describe("deriveTourNode", () => {
 
   it("lists every shot on the room's filming list for the visible checklist", () => {
     const kitchenShots = filmRoomShots("kitchen").join(" ").toLowerCase();
-    for (const shot of ["faucet", "sink", "lock", "detector"]) {
+    for (const shot of ["faucet", "sink", "detector"]) {
       expect(kitchenShots).toContain(shot);
     }
+    // Owner direction: the entry-door shot belongs to the hallway, not the kitchen.
+    expect(kitchenShots).not.toContain("lock");
     const bathroomShots = filmRoomShots("bathroom").join(" ").toLowerCase();
     for (const shot of ["faucet", "toilet", "fan"]) {
       expect(bathroomShots).toContain(shot);

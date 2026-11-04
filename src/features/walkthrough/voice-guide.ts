@@ -95,7 +95,7 @@ export function speakCueSequence(
         }
       }
       if (chain.signal.aborted) return;
-      await new Promise((resolveGap) => setTimeout(resolveGap, 600));
+      await new Promise((resolveGap) => setTimeout(resolveGap, 1000));
     }
   })().finally(() => {
     if (controller === chain) controller = null;

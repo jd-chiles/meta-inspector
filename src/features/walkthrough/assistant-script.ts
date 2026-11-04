@@ -47,7 +47,6 @@ export const ASSISTANT_FILMING_SCRIPTS: Record<MoveInReadyRoomType, readonly str
   kitchen: [
     "Recording. First, run the kitchen faucet and show the water flow and drainage.",
     "Now pan across the sink, counters, and outlets.",
-    "Open the entry door and test its lock.",
     "Finally, show the smoke or carbon monoxide detector and its indicator light.",
   ],
   bathroom: [
@@ -85,7 +84,6 @@ export const ASSISTANT_FILMING_SCRIPTS_ES: Record<MoveInReadyRoomType, readonly 
   kitchen: [
     "Grabando. Primero, abra el grifo de la cocina y muestre el flujo y el desagüe.",
     "Ahora muestre el fregadero, las encimeras y los enchufes.",
-    "Abra la puerta de entrada y pruebe su cerradura.",
     "Por último, muestre el detector de humo o monóxido de carbono y su luz indicadora.",
   ],
   bathroom: [

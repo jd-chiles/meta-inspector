@@ -6,9 +6,9 @@ import {
   type EvaluatorDecisionSet,
 } from "../../../src/domain/move-in-ready";
 import { createInitialInspectionRecord } from "../../../src/features/walkthrough/inspection-store";
-import { ASSISTANT_FILMING_SCRIPTS, ASSISTANT_FILMING_SCRIPTS_ES } from "../../../src/features/walkthrough/assistant-script";
+import { ASSISTANT_FILMING_SCRIPTS, ASSISTANT_FILMING_SCRIPTS_ES, deriveAssistantNode } from "../../../src/features/walkthrough/assistant-script";
 import { SETUP_VOICE_QUESTIONS, SETUP_VOICE_QUESTIONS_ES, TOUR_REPROMPTS, TOUR_REPROMPTS_ES, VOICE_ROOM_CHECKS, VOICE_ROOM_CHECKS_ES } from "../../../src/features/walkthrough/voice-checks";
-import { LANDLORD_VOICE_QUESTION, LANDLORD_VOICE_QUESTION_ES, REVIEW_VOICE_QUESTION, REVIEW_VOICE_QUESTION_ES, tourScriptForNode } from "../../../src/features/walkthrough/guided-tour";
+import { LANDLORD_VOICE_QUESTION, LANDLORD_VOICE_QUESTION_ES, REVIEW_VOICE_QUESTION, REVIEW_VOICE_QUESTION_ES, filmOutroCue, filmRoomScript, tourScriptForNode } from "../../../src/features/walkthrough/guided-tour";
 import { DETECTOR_TEST_PROMPT, DETECTOR_TEST_PROMPT_ES } from "../../../src/features/walkthrough/detector-test";
 import { VOICE_CLIP_TEXTS, VOICE_CLIP_TEXTS_ES, voiceClipId } from "../../../scripts/voice-inventory.mjs";
 
@@ -85,6 +85,91 @@ describe("voice inventory contract", () => {
     expect(CLIPS).toContain(REVIEW_VOICE_QUESTION);
     expect(CLIPS).toContain(LANDLORD_VOICE_QUESTION);
     expect(CLIPS).toContain(DETECTOR_TEST_PROMPT);
+  });
+
+  it("covers every standard film-room intro variant and the outro", () => {
+    for (const roomId of ["kitchen", "bathroom", "bedroom", "living-room", "hallway"] as const) {
+      for (let total = 1; total <= 5; total += 1) {
+        for (let position = 1; position <= total; position += 1) {
+          expect(CLIPS).toContain(filmRoomScript(roomId, position, total));
+        }
+      }
+    }
+    expect(CLIPS).toContain(filmOutroCue());
+  });
+
+  it("covers every static guide-bar line on every branch", () => {
+    const roomIds = ["kitchen", "bathroom", "bedroom", "living-room", "hallway"] as const;
+    const base = {
+      fundingType: "lahsa" as const,
+      flowStarted: true,
+      canCapture: true,
+      pseudonym: "unit-a",
+      evaluatorName: "Evaluator",
+      roomIds,
+      filmedRoomIds: roomIds,
+      analyzedRoomIds: roomIds,
+      analyzedTotal: roomIds.length,
+      resolvedDecisions: 0,
+      nextUndecidedLabel: null,
+      nextUndecidedId: null,
+      signed: false,
+      batchActive: false,
+    };
+    const branches = [
+      { ...base, fundingType: "hud" as const },
+      { ...base, flowStarted: false },
+      { ...base, canCapture: false },
+      { ...base, batchActive: true },
+      { ...base, analyzedTotal: 0 },
+      { ...base, resolvedDecisions: 11 },
+      { ...base, resolvedDecisions: 11, signed: true },
+    ];
+    for (const input of branches) {
+      const node = deriveAssistantNode(input);
+      expect(CLIPS, `missing guide line for ${node.key}`).toContain(node.speak);
+    }
+  });
+
+  it("covers every guide-bar film step and remaining-count line", () => {
+    const roomIds = ["kitchen", "bathroom", "bedroom", "living-room", "hallway"] as const;
+    const base = {
+      fundingType: "lahsa" as const,
+      flowStarted: true,
+      canCapture: true,
+      pseudonym: "unit-a",
+      evaluatorName: "Evaluator",
+      analyzedTotal: 0,
+      resolvedDecisions: 0,
+      nextUndecidedLabel: null,
+      nextUndecidedId: null,
+      signed: false,
+      batchActive: false,
+    };
+    for (let total = 1; total <= 5; total += 1) {
+      const rooms = roomIds.slice(0, total);
+      for (let filmed = 0; filmed < total; filmed += 1) {
+        const node = deriveAssistantNode({
+          ...base,
+          roomIds: rooms,
+          filmedRoomIds: rooms.slice(0, filmed),
+          analyzedRoomIds: rooms.slice(0, filmed),
+          analyzedTotal: filmed,
+        });
+        expect(CLIPS).toContain(node.speak);
+      }
+    }
+    for (let resolved = 0; resolved < 11; resolved += 1) {
+      const node = deriveAssistantNode({
+        ...base,
+        roomIds,
+        filmedRoomIds: roomIds,
+      analyzedRoomIds: roomIds,
+        analyzedTotal: roomIds.length,
+        resolvedDecisions: resolved,
+      });
+      expect(CLIPS).toContain(node.speak);
+    }
   });
 
   it("covers every Spanish room check, filming cue, setup question, and reprompt", () => {

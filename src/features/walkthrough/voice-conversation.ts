@@ -115,11 +115,12 @@ export const PLAYBACK_TIMEOUT_MESSAGE = "voice playback timed out";
  * the device fallback all speak ~30% slower than conversational so filming
  * keeps up. Timeout budgets assume this rate (roughly 10 chars/second).
  */
-export const SPEECH_PLAYBACK_RATE = 0.7;
-export const DEVICE_SPEECH_RATE = 0.75;
+export const SPEECH_PLAYBACK_RATE = 0.6;
+export const DEVICE_SPEECH_RATE = 0.65;
 
 export function playbackTimeoutMs(text: string): number {
-  return Math.max(17_000, Math.min(60_000, text.length * 160));
+  // Slower narration needs a longer ceiling, or clips get cut mid-sentence.
+  return Math.max(20_000, Math.min(75_000, text.length * 200));
 }
 
 function playAudioUrl(url: string, signal?: AbortSignal, timeoutMs: number = 12_000): Promise<void> {
@@ -165,6 +166,16 @@ function isPlaybackTimeout(error: unknown): boolean {
   return error instanceof Error && error.message === PLAYBACK_TIMEOUT_MESSAGE;
 }
 
+/**
+ * Autoplay policy, not a broken clip. Falling through to live synthesis here
+ * would bill a provider call that is equally unable to play, and the device
+ * voice would then read the line in a different voice. Stay silent instead:
+ * the next user gesture unlocks playback and the same static clip plays.
+ */
+function isAutoplayBlocked(error: unknown): boolean {
+  return (error as { name?: unknown } | null)?.name === "NotAllowedError";
+}
+
 export interface SpeakPromptOptions {
   /** Tour narration language; "es" uses the Spanish owner voice (REQ-R2). */
   language?: "en" | "es";
@@ -185,6 +196,8 @@ export async function speakPrompt(text: string, signal?: AbortSignal, options: S
     }
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
+    // Autoplay-blocked: the clip is fine, the browser is waiting for a gesture.
+    if (isAutoplayBlocked(error)) return { engine: "none" };
     // A stuck clip counts as spoken: never freeze the walkthrough on it.
     if (isPlaybackTimeout(error)) return { engine: "fish" };
     // A missing or unplayable clip falls through to live speech below.
@@ -214,6 +227,7 @@ export async function speakPrompt(text: string, signal?: AbortSignal, options: S
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     if (signal?.aborted) return { engine: "none" };
     if (isPlaybackTimeout(error)) return { engine: "fish" };
+    if (isAutoplayBlocked(error)) return { engine: "none" };
     stopDeviceSpeech();
     await speakWithDeviceVoice(text);
     if (signal?.aborted) return { engine: "none" };
@@ -264,7 +278,7 @@ export async function speakCueChain(
       }
     }
     if (signal.aborted) return;
-    await new Promise((resolveGap) => setTimeout(resolveGap, 600));
+    await new Promise((resolveGap) => setTimeout(resolveGap, 1000));
   }
 }
 
