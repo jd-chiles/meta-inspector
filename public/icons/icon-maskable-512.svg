@@ -1,9 +1,9 @@
-<!-- Original rights-cleared maskable icon for the Habitability Walkthrough Companion.
+<!-- Original rights-cleared maskable icon for Walkthrough Kit.
   Hand-authored geometric mark (house outline + review check) on a full-bleed
   theme background (#0b5cad). Key artwork is confined to the central ~66% safe
   zone so OS icon masks never clip meaningful content. No third-party assets,
   fonts, or trademarks. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Habitability Walkthrough Companion maskable app icon">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Walkthrough Kit maskable app icon">
   <rect x="0" y="0" width="512" height="512" fill="#0b5cad"/>
   <g transform="translate(86,86) scale(0.6640625)">
     <!-- House outline -->

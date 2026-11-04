@@ -1,4 +1,8 @@
-# Meta-Inspect — Runbook
+# Walkthrough Kit — Runbook
+
+This runbook preserves the original team-lane notes. For current product scope,
+ownership, and release gates, follow `AGENTS.md` and
+`docs/PRODUCTION_MVP_ROADMAP.md`.
 
 How backend, frontend, and gtm coordinate without asking PM again. Normative
 for handoffs; the SDD plan (`docs/sdd/features/habitability-walkthrough-mvp/`)

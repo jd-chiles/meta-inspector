@@ -6,9 +6,9 @@ Packet under review (generated 2026-11-02 from `buildMoveInReadyExportSet` at
 `101a67f`, staged inspection `packet-session-2026-11-02`: 10 Approved, 1
 Deficient with evidence still + full correction plan, signed):
 
-- `move-in-ready-client-file-….pdf` (client file)
-- `move-in-ready-landlord-fix-list-….pdf` (landlord fix list)
-- `move-in-ready-hmis-ready-….pdf` (official Form 1083, filled + flattened)
+- `walkthrough-kit-client-file-….pdf` (client file)
+- `walkthrough-kit-landlord-fix-list-….pdf` (landlord fix list)
+- `walkthrough-kit-hmis-ready-….pdf` (official Form 1083, filled + flattened)
 - `packet-session-2026-11-02-hmis-ready.json` (HMIS-style companion data)
 
 Files are handed to the recipient out of band; they are not stored in this

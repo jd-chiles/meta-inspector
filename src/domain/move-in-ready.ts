@@ -1,5 +1,5 @@
 /**
- * Domain contract for the Move-in Ready video walkthrough flow.
+ * Domain contract for the Walkthrough Kit video walkthrough flow.
  *
  * Model output is kept in `ModelElementProposal`. There is deliberately no
  * path from a proposal to an `EvaluatorDecision`: the evaluator records
@@ -11,7 +11,7 @@
 
 import type { ValidationResult } from "./catalog";
 
-/** Version of the persisted Move-in Ready inspection/evidence contract. */
+/** Version of the persisted Walkthrough Kit inspection/evidence contract. */
 export const MOVE_IN_READY_SCHEMA_VERSION = 5;
 
 /**

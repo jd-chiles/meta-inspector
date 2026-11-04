@@ -1,6 +1,6 @@
 # Walkthrough Kit
 
-**A human-led, AI-assisted habitability walkthrough companion.**
+**A human-led, AI-assisted habitability walkthrough for housing navigators.**
 
 Walkthrough Kit helps housing navigators and case managers capture a staged unit walkthrough, review evidence-linked AI observations, and prepare local files for a manual habitability-inspection workflow.
 
@@ -68,7 +68,7 @@ Read the [hackathon project narrative](docs/HACKATHON.md) for the problem, appro
 
 ## Project name
 
-The product name is **Walkthrough Kit**. The GitHub repository currently uses the `meta-inspector` slug. The `walkthroughkit.com` domain is being purchased; do not treat it as a live public site until registration and deployment are confirmed. Older records may use “Meta-Inspect” as a technical or historical name.
+The product name is **Walkthrough Kit**. The GitHub repository URL currently uses the `meta-inspector` slug. The `walkthroughkit.com` domain is being purchased; do not treat it as a live public site until registration and deployment are confirmed.
 
 ## License and bundled materials
 

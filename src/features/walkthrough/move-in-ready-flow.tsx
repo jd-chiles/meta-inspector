@@ -2418,10 +2418,10 @@ export default function MoveInReadyFlow({ analysisMode }: MoveInReadyFlowProps) 
       </p>
       <header className={`${styles.topBar} ${analysisMode === "live" ? styles.topBarConfigured : ""}`}>
         <div className={styles.brand}>
-          <span className={styles.brandMark} aria-hidden="true">MR</span>
+          <span className={styles.brandMark} aria-hidden="true">WK</span>
           <div className={styles.brandCopy}>
             <p className={styles.brandKicker}>LAHSA Form 1083 · Local draft</p>
-            <p className={styles.brandTitle}>Move-in Ready</p>
+            <p className={styles.brandTitle}>Walkthrough Kit</p>
           </div>
         </div>
         <span className={`${styles.modeBadge} ${analysisMode === "live" ? styles.modeLive : analysisMode === "fixture" ? styles.modeFixture : styles.modeUnconfigured}`} data-testid="analysis-mode">

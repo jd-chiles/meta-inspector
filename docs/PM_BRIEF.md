@@ -1,4 +1,4 @@
-# Meta-Inspect — PM Brief (2026-10-28)
+# Walkthrough Kit — Historical PM Brief (2026-10-28)
 
 Source snapshot inspected: SDD slug `habitability-walkthrough-mvp`, stage
 `verifying` (`.sdd/state/habitability-walkthrough-mvp.json`, updated

@@ -356,7 +356,7 @@
   },
   {
     "id": "TASK-104",
-    "title": "Move-in Ready domain and intake contracts",
+    "title": "Walkthrough Kit domain and intake contracts",
     "description": "Define the stable four-room and eleven-element model, strict evidence-linked model proposals, separate evaluator decisions, funding route, and human-only sign-off/result rules.",
     "profile": "implementer",
     "difficulty": "medium",
@@ -515,7 +515,7 @@
   },
   {
     "id": "TASK-108",
-    "title": "Move-in Ready flow verification",
+    "title": "Walkthrough Kit flow verification",
     "description": "Add focused browser and exporter coverage for the integrated mobile video workflow, human decision gate, failure states, and local export set. Ownership is phase-based: TASK-108 may extend tests established by completed prior implementation tasks, including TASK-103, after TASK-107 completes. No tasks edit shared files concurrently.",
     "profile": "tests",
     "difficulty": "high",

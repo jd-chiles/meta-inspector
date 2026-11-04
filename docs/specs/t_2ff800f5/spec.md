@@ -1,8 +1,8 @@
-# SPEC: Fold verified Form 1083 source findings into Move-in Ready (HQS exception, VSP destination, inspection occasion)
+# SPEC: Fold verified Form 1083 source findings into Walkthrough Kit (HQS exception, VSP destination, inspection occasion)
 
 Short goal
 
-- Update the Move-in Ready (Form 1083) workflow so it reflects the verified, owner-confirmed official form (public/forms/lahsa-form-1083-fy-2022-2023.pdf) rather than the external attachment. Close the four verified gaps (HQS exception copy, recorded destination, inspection occasion, landlord-fix consequence sentence) without changing the bundled official PDF's bytes or adding new AcroForm widgets.
+- Update the Walkthrough Kit (Form 1083) workflow so it reflects the verified, owner-confirmed official form (public/forms/lahsa-form-1083-fy-2022-2023.pdf) rather than the external attachment. Close the four verified gaps (HQS exception copy, recorded destination, inspection occasion, landlord-fix consequence sentence) without changing the bundled official PDF's bytes or adding new AcroForm widgets.
 
 Background / context
 

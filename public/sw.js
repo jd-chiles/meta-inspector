@@ -1,5 +1,5 @@
 /**
- * Habitability Walkthrough Companion — service worker (REQ-007, REQ-010, REQ-013).
+ * Walkthrough Kit — service worker (REQ-007, REQ-010, REQ-013).
  *
  * App-shell precache + offline fallback. Caches the application shell and
  * static assets ONLY. Never caches, stores, or serves:
@@ -72,7 +72,7 @@ function offlineFallbackHtml() {
     "<!doctype html>" +
     '<html lang="en"><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
-    "<title>Offline — Habitability Walkthrough Companion</title>" +
+    "<title>Offline — Walkthrough Kit</title>" +
     "<style>body{font-family:system-ui,sans-serif;margin:2rem;line-height:1.6}" +
     ".card{max-width:36rem;border:.125rem solid #5b6b82;border-radius:.625rem;padding:1rem 1.25rem}" +
     "</style></head><body><main><div class=\"card\" role=\"alert\">" +

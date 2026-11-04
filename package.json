@@ -1,8 +1,8 @@
 {
-  "name": "habitability-walkthrough-companion",
+  "name": "walkthrough-kit",
   "version": "0.1.0",
   "private": true,
-  "description": "Mobile-first LAHSA Form 1083 walkthrough companion for room video capture, evidence-linked draft review, worker sign-off, and local exports. Video decoding runs in the browser; live Meta SAM and Muse processing stays server-side and is never required for local checks.",
+  "description": "Walkthrough Kit is a mobile-first LAHSA Form 1083 walkthrough tool for room video capture, evidence-linked draft review, worker sign-off, and local exports. Video decoding runs in the browser; live Meta SAM and Muse processing stays server-side and is never required for local checks.",
   "engines": {
     "node": "22.x"
   },

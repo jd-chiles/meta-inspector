@@ -1,4 +1,4 @@
-/** Versioned local storage for Move-in Ready decisions and clip identities. */
+/** Versioned local storage for Walkthrough Kit decisions and clip identities. */
 
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import catalogJson from "../../data/catalog.demo.json";

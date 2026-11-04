@@ -270,7 +270,7 @@ export async function buildHmisReadyJson(input: MoveInReadyExportInput): Promise
 
 export function exportFilename(kind: MoveInReadyExportKind, sessionId: string, generatedAt = new Date().toISOString()): string {
   const timestamp = generatedAt.replace(/[^0-9T]/g, "-").replace(/-+$/, "");
-  return `move-in-ready-${kind}-${safeIdentifier(sessionId)}-${timestamp}.pdf`;
+  return `walkthrough-kit-${kind}-${safeIdentifier(sessionId)}-${timestamp}.pdf`;
 }
 
 async function buildPdf(
@@ -299,7 +299,7 @@ async function buildPdf(
   await stampFooter(page);
 
   const title = titleFor(kind);
-  await drawText(page, "MOVE-IN READY · LOCAL DRAFT", {
+  await drawText(page, "WALKTHROUGH KIT · LOCAL DRAFT", {
     x: margin,
     y: cursorY,
     size: 9,

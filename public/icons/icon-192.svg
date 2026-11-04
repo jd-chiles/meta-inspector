@@ -1,7 +1,7 @@
-<!-- Original rights-cleared icon for the Habitability Walkthrough Companion.
+<!-- Original rights-cleared icon for Walkthrough Kit.
   Hand-authored geometric mark (house outline + review check) in the app theme
   palette (#0b5cad on #eef3f8). No third-party assets, fonts, or trademarks. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192" role="img" aria-label="Habitability Walkthrough Companion app icon">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192" role="img" aria-label="Walkthrough Kit app icon">
   <rect x="8" y="8" width="176" height="176" rx="40" fill="#0b5cad"/>
   <rect x="8" y="8" width="176" height="176" rx="40" fill="none" stroke="#eef3f8" stroke-width="6" opacity="0.35"/>
   <!-- House outline -->

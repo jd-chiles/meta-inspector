@@ -102,7 +102,7 @@ const SIGNOFF = {
 };
 const CAPTURED_ROOM_IDS = roomsForUnit("1-bedroom", 1);
 
-describe("Move-in Ready inspection domain", () => {
+describe("Walkthrough Kit inspection domain", () => {
   it("derives the room list from the evaluator's unit description", () => {
     expect(roomsForUnit("studio", 1)).toEqual(["kitchen", "bathroom", "living-room", "hallway"]);
     expect(roomsForUnit("1-bedroom", 1)).toEqual(["kitchen", "bathroom", "bedroom", "living-room", "hallway"]);

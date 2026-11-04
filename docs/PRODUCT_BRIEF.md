@@ -4,7 +4,7 @@ Updated November 4, 2026 from the owner-provided product brief and mobile concep
 
 ## Product
 
-Walkthrough Kit is a mobile-first Habitability Walkthrough Companion for housing navigators and case managers. It guides an evaluator through a staged unit video walkthrough, prepares evidence-linked draft observations for review, records the evaluator's own decisions, and creates local export files for the existing manual workflow.
+Walkthrough Kit is a mobile-first Form 1083 walkthrough tool for housing navigators and case managers. It guides an evaluator through a staged unit video walkthrough, prepares evidence-linked draft observations for review, records the evaluator's own decisions, and creates local export files for the existing manual workflow.
 
 ## Problem framing
 

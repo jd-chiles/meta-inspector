@@ -29,7 +29,7 @@ Use the current main checkout, not an older handoff path. Inspect branch/status 
 - Kitchen voice guidance is spaced through the longer clip; hallway cues are scheduled early enough to finish before the 15-second recording stops.
 - Kitchen instructions cover faucet flow/drainage, sink/counters/outlets, the running fan, and smoke/CO detector. Front door/lock instructions and SAM prompts are in the hallway. The kitchen SAM prompt set still covers all 11 modeled elements by combining stove/refuse as one food-preparation prompt while retaining wall-surface, fan, and countertop prompts.
 - The review UI displays all linked source stills, and the mapper receives criteria/manual-check context for the 11 Form 1083 areas. This is implementation work, not evidence of improved accuracy; the authored clip gate remains required.
-- Active README, product brief, hackathon narrative, roadmap, and SDD docs use **Walkthrough Kit**. The GitHub slug remains `meta-inspector`; the new domain is not yet verified live.
+- README, app header, page title, PWA install name, app icons, PDF label/download filenames, package metadata, and active product docs use **Walkthrough Kit**. Internal storage keys and schema identifiers retain their legacy names to preserve saved-data compatibility. The GitHub URL still uses `meta-inspector`; the new domain is not yet verified live.
 - Playwright can use an alternate port through `PLAYWRIGHT_PORT` to avoid interrupting an existing local preview.
 
 ## Check results
@@ -39,9 +39,9 @@ Fill this section from the final run on the pushed handoff commit. Never infer a
 - `node scripts/verify-sdd.mjs`: passed on the current tree — 15 requirements, 11 active acyclic tasks, 7 named checks. This validates SDD structure only.
 - `npm run typecheck`: passed.
 - `npm run lint`: passed with three existing React hook warnings in `src/features/walkthrough/move-in-ready-flow.tsx` (lines 834, 943, 1015).
-- `npm run test:unit`: 475 passed, 3 skipped, 38 files passed.
+- `npm run test:unit`: 476 passed, 3 skipped, 38 files passed. Includes a Walkthrough Kit export-filename assertion.
 - `npm run build`: passed on the current tree; Next.js compiled, type-checked, generated all 11 static pages, and produced the route bundle. It emitted the same three React hook warnings noted above.
-- `PLAYWRIGHT_PORT=3111 npm run test:e2e`: passed, 43 tests in 3.0 minutes. The default port 3101 was already held by another preview, which was left running. Playwright's build emitted the three existing React hook warnings; browser tests used fixture data and made no live provider call.
+- `PLAYWRIGHT_PORT=3111 npm run test:e2e`: passed, 43 tests in 3.3 minutes. The default port 3101 was already held by another preview, which was left running. Playwright's build emitted the three existing React hook warnings; browser tests used fixture data and made no live provider call. The desktop browser check also confirms the visible Walkthrough Kit app header.
 - `npm run test:live`: not run. No live provider quality claim is made.
 
 ## Critical remaining risk: hosted analysis latency

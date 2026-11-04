@@ -6,7 +6,7 @@ import {
 } from "../../../src/domain/move-in-ready";
 import { MOVE_IN_READY_ELEMENT_CRITERIA } from "../../../src/domain/element-criteria";
 
-describe("Move-in Ready video criteria reference", () => {
+describe("Walkthrough Kit video criteria reference", () => {
   it("provides displayable checklist criteria for each stable element", () => {
     expect(Object.keys(MOVE_IN_READY_ELEMENT_CRITERIA)).toEqual(MOVE_IN_READY_ELEMENT_IDS);
     expect(MOVE_IN_READY_ELEMENTS.map(({ id }) => id)).toEqual(MOVE_IN_READY_ELEMENT_IDS);

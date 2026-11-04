@@ -1,4 +1,4 @@
-# Move-in Ready production image (see meta-inspect-delivery/azure-aca-plan.md).
+# Walkthrough Kit production image.
 # Multi-stage: bounded FFmpeg runtime, deps, Next.js standalone build, minimal run.
 FROM node:22-alpine AS ffmpeg
 WORKDIR /ffmpeg-src

@@ -20,8 +20,8 @@ const SPLASH_CSS = `
 
 export const metadata: Metadata = {
   title: {
-    default: "Habitability Walkthrough Companion",
-    template: "%s · Habitability Walkthrough Companion",
+    default: "Walkthrough Kit",
+    template: "%s · Walkthrough Kit",
   },
   description:
     "A mobile-first LAHSA Form 1083 room-video walkthrough for staged mock units, with human-reviewed evidence and local/manual exports. Not an HMIS submission.",

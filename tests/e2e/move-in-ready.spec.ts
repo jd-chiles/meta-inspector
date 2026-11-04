@@ -1,5 +1,5 @@
 /**
- * Browser acceptance for the current Move-in Ready Capture / Review /
+ * Browser acceptance for the current Walkthrough Kit Capture / Review /
  * Sign-Off / Profile flow. The webServer is pinned to APP_ANALYSIS_MODE=fixture
  * with no provider credentials passed by the shared suite. The delayed
  * response cases use a second local process with a synthetic test-only key;
@@ -31,6 +31,7 @@ test.use({
 async function openApp(page: Page): Promise<void> {
   await page.goto("/");
   await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
+  await expect(page).toHaveTitle("Walkthrough Kit");
   await expect(page.getByTestId("analysis-mode")).toHaveText("Sample only");
 }
 
@@ -685,7 +686,7 @@ async function readStoredWalkthroughState(page: Page, sessionId: string): Promis
   }, sessionId);
 }
 
-test.describe("Move-in Ready mobile flow", () => {
+test.describe("Walkthrough Kit mobile flow", () => {
   test("360px shows the five navigation items and keeps default Capture usable without horizontal scroll", async ({ page }) => {
     await openApp(page);
     await mkdir(path.join(process.cwd(), "artifacts/design-qa"), { recursive: true });

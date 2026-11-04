@@ -18,6 +18,7 @@ import {
 import {
   buildHmisReadyJson,
   buildMoveInReadyExportSet,
+  exportFilename,
   MOVE_IN_READY_EXPORT_NOTICE,
   type MoveInReadyExportInput,
 } from "../../../src/export/move-in-ready-pdf";
@@ -195,7 +196,11 @@ function countOccurrences(value: string, needle: string): number {
   return value.split(needle).length - 1;
 }
 
-describe("Move-in Ready signed export PDFs", () => {
+describe("Walkthrough Kit signed export PDFs", () => {
+  it("uses the Walkthrough Kit brand in downloaded document filenames", () => {
+    expect(exportFilename("client-file", "session-1", SIGNED_AT)).toMatch(/^walkthrough-kit-client-file-/);
+  });
+
   it("keeps the official Form 1083 row and note widgets aligned with its 11a/11b sections", async () => {
     expect(createHash("sha256").update(officialFormFixture).digest("hex")).toBe(
       "9c9faf9039d98aa570017f6bf22bafd5a999c1ba3f25a8f8bee3241546602261",
