@@ -505,8 +505,7 @@ describe("POST /api/video/segment", () => {
   });
 
   it("rejects excess segment and map requests before parsing their multipart bodies", async () => {
-    const first = claimVideoProcessing();
-    const second = claimVideoProcessing();
+    const held = [0, 1, 2, 3].map(() => claimVideoProcessing());
     try {
       for (const stage of ["segment", "map"] as const) {
         const request = requestFor({ stage });
@@ -524,14 +523,12 @@ describe("POST /api/video/segment", () => {
         expect(formData).not.toHaveBeenCalled();
       }
     } finally {
-      first.release();
-      second.release();
+      held.forEach((lease) => lease.release());
     }
   });
 
   it("logs one safe failure record with stage, status, and code for every rejected request", async () => {
-    const first = claimVideoProcessing();
-    const second = claimVideoProcessing();
+    const held = [0, 1, 2, 3].map(() => claimVideoProcessing());
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const response = await handleVideoSegmentRequest(requestFor({ stage: "segment" }), { env: LIVE_ENV });
@@ -542,11 +539,11 @@ describe("POST /api/video/segment", () => {
         stage: "segment",
         status: 429,
         code: "PROCESSING_BUSY",
+        detail: "Video processing is busy. Wait briefly and try again.",
       });
     } finally {
       errorSpy.mockRestore();
-      first.release();
-      second.release();
+      held.forEach((lease) => lease.release());
     }
   });
 
@@ -607,13 +604,11 @@ describe("POST /api/video/segment", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(cancelled).toBe(true);
 
-    const first = claimVideoProcessing();
-    const second = claimVideoProcessing();
+    const held = [0, 1, 2, 3].map(() => claimVideoProcessing());
     try {
       expect(() => claimVideoProcessing()).toThrowError(/processing is busy/i);
     } finally {
-      first.release();
-      second.release();
+      held.forEach((lease) => lease.release());
     }
   });
 
@@ -814,18 +809,20 @@ describe("POST /api/video/segment", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("completes a no-detection review without creating a mapping lease or a Muse call", async () => {
+  it("falls back to timestamp candidates when SAM detects nothing", async () => {
     const { fetchImpl: segmentFetch } = mockMetaFetch({ stream: () => streamResponse("No detections.") });
     const segmented = await segment({ identity: identityFor("no-detections") }, segmentFetch);
     expect(segmented.response.status).toBe(200);
-    expect(segmented.body.candidates).toEqual([]);
-    expect(segmented.body).toMatchObject({ mappingRequired: false });
-    expect(segmented.body.candidateToken).toBeUndefined();
-    expect(segmented.body.mappingExpiresAt).toBeUndefined();
+    // Plain walls and dark bathrooms are common; an empty candidate list made
+    // the app report "needs attention" on rooms that analysed fine.
+    expect((segmented.body.candidates as unknown[]).length).toBeGreaterThan(0);
+    expect(segmented.body).toMatchObject({ mappingRequired: true });
+    expect(typeof segmented.body.candidateToken).toBe("string");
+    expect(typeof segmented.body.mappingExpiresAt).toBe("number");
 
     const cancelled = await handleVideoSegmentRequest(identityOnlyCancellationRequest(segmented.body));
     expect(cancelled.status).toBe(200);
-    expect(await json(cancelled)).toMatchObject({ ok: true, stage: "cancelled", released: false });
+    expect(await json(cancelled)).toMatchObject({ ok: true, stage: "cancelled", released: true });
   });
 
   it("uploads the original QuickTime bytes when the container cannot be rewritten", async () => {
@@ -966,7 +963,7 @@ describe("POST /api/video/segment", () => {
     expect(fallbackCalls).toHaveLength(1);
     expect(fallbackCalls[0]?.url).toBe("https://inference.baseten.co/v1/chat/completions");
     expect(fallbackCalls[0]?.authorization).toBe("Bearer baseten-test-key");
-    expect(fallbackCalls[0]?.payload.model).toBe("meta-models/muse-spark-open");
+    expect(fallbackCalls[0]?.payload.model).toBe("meta-models/muse-spark-open-1026");
     expect(JSON.stringify(body)).not.toContain("baseten-test-key");
     expect(body.proposals).toMatchObject([{ elementId: "demo-water-supply", state: "draft-proposal", evidenceCandidateIds: ["cand-0001"] }]);
   });
@@ -1521,15 +1518,15 @@ describe("SAM per-concept concurrency", () => {
     );
   });
 
-  it("parses the concurrency override from env, clamped to 1-6 with a 6 default", () => {
-    expect(DEFAULT_MAX_CONCURRENT_SAM_CONCEPTS).toBe(6);
-    expect(resolveMaxConcurrentSamConcepts({})).toBe(6);
+  it("parses the concurrency override from env, clamped to 1-6 with a 2 default", () => {
+    expect(DEFAULT_MAX_CONCURRENT_SAM_CONCEPTS).toBe(2);
+    expect(resolveMaxConcurrentSamConcepts({})).toBe(2);
     expect(resolveMaxConcurrentSamConcepts({ SAM_MAX_CONCURRENT_CONCEPTS: "2" })).toBe(2);
     expect(resolveMaxConcurrentSamConcepts({ SAM_MAX_CONCURRENT_CONCEPTS: "6" })).toBe(6);
     expect(resolveMaxConcurrentSamConcepts({ SAM_MAX_CONCURRENT_CONCEPTS: "99" })).toBe(6);
     expect(resolveMaxConcurrentSamConcepts({ SAM_MAX_CONCURRENT_CONCEPTS: "0" })).toBe(1);
     expect(resolveMaxConcurrentSamConcepts({ SAM_MAX_CONCURRENT_CONCEPTS: "-3" })).toBe(1);
-    expect(resolveMaxConcurrentSamConcepts({ SAM_MAX_CONCURRENT_CONCEPTS: "banana" })).toBe(6);
+    expect(resolveMaxConcurrentSamConcepts({ SAM_MAX_CONCURRENT_CONCEPTS: "banana" })).toBe(2);
   });
 
   it("runs concepts sequentially when the env override is 1", async () => {

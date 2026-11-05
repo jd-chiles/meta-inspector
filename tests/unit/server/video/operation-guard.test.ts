@@ -209,26 +209,26 @@ describe("same-session concurrent operations (Sprint 0 REQ-S2)", () => {
     secondMapping.complete();
   });
 
-  it("admits at most two concurrent operations per session", () => {
+  // A walkthrough analyses its four rooms at once, so a session admits four.
+  it("admits at most four concurrent operations per session", () => {
     const base = identity();
-    const firstLease = claimVideoSegmentation(base);
-    const secondLease = claimVideoSegmentation({ ...identity(), sessionId: base.sessionId });
+    const sessionId = base.sessionId;
+    const leases = [0, 1, 2, 3].map(() => claimVideoSegmentation({ ...identity(), sessionId }));
     expectVideoError(
-      () => claimVideoSegmentation({ ...identity(), sessionId: base.sessionId }),
+      () => claimVideoSegmentation({ ...identity(), sessionId }),
       "OPERATION_BUSY",
     );
-    firstLease.complete();
+    leases[0]!.complete();
     // Releasing one slot admits the next identity.
-    const nextLease = claimVideoSegmentation({ ...identity(), sessionId: base.sessionId });
-    secondLease.complete();
+    const nextLease = claimVideoSegmentation({ ...identity(), sessionId });
+    leases.slice(1).forEach((lease) => lease.complete());
     nextLease.complete();
   });
 });
 
 describe("process-wide video operation admission", () => {
-  it("rejects a third concurrent operation and admits it after capacity is released", () => {
-    const first = claimVideoProcessing();
-    const second = claimVideoProcessing();
+  it("rejects a fifth concurrent operation and admits it after capacity is released", () => {
+    const held = [0, 1, 2, 3].map(() => claimVideoProcessing());
 
     let caught: unknown;
     try {
@@ -243,10 +243,10 @@ describe("process-wide video operation admission", () => {
       message: "Video processing is busy. Wait briefly and try again.",
     });
 
-    first.release();
-    first.release();
+    held[0]!.release();
+    held[0]!.release();
     const replacement = claimVideoProcessing();
-    second.release();
+    held.slice(1).forEach((lease) => lease.release());
     replacement.release();
   });
 });
