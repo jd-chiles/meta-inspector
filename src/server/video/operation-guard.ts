@@ -4,7 +4,10 @@ import { VideoSegmentError } from "./errors";
 const SESSION_DEDUPE_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_TRACKED_SESSIONS = 5_000;
 const MAX_ATTEMPTS_PER_SESSION = 64;
-const MAX_CONCURRENT_VIDEO_OPERATIONS = 2;
+// A walkthrough analyses four rooms as one batch. A cap of two turned a
+// normal batch into two provider calls plus two 429s, which the UI reported
+// as "needs attention" on every room.
+const MAX_CONCURRENT_VIDEO_OPERATIONS = 4;
 const MAX_CONCURRENT_STILLS_OPERATIONS = 4;
 /**
  * Concurrent operations per walkthrough session (Sprint 0 REQ-S2). Two
@@ -12,7 +15,9 @@ const MAX_CONCURRENT_STILLS_OPERATIONS = 4;
  * analysis, attempt, versions, hash) is the isolation key, so rooms of
  * one session can never share a lease, token, or retained stills.
  */
-const MAX_ACTIVE_OPERATIONS_PER_SESSION = 2;
+// One walkthrough analyses its four rooms together and shares a session id.
+// A cap of two admitted half the batch and rejected the rest as busy.
+const MAX_ACTIVE_OPERATIONS_PER_SESSION = 4;
 const MAX_PENDING_MAPPING_STILLS_BYTES = 64 * 1024 * 1024;
 const MAX_SINGLE_MAPPING_STILLS_BYTES = 16 * 1024 * 1024;
 

@@ -105,10 +105,10 @@ export default function LandingClient({ analysisMode }: { analysisMode: "live" |
 
   const isLive = analysisMode === "live";
   return (
-    <div className="lp">
+    <div className="lp" data-testid="landing-page">
       <header className="lp-header">
         <div className="lp-header-inner">
-          <Link className="lp-brand" href="/">
+          <Link className="lp-brand" href="/welcome">
             <span className="lp-mark" aria-hidden="true">WK</span>
             <span>
               <h1>WalkthroughKit</h1>
@@ -116,7 +116,7 @@ export default function LandingClient({ analysisMode }: { analysisMode: "live" |
             </span>
           </Link>
           <nav className="lp-nav" aria-label="Primary">
-            <Link href="/app">Open app</Link>
+            <Link href="/">Open app</Link>
             <a className="lp-cta" href="#prescreen">Check a building</a>
           </nav>
         </div>
@@ -182,7 +182,7 @@ export default function LandingClient({ analysisMode }: { analysisMode: "live" |
             <button className="lp-btn" type="submit" disabled={pending}>{pending ? "Checking…" : "Check building — free, instant"}</button>
             {error && <p className="lp-status lp-status--err" role="alert">{error}</p>}
             {leadOk && !error && !report && <p className="lp-status lp-status--info">Contact saved. Running public-record checks…</p>}
-            <p className="hint">Free forever for the pre-screen. Full walkthrough (4 rooms, AI drafts, 11-element review, 3 PDFs) is free in the pilot at <Link href="/app">/app</Link>. No spam — one follow-up, unsubscribe anytime.</p>
+            <p className="hint">Free forever for the pre-screen. Full walkthrough (4 rooms, AI drafts, 11-element review, 3 PDFs) is free in the pilot at <Link href="/">/</Link>. No spam — one follow-up, unsubscribe anytime.</p>
           </form>
         </section>
 
@@ -230,7 +230,7 @@ export default function LandingClient({ analysisMode }: { analysisMode: "live" |
                 <div className="lp-panel">
                   <h3>What next?</h3>
                   <p className="hint">Decide to visit, bring evidence cues, or share the summary with your team. When you&apos;re ready to walk the unit, the full app films 4 rooms, drafts the 11 LAHSA Form 1083 elements against your video evidence, and exports local PDFs + JSON for your manual workflow.</p>
-                  <Link className="lp-btn" href="/app">Open the full walkthrough app →</Link>
+                  <Link className="lp-btn" href="/">Open the full walkthrough app →</Link>
                   <a className="lp-btn lp-btn-secondary" href="#prescreen" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }); }}>Check another address</a>
                 </div>
               )}
@@ -276,7 +276,7 @@ export default function LandingClient({ analysisMode }: { analysisMode: "live" |
 
       <footer className="lp-footer">
         <div><strong>WalkthroughKit</strong> · walkthroughkit.com · Built for LAHSA Form 1083 mock-unit walkthroughs. Not an HMIS submission. Not affiliated with LAHD, LADBS, FEMA, HUD, EPA, or GSA — we just query their free public records.</div>
-        <div>Full app: <Link href="/app">/app</Link> · Source datasets linked per result · File a correction with the source agency — we surface, they decide.</div>
+        <div>Full app: <Link href="/">/</Link> · Source datasets linked per result · File a correction with the source agency — we surface, they decide.</div>
         <div>Contact: reply to the report email or leave your org in the form above. <span id="privacy">Privacy:</span> address is looked up and never saved; contact info is stored separately for follow-up and never joined to an address. To delete: reply &quot;delete&quot;.</div>
         <div style={{ color: "#9fb3ac" }}>Meta Inspect · {analysisMode} mode{isLive ? " · Census + LA City + FEMA + HUD + EPA + SAM.gov" : ""}</div>
       </footer>

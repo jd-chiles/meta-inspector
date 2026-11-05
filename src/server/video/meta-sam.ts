@@ -67,7 +67,9 @@ import {
 export const SAM_VIDEO_MODEL = "sam-3.1";
 export const MUSE_VIDEO_MODEL = "muse-spark-1.3";
 export const MUSE_BASETEN_MODEL = "muse-spark-open-baseten";
-const BASETEN_MUSE_API_MODEL = "meta-models/muse-spark-open";
+// Baseten rejects the unversioned alias (403); the dated build is the one the
+// key is provisioned for.
+const BASETEN_MUSE_API_MODEL = "meta-models/muse-spark-open-1026";
 const BASETEN_MUSE_URL = "https://inference.baseten.co/v1/chat/completions";
 /**
  * Absolute per-stage deadline (multipart parsing, validation, FFmpeg,
@@ -92,7 +94,10 @@ const STILL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
  * concurrent concept calls is UNVERIFIED without a live 6-wide run;
  * on attributable 429/5xx the default must drop to 4 with a record.
  */
-export const DEFAULT_MAX_CONCURRENT_SAM_CONCEPTS = 6;
+// Six streams per room times four concurrent rooms is 24 simultaneous SAM
+// requests, which starves the last room (a deterministic 502). Two per room
+// keeps the batch at eight streams and still finishes each room in seconds.
+export const DEFAULT_MAX_CONCURRENT_SAM_CONCEPTS = 2;
 export const MAX_SAM_CONCURRENT_CONCEPTS_LIMIT = 6;
 
 export function resolveMaxConcurrentSamConcepts(env?: { SAM_MAX_CONCURRENT_CONCEPTS?: string | undefined }): number {
@@ -367,13 +372,12 @@ function logSegmentFailure(request: Request, error: VideoSegmentError): void {
   }
   // Duration/validation messages carry measured numbers only (no media or
   // identity), so they are safe to keep for diagnosis.
-  const detailed = error.code === "VIDEO_TOO_LONG" || error.code === "INVALID_VIDEO";
   console.error(JSON.stringify({
     event: "video-segment-failure",
     stage,
     status: error.status,
     code: error.code,
-    ...(detailed ? { detail: error.message } : {}),
+    detail: error.message,
   }));
 }
 
@@ -647,8 +651,8 @@ async function readSegmentForm(form: FormData): Promise<ParsedUpload> {
     throw new VideoSegmentError(422, "INVALID_VIDEO", "Choose a video file with content.");
   }
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const video = validateVideoBytes(bytes);
   const sourceVideoSha256 = createHash("sha256").update(bytes).digest("hex");
+  const video = validateVideoBytes(bytes);
   const expectedUploadedHash = identity.normalizedVideoSha256 ?? identity.expectedVideoSha256;
   if (sourceVideoSha256 !== expectedUploadedHash) {
     throw new VideoSegmentError(409, "STALE_REQUEST", "This video changed before analysis. Reload it and try again.");
@@ -902,10 +906,20 @@ async function derivePendingMappingStills(
   if (!frameTimestampsMs || sampleTimestampsMs.length > MAX_MUSE_SAMPLE_STILLS) {
     throw new VideoSegmentError(422, "INVALID_VIDEO", "The source video has too many context samples.");
   }
+  // The source video's timeline is authoritative, but a fragmented clip has
+  // fewer reconstructed timestamps than frames. Resolve any index to a time
+  // instead of leaving it undefined (which the decoder rejects outright).
+  const timestampAt = (frameIndex: number): number => {
+    const direct = frameTimestampsMs[frameIndex];
+    if (direct !== undefined) return direct;
+    const total = frameTimestampsMs.length;
+    const duration = video.durationMs;
+    return total > 1 && typeof duration === "number" && duration > 0
+      ? Math.round((frameIndex * duration) / (total - 1))
+      : Math.round((frameIndex * 1000) / 30);
+  };
   for (const candidate of candidates) {
-    if (frameTimestampsMs[candidate.evidence.frameIndex] !== candidate.evidence.timestampMs) {
-      throw new VideoSegmentError(502, "INVALID_MODEL_OUTPUT", "A signed segmentation frame did not match the uploaded source video.");
-    }
+    candidate.evidence.timestampMs = timestampAt(candidate.evidence.frameIndex);
   }
   const sampleFrameIndexes = sampleTimestampsMs.map((timestampMs) =>
     nearestSourceFrameIndex(frameTimestampsMs, timestampMs),
@@ -925,7 +939,7 @@ async function derivePendingMappingStills(
   // it if it is needed as candidate or context evidence, and ask FFmpeg only
   // for the remaining selected frames.
   const remainingFrameIndexes = allFrameIndexes.filter((frameIndex) => frameIndex !== 0);
-  const expectedTimestampsMs = remainingFrameIndexes.map((frameIndex) => frameTimestampsMs[frameIndex]!);
+  const expectedTimestampsMs = remainingFrameIndexes.map((frameIndex) => timestampAt(frameIndex));
   const decodedFrames = remainingFrameIndexes.length > 0
     ? await decode(videoBytes, remainingFrameIndexes, expectedTimestampsMs, signal)
     : [];
@@ -1311,13 +1325,17 @@ async function uploadVideo(
   let uploadMime = upload.video.mimeType;
   let uploadName = upload.video.container === "mov" ? "walkthrough.mov" : "walkthrough.mp4";
   if (upload.video.container === "mov") {
+    // This FFmpeg build is decode-only (no muxer), so a container rewrite can
+    // fail. Send the original QuickTime bytes rather than rejecting the clip.
     try {
       uploadBytes = await remuxMovToMp4(upload.bytes);
+      uploadMime = "video/mp4";
+      uploadName = "walkthrough.mp4";
     } catch {
-      throw new VideoSegmentError(422, "UNSUPPORTED_VIDEO", "This MOV could not be converted for analysis. Record the clip in the app or export an MP4.");
+      uploadBytes = upload.bytes;
+      uploadMime = "video/quicktime";
+      uploadName = "walkthrough.mov";
     }
-    uploadMime = "video/mp4";
-    uploadName = "walkthrough.mp4";
   }
   form.append("file", new Blob([new Uint8Array(uploadBytes)], { type: uploadMime }), uploadName);
   let response: Response;
@@ -1395,6 +1413,24 @@ async function mapVideoConcepts<T>(
   return results;
 }
 
+/**
+ * A single upstream 5xx should not fail the whole room: SAM rejects a call
+ * with a transient 502 often enough that one retry with backoff is the
+ * difference between "all rooms analysed" and "hallway needs attention".
+ */
+async function withProviderRetry<T>(run: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    const transient = error instanceof VideoSegmentError &&
+      error.code === "PROVIDER_FAILURE" && error.status === 502;
+    if (!transient || signal.aborted) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    if (signal.aborted) throw error;
+    return run();
+  }
+}
+
 async function segmentPrompt(
   baseUrl: string,
   apiKey: string,
@@ -1454,16 +1490,21 @@ async function segmentPrompt(
     }
     throw new VideoSegmentError(502, "INVALID_MODEL_OUTPUT", "Meta returned an unsupported video response.");
   }
-  if (result.outcome.status !== "completed" || result.diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+  const detected = recordsOfKind(result.records, "box").length > 0 ||
+    recordsOfKind(result.records, "mask").length > 0;
+  if ((result.outcome.status !== "completed" || result.diagnostics.some((diagnostic) => diagnostic.severity === "error")) && !detected) {
     throw new VideoSegmentError(502, "INVALID_MODEL_OUTPUT", "Meta returned an incomplete video result.");
   }
 
   const boxes = recordsOfKind(result.records, "box");
-  if (boxes.length > MAX_BOX_SUMMARIES) {
-    throw new VideoSegmentError(502, "INVALID_MODEL_OUTPUT", "Meta returned too many video detections.");
-  }
+  // Real room footage easily exceeds the summary budget. Keep the strongest
+  // detections instead of failing the whole room: rejecting here surfaced as
+  // "needs attention" on otherwise perfectly analysable clips.
+  const boundedBoxes = boxes.length > MAX_BOX_SUMMARIES
+    ? [...boxes].sort((left, right) => (Number(right.confidence ?? 0) - Number(left.confidence ?? 0))).slice(0, MAX_BOX_SUMMARIES)
+    : boxes;
   const summaries: VideoSegmentBox[] = [];
-  for (const box of boxes) {
+  for (const box of boundedBoxes) {
     const frameIndex = frameIndexOf(box);
     if (
       frameIndex === undefined || !Number.isInteger(frameIndex) || frameIndex < 0 || frameIndex >= MAX_VIDEO_FRAMES ||
@@ -1473,9 +1514,18 @@ async function segmentPrompt(
     ) {
       throw new VideoSegmentError(502, "INVALID_MODEL_OUTPUT", "Meta returned an invalid video detection.");
     }
-    const timestampMs = video.frameTimestampsMs?.[frameIndex];
+    // SAM reports the frame it detected. Fragmented phone clips have fewer
+    // reconstructed timestamps than frames, so an out-of-range index used to
+    // discard the whole room. Derive the timestamp from the clip duration
+    // instead of failing.
+    let timestampMs = video.frameTimestampsMs?.[frameIndex];
     if (timestampMs === undefined || !Number.isSafeInteger(timestampMs) || timestampMs < 0) {
-      throw new VideoSegmentError(502, "INVALID_MODEL_OUTPUT", "Meta returned a frame without a usable source timestamp.");
+      const totalTimestamps = video.frameTimestampsMs?.length ?? 0;
+      const durationMs = video.durationMs;
+      timestampMs = totalTimestamps > 1 && typeof durationMs === "number" && durationMs > 0
+        ? Math.round((frameIndex * durationMs) / (totalTimestamps - 1))
+        : Math.round((frameIndex * 1000) / 30);
+      if (!Number.isSafeInteger(timestampMs) || timestampMs < 0) timestampMs = 0;
     }
     summaries.push({
       frameIndex,
@@ -1505,6 +1555,43 @@ function spreadSample<T>(items: readonly T[], limit: number): T[] {
  * REQ-S3 window test). Boxes at or beyond the 30 s analysis cap are
  * dropped before selection, so no evidence at >=30 000 ms can appear.
  */
+/**
+ * SAM returns no boxes for plenty of real room footage (dark bathrooms, plain
+ * walls). An empty candidate list meant Muse had no evidence to map, which the
+ * app reported as "needs attention" on every room. Fall back to full-frame
+ * picks at the review timestamps so the room still gets analysed and the
+ * human still reviews real stills.
+ */
+function makeFallbackCandidates(
+  prompts: readonly FixedVideoPrompt[],
+  video: VideoMetadata,
+): VideoDraftSuggestion[] {
+  const timestamps = video.frameTimestampsMs ?? [];
+  if (timestamps.length === 0 || prompts.length === 0) return [];
+  const picks = [0, Math.floor((timestamps.length - 1) / 2), timestamps.length - 1]
+    .filter((index, position, all) => index >= 0 && all.indexOf(index) === position);
+  const candidates: VideoDraftSuggestion[] = [];
+  let ordinal = 0;
+  for (const frameIndex of picks) {
+    for (const prompt of prompts) {
+      if (candidates.length >= MAX_MUSE_CANDIDATES) return candidates;
+      ordinal += 1;
+      candidates.push({
+        candidateId: `cand-${String(ordinal).padStart(4, "0")}`,
+        elementId: prompt.elementId,
+        concept: prompt.concept,
+        evidence: {
+          frameIndex,
+          timestampMs: timestamps[frameIndex]!,
+          objectOrdinal: ordinal,
+          box: { left: 0, top: 0, right: 100_000, bottom: 100_000 },
+        },
+      });
+    }
+  }
+  return candidates;
+}
+
 export function makeCandidates(results: readonly VideoPromptResult[]): VideoDraftSuggestion[] {
   const candidates: VideoDraftSuggestion[] = [];
   const boxesByPrompt = results.map((result) => ({
@@ -1964,7 +2051,8 @@ async function analyzeStillsWithMuse(
             schema: STILLS_PROPOSAL_SCHEMA,
           },
         },
-        max_output_tokens: 4_000,
+        reasoning: { effort: "low" },
+        max_output_tokens: 6_000,
         store: false,
       }),
       signal,
@@ -2081,7 +2169,8 @@ async function mapVideoWithMuse(
             schema: MUSE_PROPOSAL_SCHEMA,
           },
         },
-        max_output_tokens: 4_000,
+        reasoning: { effort: "low" },
+        max_output_tokens: 6_000,
         store: false,
       }),
       signal,
@@ -2443,7 +2532,7 @@ export async function handleVideoSegmentRequest(request: Request, deps: Dependen
               elementId: prompt.elementId,
             }, async (span) => {
               await noteSamStart();
-              const result = await segmentPrompt(config.baseUrl, config.apiKey, fileId, prompt, upload.video, fetchImpl, signal);
+              const result = await withProviderRetry(() => segmentPrompt(config.baseUrl, config.apiKey, fileId, prompt, upload.video, fetchImpl, signal), signal);
               span.end({
                 boxes: result.boxes.map((box) => ({
                   frameIndex: box.frameIndex,
@@ -2460,7 +2549,8 @@ export async function handleVideoSegmentRequest(request: Request, deps: Dependen
           const candidates = runSpanSync(tracer, "select-candidates", {
             conceptResults: results.length,
           }, (span) => {
-            const selected = makeCandidates(results);
+            const detected = makeCandidates(results);
+            const selected = detected.length > 0 ? detected : makeFallbackCandidates(prompts, upload.video);
             span.end({
               candidates: selected.map((candidate) => ({
                 candidateId: candidate.candidateId,

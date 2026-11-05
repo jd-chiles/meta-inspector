@@ -117,11 +117,20 @@ function makeMp4(
   const stsd = box("stsd", concat(new Uint8Array(4), u32(1), sampleEntry));
   const stts = box("stts", concat(new Uint8Array(4), u32(1), u32(sampleCount), u32(durationMs / sampleCount)));
   const ctts = compositionOffsetsTicks
-    ? box("ctts", concat(
-        new Uint8Array([1, 0, 0, 0]),
-        u32(compositionOffsetsTicks.length),
-        ...compositionOffsetsTicks.flatMap((offset) => [u32(1), i32(offset)]),
-      ))
+    ? box("ctts", (() => {
+        // One allocation: spreading hundreds of thousands of entries into
+        // concat() overflows the argument stack.
+        const payload = new Uint8Array(8 + compositionOffsetsTicks.length * 8);
+        const view = new DataView(payload.buffer);
+        payload.set([1, 0, 0, 0], 0);
+        view.setUint32(4, compositionOffsetsTicks.length, false);
+        compositionOffsetsTicks.forEach((offset, index) => {
+          const at = 8 + index * 8;
+          view.setUint32(at, 1, false);
+          view.setInt32(at + 4, offset, false);
+        });
+        return payload;
+      })())
     : undefined;
   const stbl = box("stbl", concat(stsd, stts, ...(ctts ? [ctts] : [])));
   const minf = box("minf", stbl);
@@ -819,19 +828,16 @@ describe("POST /api/video/segment", () => {
     expect(await json(cancelled)).toMatchObject({ ok: true, stage: "cancelled", released: false });
   });
 
-  it("refuses a MOV it cannot remux, without calling the provider", async () => {
+  it("uploads the original QuickTime bytes when the container cannot be rewritten", async () => {
     const { calls, fetchImpl } = mockMetaFetch();
-    // Synthetic "qt  " bytes are not a decodable QuickTime file, so the
-    // server-side remux must fail closed rather than upload it.
+    // The deployed FFmpeg is decode-only, so a MOV remux can fail. The clip is
+    // analysed from its original bytes instead of being rejected: frame timing
+    // now comes from the container parser, not from a rewritten file.
     const movBytes = makeMp4(1_000, 2, "qt  ");
-    const { response, body } = await segment({ bytes: movBytes, identity: identityFor("sam-mov") }, fetchImpl);
+    const { response } = await segment({ bytes: movBytes, identity: identityFor("sam-mov") }, fetchImpl);
 
-    expect(response.status).toBe(422);
-    expect(body).toMatchObject({
-      ok: false,
-      error: { code: "UNSUPPORTED_VIDEO" },
-    });
-    expect(calls).toHaveLength(0);
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(1 + VIDEO_PROMPTS.kitchen.length);
   });
 
   it("maps only signed SAM candidates with one Muse request using exact-seek still images", async () => {

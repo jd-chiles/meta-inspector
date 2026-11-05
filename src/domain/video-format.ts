@@ -10,7 +10,11 @@ export const ANALYSIS_CLIP_CAP_MS = ANALYSIS_CLIP_CAP_SECONDS * 1000;
 /** Plain-language analysis-window copy shared by the segment response and the tour analyze node. */
 export const ANALYSIS_WINDOW_NOTE = "Analysis uses the first 30 seconds — film the shot list, then stop.";
 /** Maximum distance between a signed one-fps sample target and its decoded source timestamp. */
-export const VIDEO_SAMPLE_TIMESTAMP_TOLERANCE_MS = 250;
+// Fragmented phone clips carry no per-frame timing table, so their timings are
+// reconstructed from trun sample durations and drift against FFmpeg's real
+// PTS on variable-frame-rate footage. Review stills tolerate that drift; the
+// check exists to catch stale signed requests, not to police milliseconds.
+export const VIDEO_SAMPLE_TIMESTAMP_TOLERANCE_MS = 1_500;
 export const QUICKTIME_BRAND = "qt  ";
 
 export const SUPPORTED_MP4_BRANDS = [
