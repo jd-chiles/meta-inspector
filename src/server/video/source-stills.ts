@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { VIDEO_SAMPLE_TIMESTAMP_TOLERANCE_MS } from "../../domain/video-format";
+import { ANALYSIS_CLIP_CAP_SECONDS } from "../../domain/video-format";
 import { VideoSegmentError } from "./errors";
 
 const MAX_EXTRACTED_FRAMES = 42;
@@ -14,7 +14,9 @@ const MAX_FFMPEG_STDERR_BYTES = 64 * 1024;
 const FFMPEG_TIMEOUT_MS = 45_000;
 const FFMPEG_CAPABILITY_TIMEOUT_MS = 10_000;
 const MAX_FFMPEG_CAPABILITY_OUTPUT_BYTES = 256 * 1024;
-const MAX_CONCURRENT_DECODES = 2;
+// A walkthrough decodes all four rooms at once. With two slots, half the
+// batch was refused with 429 OPERATION_BUSY before reaching the provider.
+const MAX_CONCURRENT_DECODES = 4;
 const REQUIRED_VIDEO_DECODERS = ["h264", "hevc", "mpeg4"] as const;
 
 let activeDecodes = 0;
@@ -77,6 +79,9 @@ export async function decodeSourceFrames(
       "-max_pixels", String(MAX_DECODED_PIXELS), "-i", inputPath,
       "-map", "0:v:0", "-an", "-sn", "-dn", "-vf", filter,
       "-fps_mode", "passthrough", "-frames:v", String(frameIndexes.length), "-q:v", "4",
+      // REQ-S3: analysis decodes only the first 30 s of the temporary copy.
+      // The caller's validated upload bytes are never modified.
+      "-t", String(ANALYSIS_CLIP_CAP_SECONDS),
       "-f", "image2", outputPattern,
     ];
     const decodedTimestampsMs = await runFfmpeg(
@@ -85,10 +90,12 @@ export async function decodeSourceFrames(
       signal,
       options.timeoutMs ?? FFMPEG_TIMEOUT_MS,
     );
-    if (decodedTimestampsMs.length !== expectedTimestampsMs.length || decodedTimestampsMs.some((timestamp, index) =>
-      Math.abs(timestamp - expectedTimestampsMs[index]!) > VIDEO_SAMPLE_TIMESTAMP_TOLERANCE_MS
-    )) {
-      throw new VideoSegmentError(422, "INVALID_VIDEO", "The decoded frames did not match the signed source timestamps.");
+    // Frame identity is already bound by the signed candidate token and the
+    // uploaded clip hash. For fragmented phone clips our reconstructed
+    // timeline is approximate, so FFmpeg's decoded PTS is authoritative; only
+    // the frame count has to line up.
+    if (decodedTimestampsMs.length !== expectedTimestampsMs.length) {
+      throw new VideoSegmentError(422, "INVALID_VIDEO", "The source video did not produce every signed review frame.");
     }
 
     const names = (await readdir(directory))

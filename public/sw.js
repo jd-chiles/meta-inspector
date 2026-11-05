@@ -19,7 +19,10 @@
 
 /* global self, caches, fetch, Response, URL */
 
-var SHELL_CACHE = "habitability-walkthrough-shell-v4";
+var SHELL_CACHE = "habitability-walkthrough-shell-v8";
+// Content-addressed spoken clips: cached on first play so the guide still
+// works on a flaky connection, never precached (211 clips, ~19 MB).
+var VOICE_CACHE = "habitability-walkthrough-voice-v1";
 var APP_CACHE_PREFIX = "habitability-walkthrough-";
 
 /** Core shell: required for an honest offline launch. */
@@ -31,9 +34,10 @@ var CORE_PRECACHE = ["/", "/manifest.webmanifest"];
  * failure is tolerated.
  */
 var ICON_PRECACHE = [
-  "/icons/icon-192.svg",
-  "/icons/icon-512.svg",
-  "/icons/icon-maskable-512.svg",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+  "/icons/icon-maskable-512.png",
+  "/icons/apple-touch-icon.png",
 ];
 
 /**
@@ -49,6 +53,10 @@ var FONT_PRECACHE = [
 
 function isApiRequest(url) {
   return url.pathname.indexOf("/api/") === 0;
+}
+
+function isVoiceClip(url) {
+  return url.pathname.indexOf("/voice/") === 0 && url.pathname.slice(-4) === ".mp3";
 }
 
 function isShellAsset(url) {
@@ -118,7 +126,7 @@ self.addEventListener("activate", function (event) {
             // CacheStorage is shared by every app on this origin. Remove only
             // caches owned by this PWA so activation cannot erase unrelated
             // same-origin offline data.
-            if (name.indexOf(APP_CACHE_PREFIX) === 0 && name !== SHELL_CACHE) {
+            if (name.indexOf(APP_CACHE_PREFIX) === 0 && name !== SHELL_CACHE && name !== VOICE_CACHE) {
               return caches.delete(name);
             }
             return Promise.resolve(false);
@@ -148,17 +156,29 @@ self.addEventListener("fetch", function (event) {
   // API traffic is never cached and never served from cache.
   if (isApiRequest(url)) return;
 
-  // Navigations: network first so the worker sees fresh progress, falling
-  // back to the cached app shell (which restores IndexedDB progress), and
-  // finally to an honest offline notice.
+  // Navigations: network first, cached shell only as the offline
+  // fallback. Serving the cached shell first strands the user on a stale
+  // app after a deploy — old HTML boots old hashed bundles, so the page
+  // visibly flips between versions as the cache refreshes in the
+  // background. An online load must always get the newest document;
+  // progress restores from IndexedDB client-side either way. Only plain
+  // 200s are cached, keyed by final URL, so a passcode redirect can never
+  // strand an authenticated user on stale HTML.
   if (isNavigationRequest(request)) {
     event.respondWith(
       fetch(request).then(
         function (response) {
+          if (response && response.status === 200 && response.type === "basic") {
+            var copy = response.clone();
+            var key = response.url || request.url;
+            caches.open(SHELL_CACHE).then(function (cache) {
+              return cache.put(key, copy);
+            }).then(function () {}, function () {});
+          }
           return response;
         },
         function () {
-          return caches.match("/", { ignoreSearch: false }).then(function (cached) {
+          return caches.match(request).then(function (cached) {
             if (cached) return cached;
             return new Response(offlineFallbackHtml(), {
               status: 503,
@@ -174,6 +194,25 @@ self.addEventListener("fetch", function (event) {
   // Versioned shell assets and install icons: cache first, refresh in the
   // background. Anything else same-origin (including media-like paths) goes
   // to the network only and is never cached.
+  // Spoken clips: cache-first. The filename is the hash of the text, so a
+  // cached clip is never stale; a miss falls through to the network.
+  if (isVoiceClip(url)) {
+    event.respondWith(
+      caches.open(VOICE_CACHE).then(function (cache) {
+        return cache.match(request).then(function (cached) {
+          if (cached) return cached;
+          return fetch(request).then(function (response) {
+            if (response && response.status === 200) {
+              cache.put(request, response.clone()).then(function () {}, function () {});
+            }
+            return response;
+          });
+        });
+      }),
+    );
+    return;
+  }
+
   if (isShellAsset(url)) {
     var network = fetch(request).then(function (response) {
       if (response && response.status === 200) {

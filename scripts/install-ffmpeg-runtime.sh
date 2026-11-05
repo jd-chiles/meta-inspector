@@ -91,14 +91,21 @@ make -j"$jobs"
 make install
 
 binary="$prefix/bin/ffmpeg"
-"$binary" -version | head -n 1
-"$binary" -hide_banner -demuxers | grep -Eq '[[:space:]]mov(,|[[:space:]])'
-"$binary" -hide_banner -decoders | grep -Eq '[[:space:]]h264[[:space:]]'
-"$binary" -hide_banner -decoders | grep -Eq '[[:space:]]hevc[[:space:]]'
-"$binary" -hide_banner -decoders | grep -Eq '[[:space:]]mpeg4[[:space:]]'
-"$binary" -hide_banner -encoders | grep -Eq '[[:space:]]mjpeg[[:space:]]'
-"$binary" -hide_banner -filters | grep -Eq '[[:space:]]select[[:space:]]'
-"$binary" -hide_banner -filters | grep -Eq '[[:space:]]showinfo[[:space:]]'
-"$binary" -hide_banner -filters | grep -Eq '[[:space:]]scale[[:space:]]'
+# Capture-then-inspect: piping ffmpeg straight into head/grep -q lets the
+# reader exit early, SIGPIPEs the writer, and fails the build under pipefail.
+version_output="$("$binary" -version)"
+head -n 1 <<< "$version_output"
+demuxers="$("$binary" -hide_banner -demuxers)"
+decoders="$("$binary" -hide_banner -decoders)"
+encoders="$("$binary" -hide_banner -encoders)"
+filters="$("$binary" -hide_banner -filters)"
+grep -Eq '[[:space:]]mov(,|[[:space:]])' <<< "$demuxers"
+grep -Eq '[[:space:]]h264[[:space:]]' <<< "$decoders"
+grep -Eq '[[:space:]]hevc[[:space:]]' <<< "$decoders"
+grep -Eq '[[:space:]]mpeg4[[:space:]]' <<< "$decoders"
+grep -Eq '[[:space:]]mjpeg[[:space:]]' <<< "$encoders"
+grep -Eq '[[:space:]]select[[:space:]]' <<< "$filters"
+grep -Eq '[[:space:]]showinfo[[:space:]]' <<< "$filters"
+grep -Eq '[[:space:]]scale[[:space:]]' <<< "$filters"
 
 echo "Installed verified FFmpeg $version at $binary"

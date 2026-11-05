@@ -75,4 +75,19 @@ describe("isAnalysisCurrent", () => {
     expect(isAnalysisCurrent({ ...baseInput(), record: null })).toBe(false);
     expect(isAnalysisCurrent({ ...baseInput(), identity: null })).toBe(false);
   });
+
+  it("lets batch pipelines skip only the UI selection comparison", () => {
+    const movedRoom = baseInput();
+    movedRoom.record!.selectedRoomId = "bathroom";
+    expect(isAnalysisCurrent(movedRoom)).toBe(false);
+    expect(isAnalysisCurrent({ ...movedRoom, requireSelectedRoom: false })).toBe(true);
+
+    const replacedClip = baseInput();
+    replacedClip.identity!.videoRevision = 3;
+    expect(isAnalysisCurrent({ ...replacedClip, requireSelectedRoom: false })).toBe(false);
+
+    const wrongSession = baseInput();
+    wrongSession.record!.sessionId = "session-2";
+    expect(isAnalysisCurrent({ ...wrongSession, requireSelectedRoom: false })).toBe(false);
+  });
 });

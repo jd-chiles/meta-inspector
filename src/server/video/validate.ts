@@ -7,6 +7,7 @@
  */
 import { VideoSegmentError } from "./errors";
 import {
+  ANALYSIS_CLIP_CAP_SECONDS,
   isSupportedMp4Brand,
   MAX_FTYP_BOX_BYTES,
   QUICKTIME_BRAND,
@@ -14,8 +15,16 @@ import {
 
 export const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
 export const MAX_MULTIPART_BYTES = MAX_VIDEO_BYTES + 128 * 1024;
-export const MAX_VIDEO_FRAMES = 15_000;
-export const MAX_VIDEO_DURATION_MS = 30_000;
+// A 30 s clip is ~1.8k frames at 60 fps, but iPhones ship variable-frame-rate
+// HEVC with very large timing tables. 15k rejected otherwise-valid room clips
+// during parsing, before the duration check could report the real problem.
+export const MAX_VIDEO_FRAMES = 300_000;
+// The in-app recorder stops on a wall-clock timer, so the final frame's
+// sample duration can land the container a frame or two past the cap. Allow a
+// small tolerance; evidence at or beyond the analysis window is dropped later
+// anyway (meta-sam filters on ANALYSIS_CLIP_CAP_MS).
+export const MAX_VIDEO_DURATION_TOLERANCE_MS = 2_000;
+export const MAX_VIDEO_DURATION_MS = ANALYSIS_CLIP_CAP_SECONDS * 1000 + MAX_VIDEO_DURATION_TOLERANCE_MS;
 
 export type VideoContainer = "mp4" | "mov";
 
@@ -126,9 +135,14 @@ function readTimingTable(bytes: Uint8Array, stts: Box, ctts?: Box): { durations:
     throw new VideoSegmentError(422, "INVALID_VIDEO", "The video timing table is incomplete.");
   }
   const entryCount = uint32(bytes, p + 4);
-  if (entryCount === 0 || entryCount > MAX_VIDEO_FRAMES) {
-    throw new VideoSegmentError(413, "VIDEO_TOO_LONG", "The video contains more frames than this request supports.");
+  if (entryCount > MAX_VIDEO_FRAMES) {
+    throw new VideoSegmentError(
+      413,
+      "VIDEO_TOO_LONG",
+      `The video timing table has ${entryCount} entries; the limit is ${MAX_VIDEO_FRAMES}.`,
+    );
   }
+  if (entryCount === 0) return { durations: [], offsets: [] };
   if (stts.end - (p + 8) !== entryCount * 8) {
     throw new VideoSegmentError(422, "INVALID_VIDEO", "The video timing table is corrupt.");
   }
@@ -139,7 +153,11 @@ function readTimingTable(bytes: Uint8Array, stts: Box, ctts?: Box): { durations:
     const sampleCount = uint32(bytes, cursor);
     const sampleDuration = uint32(bytes, cursor + 4);
     if (sampleDuration === 0 || durations.length + sampleCount > MAX_VIDEO_FRAMES) {
-      throw new VideoSegmentError(413, "VIDEO_TOO_LONG", "The video contains more frames than this request supports.");
+      throw new VideoSegmentError(
+        413,
+        "VIDEO_TOO_LONG",
+        `The video has ${durations.length + sampleCount} frames; the limit is ${MAX_VIDEO_FRAMES}.`,
+      );
     }
     for (let i = 0; i < sampleCount; i += 1) durations.push(sampleDuration);
     cursor += 8;
@@ -177,7 +195,51 @@ function readTimingTable(bytes: Uint8Array, stts: Box, ctts?: Box): { durations:
   return { durations, offsets };
 }
 
-function parseVideoTrack(bytes: Uint8Array, moov: Box, maxDurationMs: number): {
+/**
+ * Fragmented MP4 (what Safari MediaRecorder and many iPhone exports produce)
+ * keeps no timing table in moov: samples live in moof/traf/trun. Read the
+ * per-sample durations from there so such clips can still be mapped.
+ */
+function readFragmentDurations(bytes: Uint8Array): number[] {
+  const durations: number[] = [];
+  for (const moof of boxes(bytes, 0, bytes.byteLength).filter((box) => box.type === "moof")) {
+    for (const traf of childBoxes(bytes, moof).filter((box) => box.type === "traf")) {
+      const tfhd = findChild(bytes, traf, "tfhd");
+      const trun = findChild(bytes, traf, "trun");
+      if (!trun) continue;
+      let defaultDuration = 0;
+      if (tfhd && tfhd.end - tfhd.payloadStart >= 8) {
+        const flags = uint32(bytes, tfhd.payloadStart) & 0xff_ffff;
+        let cursor = tfhd.payloadStart + 8;
+        if (flags & 0x01) cursor += 8;
+        if (flags & 0x02) cursor += 4;
+        if (flags & 0x08 && tfhd.end - cursor >= 4) defaultDuration = uint32(bytes, cursor);
+      }
+      const version = bytes[trun.payloadStart]!;
+      if (version !== 0 && version !== 1) continue;
+      if (trun.end - trun.payloadStart < 8) continue;
+      const flags = uint32(bytes, trun.payloadStart) & 0xff_ffff;
+      const sampleCount = uint32(bytes, trun.payloadStart + 4);
+      if (sampleCount > MAX_VIDEO_FRAMES) {
+        throw new VideoSegmentError(413, "VIDEO_TOO_LONG", `The video has ${sampleCount} frames; the limit is ${MAX_VIDEO_FRAMES}.`);
+      }
+      let cursor = trun.payloadStart + 8;
+      if (flags & 0x01) cursor += 4;
+      if (flags & 0x04) cursor += 4;
+      const perSample = Boolean(flags & 0x100);
+      const stride = (perSample ? 4 : 0) + ((flags & 0x200) ? 4 : 0) + ((flags & 0x400) ? 4 : 0) + ((flags & 0x800) ? 4 : 0) || 4;
+      for (let sample = 0; sample < sampleCount; sample += 1) {
+        const duration = perSample ? uint32(bytes, cursor) : defaultDuration;
+        if (duration === 0) break;
+        durations.push(duration);
+        cursor += stride;
+      }
+    }
+  }
+  return durations;
+}
+
+function parseVideoTrack(bytes: Uint8Array, moov: Box): {
   frameTimestampsMs?: readonly number[];
   durationMs?: number;
 } | undefined {
@@ -203,7 +265,11 @@ function parseVideoTrack(bytes: Uint8Array, moov: Box, maxDurationMs: number): {
     if (!timescale || !stts) {
       throw new VideoSegmentError(422, "INVALID_VIDEO", "The video timing metadata could not be validated.");
     }
-    const timing = readTimingTable(bytes, stts, ctts);
+    let timing = readTimingTable(bytes, stts, ctts);
+    if (timing.durations.length === 0) {
+      const fragmentDurations = readFragmentDurations(bytes);
+      if (fragmentDurations.length > 0) timing = { durations: fragmentDurations, offsets: fragmentDurations.map(() => 0) };
+    }
 
     let decodeTimestamp = 0;
     const presentationTimestamps = timing.durations.map((duration, index) => {
@@ -225,8 +291,8 @@ function parseVideoTrack(bytes: Uint8Array, moov: Box, maxDurationMs: number): {
       throw new VideoSegmentError(422, "INVALID_VIDEO", "The video frame timestamps are too close to map safely.");
     }
     const durationMs = Math.round((decodeTimestamp * 1000) / timescale);
-    if (durationMs > maxDurationMs) {
-      throw new VideoSegmentError(413, "VIDEO_TOO_LONG", `The video must be ${Math.floor(maxDurationMs / 1000)} seconds or shorter.`);
+    if (durationMs > MAX_VIDEO_DURATION_MS) {
+      throw new VideoSegmentError(413, "VIDEO_TOO_LONG", `The video is ${(durationMs / 1000).toFixed(1)} seconds long; the limit is ${ANALYSIS_CLIP_CAP_SECONDS} seconds (with a ${MAX_VIDEO_DURATION_TOLERANCE_MS / 1000}s tolerance).`);
     }
     if (timestamps.length === 0 || durationMs <= 0) {
       throw new VideoSegmentError(422, "INVALID_VIDEO", "The video has no valid frame timing data.");
@@ -237,7 +303,7 @@ function parseVideoTrack(bytes: Uint8Array, moov: Box, maxDurationMs: number): {
 }
 
 /** Validate actual MP4/MOV container bytes and extract frame timestamps when available. */
-export function validateVideoBytes(bytes: Uint8Array, maxDurationMs = MAX_VIDEO_DURATION_MS): VideoMetadata {
+export function validateVideoBytes(bytes: Uint8Array): VideoMetadata {
   if (bytes.byteLength === 0) {
     throw new VideoSegmentError(422, "INVALID_VIDEO", "Choose a video file with content.");
   }
@@ -269,10 +335,7 @@ export function validateVideoBytes(bytes: Uint8Array, maxDurationMs = MAX_VIDEO_
     throw new VideoSegmentError(422, "INVALID_VIDEO", "The video container is incomplete or unsupported.");
   }
   const moov = topLevel.find((box) => box.type === "moov")!;
-  if (!Number.isSafeInteger(maxDurationMs) || maxDurationMs < 1 || maxDurationMs > MAX_VIDEO_DURATION_MS) {
-    throw new VideoSegmentError(400, "INVALID_REQUEST", "The room video duration limit is invalid.");
-  }
-  const track = parseVideoTrack(bytes, moov, maxDurationMs);
+  const track = parseVideoTrack(bytes, moov);
   if (track?.frameTimestampsMs && track.frameTimestampsMs.length > MAX_VIDEO_FRAMES) {
     throw new VideoSegmentError(413, "VIDEO_TOO_LONG", "The video contains more frames than this request supports.");
   }

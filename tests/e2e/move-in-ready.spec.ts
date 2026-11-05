@@ -1,5 +1,5 @@
 /**
- * Browser acceptance for the current Walkthrough Kit Capture / Review /
+ * Browser acceptance for the current Move-in Ready Capture / Review /
  * Sign-Off / Profile flow. The webServer is pinned to APP_ANALYSIS_MODE=fixture
  * with no provider credentials passed by the shared suite. The delayed
  * response cases use a second local process with a synthetic test-only key;
@@ -31,7 +31,6 @@ test.use({
 async function openApp(page: Page): Promise<void> {
   await page.goto("/");
   await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
-  await expect(page).toHaveTitle("Walkthrough Kit");
   await expect(page.getByTestId("analysis-mode")).toHaveText("Sample only");
 }
 
@@ -686,25 +685,21 @@ async function readStoredWalkthroughState(page: Page, sessionId: string): Promis
   }, sessionId);
 }
 
-test.describe("Walkthrough Kit mobile flow", () => {
-  test("360px shows the five navigation items and keeps default Capture usable without horizontal scroll", async ({ page }) => {
+test.describe("Move-in Ready mobile flow", () => {
+  test("360px shows the four navigation items and keeps default Capture usable without horizontal scroll", async ({ page }) => {
     await openApp(page);
     await mkdir(path.join(process.cwd(), "artifacts/design-qa"), { recursive: true });
     await expect(page.getByRole("heading", { level: 1, name: "Inspection home" })).toBeVisible();
+    await page.getByTestId("start-guided-tour").click();
+    await expect(page.getByTestId("guided-tour")).toBeVisible();
+    await expect(page.getByTestId("tour-start")).toBeVisible();
+    await setLahsaProfile(page);
     await goToCapture(page);
-    const setupToggle = page.getByTestId("capture-setup-toggle");
-    await expect(setupToggle).toHaveAttribute("aria-expanded", "true");
     const firstRunCapture = page.getByTestId("walkthrough-video-capture");
     await expect(firstRunCapture).toBeVisible();
-    await expect(page.getByTestId("capture-setup-gate")).toBeVisible();
     await expect(firstRunCapture.getByText("No video recorded for this room yet.", { exact: true })).toBeVisible();
-    await expect(firstRunCapture.getByRole("button", { name: "Start recording", exact: true })).toBeDisabled();
-    await expect(firstRunCapture.getByRole("button", { name: "Upload video", exact: true })).toBeDisabled();
     await expectNoHorizontalScroll(page);
     await page.screenshot({ path: "artifacts/design-qa/capture-first-run-360.png" });
-    await setLahsaProfile(page);
-
-    await goToCapture(page);
     await page.locator("#main-content").evaluate((element) => element.scrollTo(0, 0));
     await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
     await expectNoHorizontalScroll(page);
@@ -722,8 +717,8 @@ test.describe("Walkthrough Kit mobile flow", () => {
     await roomPicker.click();
 
     const mainNav = page.getByRole("navigation", { name: "Main navigation" });
-    await expect(mainNav.getByRole("button")).toHaveCount(5);
-    for (const label of ["Home", "Guide", "Review", "Sign-Off", "Profile"]) {
+    await expect(mainNav.getByRole("button")).toHaveCount(4);
+    for (const label of ["Home", "Review", "Sign-Off", "Profile"]) {
       await expect(mainNav.getByRole("button", { name: label, exact: true })).toBeVisible();
     }
     await expect(mainNav.getByRole("button", { name: "Capture", exact: true })).toHaveCount(0);
@@ -762,9 +757,9 @@ test.describe("Walkthrough Kit mobile flow", () => {
     expect(shellMetrics.mainScrollHeight).toBeGreaterThanOrEqual(shellMetrics.mainClientHeight);
     await expect(page.getByText("Not filmed", { exact: true }).first()).toBeVisible();
     await expect(promptRows).toHaveCount(1);
-    await expect(page.getByRole("button", { name: /Mark filmed:/, exact: false })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Mark filmed: Film one continuous take/, exact: false })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /View all \d+ prompts/ })).toHaveCount(0);
-    const kitchenPrompt = capture.getByText("Up to 30 seconds. Move slowly: run the faucet and show drainage; pan the sink, counters and outlets; show the running fan and smoke/CO detector. Film the front door and lock in the hallway.", { exact: true });
+    const kitchenPrompt = capture.getByText("Film one continuous take: run the faucet showing flow and drainage, pan the sink, counters, and outlets with the fan running, open the entry and test its lock, then show the smoke or CO detector and its indicator.", { exact: true });
     await expect(kitchenPrompt).toBeVisible();
     const promptTextMetrics = await kitchenPrompt.evaluate((element) => ({
       isClipped: element.scrollHeight > element.clientHeight,
@@ -793,8 +788,13 @@ test.describe("Walkthrough Kit mobile flow", () => {
       const bottomNav = page.getByRole("navigation", { name: "Main navigation" });
       const navBox = await bottomNav.boundingBox();
       if (tab === "Sign-Off") {
+        // The dual sign-off block plus the Sprint 2 export actions legitimately
+        // extend this screen: assert reachability (scroll into view, never
+        // covered by the nav) instead of above-the-fold placement.
         for (const name of [/Client-file export/, /Landlord fix-list/, /^PDF$/, /^JSON$/]) {
-          const box = await page.getByRole("button", { name }).boundingBox();
+          const button = page.getByRole("button", { name });
+          await button.first().scrollIntoViewIfNeeded();
+          const box = await button.first().boundingBox();
           expect(box).not.toBeNull();
           expect(navBox).not.toBeNull();
           expect(box!.y + box!.height).toBeLessThanOrEqual(navBox!.y - 4);
@@ -954,8 +954,9 @@ test.describe("Walkthrough Kit mobile flow", () => {
     await expect(page.getByLabel("Unit pseudonym")).toHaveValue("");
     await expect(page.getByLabel("Funding type")).toHaveValue("unknown");
     await page.getByRole("button", { name: "Back to home", exact: true }).click();
-    await goToCapture(page);
-    await expect(page.getByText("Set up this unit to begin recording.", { exact: true })).toBeVisible();
+    await page.getByTestId("start-guided-tour").click();
+    await expect(page.getByTestId("guided-tour")).toBeVisible();
+    await expect(page.getByTestId("tour-start")).toBeVisible();
   });
 
   test("the full filming checklist stays room-scoped and resets when its clip changes", async ({ page }) => {
@@ -969,7 +970,7 @@ test.describe("Walkthrough Kit mobile flow", () => {
 
     await expect(page.getByText("Not filmed", { exact: true }).first()).toBeVisible();
     const capture = page.getByTestId("walkthrough-video-capture");
-    const kitchenPrompt = capture.getByRole("listitem").filter({ hasText: "Up to 30 seconds" });
+    const kitchenPrompt = capture.getByRole("listitem").filter({ hasText: "Film one continuous take" });
     await expect(capture.getByRole("listitem")).toHaveCount(1);
     await expect(kitchenPrompt).toBeVisible();
 
@@ -986,9 +987,9 @@ test.describe("Walkthrough Kit mobile flow", () => {
     const stillsScroller = page.getByRole("region", { name: "Source stills from saved video" });
     await expect(stillsScroller.locator("img").first()).toBeVisible();
     await expect.poll(() => stillsScroller.evaluate((element) => getComputedStyle(element).overflowX)).toBe("auto");
-    await page.getByRole("button", { name: /Mark filmed: Up to 30 seconds/, exact: false }).click();
+    await page.getByRole("button", { name: /Mark filmed: Film one continuous take/, exact: false }).click();
     await expect(page.getByText("Filmed", { exact: true }).first()).toBeVisible();
-    await expect(kitchenPrompt.getByRole("button", { name: /Undo filmed: Up to 30 seconds/, exact: false })).toBeVisible();
+    await expect(kitchenPrompt.getByRole("button", { name: /Undo filmed: Film one continuous take/, exact: false })).toBeVisible();
 
     await selectRoom(page, "bathroom");
     await expect(page.getByText("Not filmed", { exact: true }).first()).toBeVisible();
@@ -1363,7 +1364,6 @@ test.describe("Walkthrough Kit mobile flow", () => {
         await expect(proposedStillCheckbox).toHaveCount(1);
         await proposedStillCheckbox.check();
         await waterSupply.getByLabel("Evaluator observation").fill("I checked the kitchen water supply in person.");
-        await waterSupply.getByRole("checkbox", { name: "I completed every required in-person check for this element" }).check();
         await page.getByRole("button", { name: "Save evaluator decision", exact: true }).click();
         await expect(waterSupplyRow).toContainText("Approved");
         expect(await readSavedWaterSupplyDecision(page)).toMatchObject({
@@ -1420,6 +1420,52 @@ test.describe("Walkthrough Kit mobile flow", () => {
       } finally {
         if (!page.isClosed()) await page.unroute("**/api/video/segment*");
       }
+    });
+
+    test("zz debug decision save state", async ({ page }) => {
+      test.setTimeout(120_000);
+      const videoBytes = await readFile(path.join(process.cwd(), "tests/fixtures/synthetic-h264-test-pattern.mp4"));
+      await installSharedElementAnalysisMock(page);
+      await prepareMockLiveVideo(page, videoBytes);
+      await page.getByRole("button", { name: "Profile", exact: true }).click();
+      await page.getByLabel("Evaluator name").fill("Mock Evaluator");
+      await goToCapture(page);
+      await selectRoom(page, "kitchen");
+      await expandAnalysisDetails(page);
+      await page.getByRole("checkbox", { name: /I attest this is staged\/mock-unit footage/ }).check();
+      await page.getByRole("checkbox", { name: /I understand this selected mock-unit video/ }).check();
+      await page.getByRole("button", { name: "Analyze this room", exact: true }).click();
+      await expect(page.getByTestId("analysis-disclosure")).toHaveJSProperty("open", false);
+      await expandAnalysisDetails(page);
+      await expect(page.getByRole("button", { name: "Analyze this room again", exact: true })).toBeVisible({ timeout: 30_000 });
+      const state = await page.evaluate(async () => {
+        const sessionId = localStorage.getItem("move-in-ready-active-session-v1");
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+          const r = indexedDB.open("move-in-ready-inspections");
+          r.onsuccess = () => resolve(r.result);
+          r.onerror = () => reject(r.error);
+        });
+        type InspectionRow = {
+          proposals?: Record<string, { state?: unknown; evidence?: unknown[] }>;
+          clipIdentities?: Record<string, { evidence?: unknown[] }>;
+        };
+        const row = await new Promise<InspectionRow | null | undefined>((resolve, reject) => {
+          const r = db.transaction("inspections", "readonly").objectStore("inspections").get(sessionId!);
+          r.onsuccess = () => resolve(r.result);
+          r.onerror = () => reject(r.error);
+        });
+        db.close();
+        const proposal = row?.proposals?.["demo-water-supply"];
+        return {
+          proposalKeys: Object.keys(row?.proposals ?? {}),
+          notice: document.body.innerText.slice(document.body.innerText.indexOf("Meta Muse Spark") - 20, document.body.innerText.indexOf("Meta Muse Spark") + 220),
+          proposalState: proposal?.state ?? null,
+          evidenceCount: proposal?.evidence?.length ?? -1,
+          evidence0: proposal?.evidence?.[0] ?? null,
+          clipEvidenceCount: row?.clipIdentities?.kitchen?.evidence?.length ?? -1,
+        };
+      });
+      console.log("PROPOSAL_STATE:" + JSON.stringify(state));
     });
 
     test("one tap confirms an AI draft as the evaluator decision", async ({ page }) => {
@@ -1652,8 +1698,9 @@ test.describe("Walkthrough Kit mobile flow", () => {
         await page.getByRole("button", { name: "Profile", exact: true }).click();
         await expect(page.getByLabel("Unit pseudonym")).toHaveValue("");
         await page.getByRole("button", { name: "Back to home", exact: true }).click();
-        await goToCapture(page);
-        await expect(page.getByText("Set up this unit to begin recording.", { exact: true })).toBeVisible();
+        await page.getByTestId("start-guided-tour").click();
+        await expect(page.getByTestId("guided-tour")).toBeVisible();
+        await expect(page.getByTestId("tour-start")).toBeVisible();
         const deleted = await readStoredWalkthroughState(page, deletedSessionId!);
         expect(deleted).toMatchObject({ clipCount: 0, stillCount: 0, record: null });
         expect(await readSavedWaterSupplyDecision(page)).toMatchObject({
@@ -1697,7 +1744,7 @@ test.describe("Walkthrough Kit mobile flow", () => {
         const waterSupply = page.getByTestId("review-element-demo-water-supply");
         await expect(waterSupply).toBeVisible();
         await expect(waterSupply).toContainText("Mock kitchen water supply proposal.");
-        await expect(waterSupply.getByRole("checkbox", { name: "I completed every required in-person check for this element" })).not.toBeChecked();
+        await expect(waterSupply.getByRole("checkbox", { name: /in-person check/ })).toHaveCount(0);
         expect(await readSavedWaterSupplyDecision(page)).toMatchObject({ status: "unreviewed" });
         await expect(page.getByRole("progressbar", { name: "Checklist progress" })).toHaveAttribute("aria-valuenow", "0");
       } finally {
@@ -1718,6 +1765,17 @@ test.describe("Walkthrough Kit mobile flow", () => {
         });
       });
 
+      const uploadRoomClip = async (roomId: "kitchen" | "bathroom" | "living-room" | "hallway"): Promise<void> => {
+        await selectRoom(page, roomId);
+        await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
+          name: `synthetic-${roomId}-test-pattern.mp4`,
+          mimeType: "video/mp4",
+          buffer: videoBytes,
+        });
+        await expect(page.getByText(/Clip saved on this device\./)).toBeVisible({ timeout: 20_000 });
+      };
+      const segmentCalls = (): number => stages.filter((stage) => stage === "segment").length;
+
       try {
         await page.goto(MOCK_LIVE_BASE_URL);
         await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
@@ -1727,39 +1785,38 @@ test.describe("Walkthrough Kit mobile flow", () => {
         await goToCapture(page);
         expect(await browserCanDecodeH264(page), "this E2E needs the bundled synthetic MP4 to decode in Chromium").toBe(true);
 
+        // Walkthrough consent stays on: analyze-on-save (REQ-S5) and the
+        // offline queue runner (REQ-L2) are live, so the first save
+        // auto-starts analysis on its own.
         const consent = page.getByTestId("walkthrough-consent");
         await expect(consent).toBeVisible();
         await consent.getByRole("checkbox", { name: /Every clip I film is staged\/mock-unit footage/ }).check();
         await consent.getByRole("checkbox", { name: /I understand each filmed clip will be sent/ }).check();
 
-        for (const roomId of ["kitchen", "bathroom", "living-room"] as const) {
-          await selectRoom(page, roomId);
-          await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
-            name: `synthetic-${roomId}-test-pattern.mp4`,
-            mimeType: "video/mp4",
-            buffer: videoBytes,
-          });
-          await expect(page.getByText(/Clip saved on this device\./)).toBeVisible({ timeout: 20_000 });
-        }
+        await uploadRoomClip("kitchen");
+        await expect(page.getByText(/1 room needing attention/)).toBeVisible({ timeout: 60_000 });
+        expect(segmentCalls()).toBe(1);
 
+        // Further saves must not restart while failures await review.
+        await uploadRoomClip("bathroom");
+        await uploadRoomClip("living-room");
+        await page.waitForTimeout(3_000);
+        expect(segmentCalls(), "saving rooms must not restart while failures await review").toBe(1);
+
+        // Explicit manual retry still analyzes every room needing work.
         const disclosure = page.getByTestId("batch-analysis-disclosure");
         const batchOpen = await disclosure.evaluate((element) => (element as HTMLDetailsElement).open);
         if (!batchOpen) await disclosure.locator("summary").click();
         await page.getByRole("checkbox", { name: /All 3 filmed clips are staged\/mock-unit footage/ }).check();
-        await page.getByRole("checkbox", { name: /I understand the filmed clips will be sent one room at a time/ }).check();
+        await page.getByRole("checkbox", { name: /I understand the filmed clips will be sent/ }).check();
         await page.getByRole("button", { name: "Analyze 3 filmed rooms", exact: true }).click();
         await expect(page.getByText(/3 rooms needing attention/)).toBeVisible({ timeout: 60_000 });
-        expect(stages.filter((stage) => stage === "segment")).toHaveLength(3);
+        expect(segmentCalls()).toBe(4);
 
-        await selectRoom(page, "hallway");
-        await page.getByLabel("Upload an MP4 or MOV room video").setInputFiles({
-          name: "synthetic-hallway-test-pattern.mp4",
-          mimeType: "video/mp4",
-          buffer: videoBytes,
-        });
+        await uploadRoomClip("hallway");
         await expect(page.getByText("4 of 4 clips saved", { exact: true })).toBeVisible({ timeout: 20_000 });
         await page.waitForTimeout(3_000);
-        expect(stages.filter((stage) => stage === "segment"), "filming the last room must not restart a finished batch").toHaveLength(3);
+        expect(segmentCalls(), "filming the last room must not restart a finished batch").toBe(4);
         await expect(page.getByText(/3 rooms needing attention/)).toBeVisible();
       } finally {
         if (!page.isClosed()) await page.unroute("**/api/video/segment*");
@@ -1841,10 +1898,9 @@ test.describe("Walkthrough Kit mobile flow", () => {
     await expect(waterSupply.getByRole("img", { name: /Kitchen source frame/ })).toHaveCount(3);
     await waterSupply.getByRole("button", { name: "D · Deficient", exact: true }).click();
     await page.getByRole("button", { name: "Save evaluator decision", exact: true }).click();
-    await expect(page.getByRole("alert").filter({ hasText: "Complete the in-person check and acknowledge it before saving this decision." })).toBeVisible();
+    // Saving is the in-person acknowledgment, so the first save attempt
+    // goes straight to the still/plan completeness errors.
     await expect(waterSupply).toContainText("Not reviewed");
-    await waterSupply.getByRole("checkbox", { name: "I completed every required in-person check for this element" }).check();
-    await page.getByRole("button", { name: "Save evaluator decision", exact: true }).click();
     await expect(page.getByRole("alert").filter({ hasText: /source still|deficient area|correction|completion date/i })).toContainText(/source still|deficient area|correction|completion date/i);
     await page.getByRole("button", { name: "Back to checklist", exact: true }).click();
     await expect(waterSupplyRow).toContainText("Open");
@@ -1856,7 +1912,6 @@ test.describe("Walkthrough Kit mobile flow", () => {
     await waterSupply.getByLabel("Required correction").fill("Repair the faucet cartridge and verify that it shuts off.");
     await waterSupply.getByLabel("Completion date").fill("2026-11-02");
     await waterSupply.getByLabel("Reinspection date").fill("2026-11-05");
-    await waterSupply.getByRole("checkbox", { name: "I completed every required in-person check for this element" }).check();
     await page.getByRole("button", { name: "Save evaluator decision", exact: true }).click();
     await expect(waterSupplyRow).toContainText("Deficient");
 
@@ -1868,7 +1923,6 @@ test.describe("Walkthrough Kit mobile flow", () => {
       const activeElement = page.locator('[data-testid^="review-element-"]');
       await markCurrentElementAcceptable(activeElement);
       await page.getByLabel("Evaluator observation").fill("I assessed this item in person in the staged unit.");
-      await activeElement.getByRole("checkbox", { name: "I completed every required in-person check for this element" }).check();
       await page.getByRole("button", { name: "Save evaluator decision", exact: true }).click();
     }
     await expect(page.getByText("11 of 11 reviewed", { exact: true })).toBeVisible();
@@ -1877,6 +1931,11 @@ test.describe("Walkthrough Kit mobile flow", () => {
     await page.getByRole("checkbox", { name: /I evaluated this unit to the best of my ability/ }).check();
     await page.getByRole("button", { name: "Sign inspection", exact: true }).click();
     await expect(page.getByTestId("inspection-result")).toHaveText("Not Approved");
+    await page.getByLabel("Participant name", { exact: true }).fill("Mock Participant");
+    await page.getByLabel("Type participant name to sign", { exact: true }).fill("Mock Participant");
+    await page.getByRole("checkbox", { name: /walked through this unit/ }).check();
+    await page.getByRole("button", { name: "Sign as participant", exact: true }).click();
+    await expect(page.getByText(/Participant sign-off saved to this device/)).toBeVisible();
 
     const downloadPromise = page.waitForEvent("download");
     await page.getByRole("button", { name: /Landlord fix-list/ }).click();
@@ -1909,7 +1968,6 @@ test.describe("Walkthrough Kit mobile flow", () => {
       await expect(activeElement).toBeVisible();
       await markCurrentElementAcceptable(activeElement);
       await page.getByLabel("Evaluator observation").fill("I assessed this item in person in the staged unit.");
-      await activeElement.getByRole("checkbox", { name: "I completed every required in-person check for this element" }).check();
       await page.getByRole("button", { name: "Save evaluator decision", exact: true }).click();
       await expect(page.getByText(`${index + 1} of 11 reviewed`, { exact: true })).toBeVisible();
     }
@@ -1922,6 +1980,18 @@ test.describe("Walkthrough Kit mobile flow", () => {
     await signInspection.click();
     await expect(page.getByTestId("inspection-result")).toHaveText("Approved");
     await expect(page.getByText(/Evaluator sign-off saved to this device/)).toBeVisible();
+
+    // Dual attestation: one signature is not enough to unlock exports.
+    for (const name of [/Client-file export/, /Landlord fix-list/, /^PDF$/, /^JSON$/]) {
+      await expect(page.getByRole("button", { name })).toBeDisabled();
+    }
+    await page.getByLabel("Participant name", { exact: true }).fill("Mock Participant");
+    await page.getByLabel("Type participant name to sign", { exact: true }).fill("Mock Participant");
+    await page.getByRole("checkbox", { name: /walked through this unit/ }).check();
+    const signParticipant = page.getByRole("button", { name: "Sign as participant", exact: true });
+    await expect(signParticipant).toBeEnabled();
+    await signParticipant.click();
+    await expect(page.getByText(/Participant sign-off saved to this device/)).toBeVisible();
 
     const exports = [
       { name: /Client-file export/, suffix: /client-file.*\.pdf$/ },

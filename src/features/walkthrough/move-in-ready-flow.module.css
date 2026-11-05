@@ -490,7 +490,7 @@
   bottom: 0;
   left: 0;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 2px;
   max-width: 1000px;
   margin: 0 auto;
@@ -767,6 +767,7 @@
 }
 
 @media (min-width: 720px) and (max-width: 959px) {
+  .app[data-guide-bar="true"] .main { padding-bottom: 142px; }
   .reviewOverviewHiddenOnMobile { display: none; }
   .reviewDetails:not(.reviewDetailsOpen) { display: none; }
   .app[data-step="review"][data-review-detail="true"] .reviewSummary { display: none; }

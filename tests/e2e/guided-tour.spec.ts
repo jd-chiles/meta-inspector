@@ -77,7 +77,22 @@ test("a spoken unit-type answer advances the tour without tapping", async ({ pag
   await expect(tour).toHaveAttribute("data-node", "ask-baths");
 });
 
-test("a spoken name saves with a yes and reaches the tour finish", async ({ page }) => {
+test("skipping a missing room advances the tour past it", async ({ page }) => {
+  test.setTimeout(90_000);
+  await startTour(page);
+  const tour = page.getByTestId("guided-tour");
+  await expect(tour).toHaveAttribute("data-node", "ask-unit");
+  await tour.getByRole("button", { name: "Studio", exact: true }).click();
+  await expect(tour).toHaveAttribute("data-node", "ask-baths");
+  await tour.getByRole("button", { name: "1", exact: true }).click();
+  await expect(tour).toHaveAttribute("data-node", "consent");
+  await page.getByTestId("tour-consent-confirm").click();
+  await expect(tour).toHaveAttribute("data-node", "film-room:kitchen");
+  await tour.getByTestId("tour-skip-room").click();
+  await expect(tour).toHaveAttribute("data-node", "film-room:bathroom");
+});
+
+test("a spoken name saves with a yes and reaches draft-less review", async ({ page }) => {
   test.setTimeout(240_000);
   const transcripts = ["Rae Evaluator", "yes"];
   await page.route("**/api/voice/transcribe", (route) => route.fulfill({
@@ -129,5 +144,24 @@ test("a spoken name saves with a yes and reaches the tour finish", async ({ page
     await tour.getByRole("button", { name: "Stop", exact: true }).click();
     if (turn === 0) await expect(page.getByTestId("tour-name-input")).toHaveValue("Rae Evaluator");
   }
-  await expect(tour).toHaveAttribute("data-node", "finish");
+  // Fixture mode yields no AI drafts: every element still gets its review
+  // question, starting with a decide-it-yourself card.
+  await expect(tour).toHaveAttribute("data-node", "review-item:demo-smoke-co");
+  await expect(tour.getByTestId("tour-review-card")).toBeVisible();
+  await expect(tour.getByText("No AI draft", { exact: false })).toBeVisible();
+  await tour.getByTestId("tour-needs-check").click();
+  await expect(tour).toHaveAttribute("data-node", "review-item:demo-item-06");
+
+  // Draft-less review: the detail form opens prefilled with the spoken
+  // in-person answers, and saving records the check with no checkbox.
+  await tour.getByTestId("tour-review-draft").click();
+  const detail = page.getByTestId("review-element-demo-item-06");
+  await expect(detail).toBeVisible();
+  await expect(detail.getByRole("checkbox", { name: /in-person check/ })).toHaveCount(0);
+  await detail.getByRole("button", { name: "A · Acceptable" }).click();
+  await expect(detail.getByLabel("Evaluator observation")).toHaveValue(/Voice checks:/);
+  // Mobile hides the inline save button; the sticky review footer saves.
+  await page.getByRole("button", { name: "Save evaluator decision" }).click();
+  await expect(detail.getByText("Approved")).toBeAttached();
 });
+

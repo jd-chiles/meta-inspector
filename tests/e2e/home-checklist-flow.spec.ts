@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-import { expectNoViewportOverflow, goToCapture, openProfilePanel } from "./navigation";
+import { expectNoViewportOverflow, goToCapture, openProfilePanel, setupProfile } from "./navigation";
 
 test.use({
   storageState: { cookies: [], origins: [] },
@@ -11,7 +11,7 @@ test.use({
 test("home leads through film into the requirement-by-requirement checklist", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
-  await expect(page.getByTestId("synthetic-data-banner")).toBeVisible();
+  await expect(page.getByTestId("synthetic-data-banner")).toHaveText(/^MVP_\d+$/);
   await expect(page.getByTestId("analysis-mode")).toHaveText("Sample only");
 
   const home = page.getByTestId("inspection-home");
@@ -26,12 +26,8 @@ test("home leads through film into the requirement-by-requirement checklist", as
   // Voice-first launch: a fresh home leads with the voice agent entry.
   await expect(home.getByTestId("home-voice-entry")).toContainText("answer by voice");
 
+  await setupProfile(page, { pseudonym: "Staged Home Flow Unit", funding: "lahsa", unitType: "studio" });
   await goToCapture(page);
-  const setupToggle = page.getByTestId("capture-setup-toggle");
-  if (await setupToggle.getAttribute("aria-expanded") !== "true") await setupToggle.click();
-  await page.getByLabel("Unit pseudonym").fill("Staged Home Flow Unit");
-  await page.getByLabel("Funding type").selectOption("lahsa");
-  await page.getByLabel("Unit type").selectOption("studio");
   await expect(page.getByTestId("walkthrough-video-capture")).toBeVisible();
   await expect(page.getByTestId("capture-next-bar")).toContainText("0 of 4 rooms filmed");
 
@@ -55,4 +51,20 @@ test("home leads through film into the requirement-by-requirement checklist", as
   await expect(page.getByLabel("Unit pseudonym")).toHaveValue("Staged Home Flow Unit");
   await goToCapture(page);
   await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();
+});
+
+test("home shows one entrance; starting over is a quiet link that enters the tour fresh", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
+  const home = page.getByTestId("inspection-home");
+  await expect(home.getByTestId("start-guided-tour")).toHaveText(/Start inspection/);
+  await expect(home.getByRole("button", { name: "Start over with a new inspection", exact: true })).toHaveCount(0);
+
+  await setupProfile(page, { pseudonym: "Staged Over Unit", funding: "lahsa", unitType: "studio" });
+  await page.getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Home", exact: true }).click();
+  await expect(home.getByTestId("start-guided-tour")).toHaveText(/Continue inspection/);
+  await home.getByRole("button", { name: "Start over with a new inspection", exact: true }).click();
+  await expect(page.getByTestId("guided-tour")).toBeVisible();
+  await expect(page.getByTestId("tour-start")).toBeVisible();
 });

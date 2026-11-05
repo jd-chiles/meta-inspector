@@ -38,4 +38,17 @@ describe("staticVoiceUrl", () => {
     await expect(staticVoiceUrl("How many bathrooms?", fetchImpl)).resolves.toBeNull();
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
+
+  it("resolves Spanish clips from the Spanish manifest", async () => {
+    const text = "¿Cuántos baños tiene?";
+    const id = clipId(text);
+    const fetchImpl = vi.fn().mockImplementation((url: string) => Promise.resolve(new Response(
+      JSON.stringify({ version: 1, clips: url.endsWith("/es/manifest.json") ? { [id]: { chars: text.length } } : {} }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )));
+    const fetchAsImpl = fetchImpl as unknown as typeof fetch;
+    await expect(staticVoiceUrl(text, fetchAsImpl, "es")).resolves.toBe(`/voice/es/${id}.mp3`);
+    await expect(staticVoiceUrl(text, fetchAsImpl, "en")).resolves.toBeNull();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
 });

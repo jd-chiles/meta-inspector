@@ -267,6 +267,8 @@ export interface EvidenceReference {
   frameIndex: number | null;
   /** SHA-256 of the actual extracted still bytes, lowercase hex. */
   stillHash: string;
+  /** Same-origin endpoint used to reload this verified cloud evidence still. */
+  sourceUrl?: string;
 }
 
 export type ProposalState = "draft-proposal" | "needs-human-check";
@@ -313,8 +315,28 @@ export interface FireSafetyAssessment {
   publicAreaDetectors: FireSafetyClauseOutcome;
 }
 
+/**
+ * Snapshot of a prior D decision, kept when a re-inspection reopens the
+ * element (REQ-L1). The snapshot carries the prior deficiency plan, the
+ * prior decision's evidence still ids (resolved against on-device stills at
+ * render time), and the prior decision timestamp. It lives only on an
+ * `unreviewed` decision: saving a new A/D decision replaces the decision
+ * and drops the snapshot.
+ */
+export interface PriorDeficiencySnapshot {
+  issueDescription: string;
+  correction: string;
+  /** Target date for the corrective work to be completed. */
+  completionDate: string;
+  /** Follow-up inspection date; cannot precede completion. */
+  reinspectionDate: string;
+  /** Still ids from the prior D decision's evidence (0–5). */
+  evidenceStillIds: string[];
+  decidedAt: string;
+}
+
 export type EvaluatorDecision =
-  | { status: "unreviewed" }
+  | { status: "unreviewed"; priorDeficiency?: PriorDeficiencySnapshot }
   | { status: "needs-human-check"; note: string; fireSafetyAssessment?: FireSafetyAssessment }
   | {
       status: "A";
@@ -363,6 +385,22 @@ export interface EvaluatorSignoff {
 export const EVALUATOR_ATTESTATION_TEXT =
   "I understand that I am not a HUD-certified inspector. I evaluated this unit to the best of my ability and completed and reviewed this inspection based on my own assessment. AI suggestions are not my decisions.";
 
+/**
+ * Program-participant co-signature (REQ-F1 dual attestation): Form 1083 is
+ * validated by BOTH the evaluator and the participant. Mirrors
+ * EvaluatorSignoff. Privacy posture (VAWA): name + typed signature only, no
+ * new identifiers.
+ */
+export interface ParticipantSignoff {
+  participantName: string;
+  typedSignature: string;
+  attested: boolean;
+  signedAt: string;
+}
+
+export const PARTICIPANT_ATTESTATION_TEXT =
+  "I walked through this unit with the evaluator. The findings above match what I saw.";
+
 const ELEMENT_BY_ID = new Map<string, (typeof MOVE_IN_READY_ELEMENTS)[number]>(
   MOVE_IN_READY_ELEMENTS.map((element) => [element.id, element]),
 );
@@ -386,6 +424,12 @@ const MODEL_PROPOSAL_KEYS = new Set([
 ]);
 const SIGNOFF_KEYS = new Set([
   "evaluatorName",
+  "typedSignature",
+  "attested",
+  "signedAt",
+]);
+const PARTICIPANT_SIGNOFF_KEYS = new Set([
+  "participantName",
   "typedSignature",
   "attested",
   "signedAt",
@@ -492,6 +536,66 @@ export function validateModelDeficiencySuggestion(
   };
 }
 
+/** Validates a re-inspection prior-deficiency snapshot (REQ-L1). */
+export function validatePriorDeficiencySnapshot(
+  value: unknown,
+): ValidationResult<PriorDeficiencySnapshot> {
+  if (!isRecord(value)) {
+    return { ok: false, errors: ["prior deficiency snapshot must be an object"] };
+  }
+  const errors: string[] = [];
+  const fields = new Set([
+    "issueDescription",
+    "correction",
+    "completionDate",
+    "reinspectionDate",
+    "evidenceStillIds",
+    "decidedAt",
+  ]);
+  if (!hasOnlyKeys(value, fields)) {
+    errors.push("prior deficiency snapshot has unknown fields");
+  }
+  if (!isNonEmptyString(value.issueDescription, 1000)) {
+    errors.push("prior deficiency issueDescription must be 1–1000 characters");
+  }
+  if (!isNonEmptyString(value.correction, 1000)) {
+    errors.push("prior deficiency correction must be 1–1000 characters");
+  }
+  if (!isValidCalendarDate(value.completionDate)) {
+    errors.push("prior deficiency completionDate must be a valid YYYY-MM-DD date");
+  }
+  if (!isValidCalendarDate(value.reinspectionDate)) {
+    errors.push("prior deficiency reinspectionDate must be a valid YYYY-MM-DD date");
+  } else if (
+    isValidCalendarDate(value.completionDate) &&
+    (value.reinspectionDate as string) < (value.completionDate as string)
+  ) {
+    errors.push("prior deficiency reinspectionDate cannot precede completionDate");
+  }
+  if (
+    !Array.isArray(value.evidenceStillIds) ||
+    value.evidenceStillIds.length > 5 ||
+    value.evidenceStillIds.some((stillId) => typeof stillId !== "string" || !IDENTIFIER_PATTERN.test(stillId))
+  ) {
+    errors.push("prior deficiency evidenceStillIds must contain 0–5 still IDs");
+  }
+  if (!isValidDateTime(value.decidedAt)) {
+    errors.push("prior deficiency decidedAt must be an ISO date-time");
+  }
+  if (errors.length) return { ok: false, errors };
+  return {
+    ok: true,
+    value: {
+      issueDescription: value.issueDescription as string,
+      correction: value.correction as string,
+      completionDate: value.completionDate as string,
+      reinspectionDate: value.reinspectionDate as string,
+      evidenceStillIds: [...(value.evidenceStillIds as string[])],
+      decidedAt: value.decidedAt as string,
+    },
+  };
+}
+
 function normalizedName(name: string): string {
   return name.trim().replace(/\s+/g, " ").toLocaleLowerCase("en-US");
 }
@@ -586,6 +690,7 @@ export function validateEvidenceReference(
     "timestampMs",
     "frameIndex",
     "stillHash",
+    "sourceUrl",
   ]);
   if (!hasOnlyKeys(value, allowed)) errors.push("evidence reference has unknown fields");
   if (typeof value.schemaVersion !== "number" || !Number.isSafeInteger(value.schemaVersion) || value.schemaVersion < 1) {
@@ -626,6 +731,10 @@ export function validateEvidenceReference(
   if (typeof value.stillHash !== "string" || !HASH_PATTERN.test(value.stillHash)) {
     errors.push("stillHash must be a lowercase SHA-256 digest");
   }
+  if (value.sourceUrl !== undefined && (typeof value.sourceUrl !== "string" ||
+      !/^\/api\/video\/jobs\/[A-Za-z0-9_-]{8,128}\/evidence\/\d{1,3}$/.test(value.sourceUrl))) {
+    errors.push("sourceUrl must be a same-origin cloud evidence path");
+  }
   if (errors.length) return { ok: false, errors };
   return {
     ok: true,
@@ -639,6 +748,7 @@ export function validateEvidenceReference(
       timestampMs: value.timestampMs as number,
       frameIndex: value.frameIndex as number | null,
       stillHash: value.stillHash as string,
+      ...(typeof value.sourceUrl === "string" ? { sourceUrl: value.sourceUrl } : {}),
     },
   };
 }
@@ -830,6 +940,166 @@ export function createUnreviewedEvaluatorDecisions(): EvaluatorDecisionSet {
   ) as EvaluatorDecisionSet;
 }
 
+/** Snapshot a D decision's deficiency plan for a re-inspection (REQ-L1); null for any other status. */
+export function extractPriorDeficiency(decision: EvaluatorDecision): PriorDeficiencySnapshot | null {
+  if (decision.status !== "D") return null;
+  return {
+    issueDescription: decision.deficiency.issueDescription,
+    correction: decision.deficiency.correction,
+    completionDate: decision.deficiency.completionDate,
+    reinspectionDate: decision.deficiency.reinspectionDate,
+    evidenceStillIds: decision.evidence.map((reference) => reference.stillId),
+    decidedAt: decision.decidedAt,
+  };
+}
+
+/**
+ * Start a re-inspection (REQ-L1): every D decision is snapshotted into
+ * `priorDeficiency` and reset to unreviewed; all other decisions are
+ * untouched. Sign-off resets happen at the record layer, not here.
+ */
+export function startReinspectionDecisions(
+  decisions: EvaluatorDecisionSet,
+): { decisions: EvaluatorDecisionSet; reinspectionCount: number } {
+  const next: EvaluatorDecisionSet = { ...decisions };
+  let reinspectionCount = 0;
+  for (const elementId of MOVE_IN_READY_ELEMENT_IDS) {
+    const snapshot = extractPriorDeficiency(next[elementId]);
+    if (!snapshot) continue;
+    next[elementId] = { status: "unreviewed", priorDeficiency: snapshot };
+    reinspectionCount += 1;
+  }
+  return { decisions: next, reinspectionCount };
+}
+
+/** Element ids currently reopened for re-inspection (unreviewed with a prior-deficiency snapshot). */
+export function reinspectionElementIds(decisions: EvaluatorDecisionSet): MoveInReadyElementId[] {
+  return MOVE_IN_READY_ELEMENT_IDS.filter((elementId) => {
+    const decision = decisions[elementId];
+    return decision.status === "unreviewed" && decision.priorDeficiency !== undefined;
+  });
+}
+
+/** True when at least one element carries a standing D decision. */
+export function hasDeficientDecisions(decisions: EvaluatorDecisionSet): boolean {
+  return MOVE_IN_READY_ELEMENT_IDS.some((elementId) => decisions[elementId].status === "D");
+}
+
+/**
+ * Build the unreviewed decision for a no-choice save (REQ-L1): when the
+ * stored decision is already unreviewed with a re-inspection snapshot,
+ * the snapshot is preserved so an untouched save cannot silently cancel
+ * the re-inspection. Any other stored status yields a plain unreviewed.
+ */
+export function unreviewedDecisionPreservingSnapshot(existing: EvaluatorDecision): EvaluatorDecision {
+  if (existing.status === "unreviewed" && existing.priorDeficiency !== undefined) {
+    return { status: "unreviewed", priorDeficiency: existing.priorDeficiency };
+  }
+  return { status: "unreviewed" };
+}
+
+/**
+ * Persisted offline analysis queue (REQ-L2): room ids whose saved clips
+ * still need analysis. Entries dedupe; order is enqueue order.
+ */
+export function enqueueAnalysisQueue(
+  queue: readonly MoveInReadyRoomId[],
+  roomId: MoveInReadyRoomId,
+): MoveInReadyRoomId[] {
+  if (!isMoveInReadyRoomId(roomId)) return [...queue];
+  return queue.includes(roomId) ? [...queue] : [...queue, roomId];
+}
+
+/** Remove a room from the persisted analysis queue (analyzed or clip removed). */
+export function dequeueAnalysisQueue(
+  queue: readonly MoveInReadyRoomId[],
+  roomId: MoveInReadyRoomId,
+): MoveInReadyRoomId[] {
+  return queue.filter((entry) => entry !== roomId);
+}
+
+/** Drop queue entries for rooms no longer in the inspection. */
+export function pruneAnalysisQueue(
+  queue: readonly MoveInReadyRoomId[],
+  roomIds: readonly MoveInReadyRoomId[],
+): MoveInReadyRoomId[] {
+  const kept = new Set(roomIds);
+  return queue.filter((entry) => kept.has(entry));
+}
+
+/**
+ * Optional GPS attestation captured at sign-off (REQ-L3). Coordinates are
+ * rounded to 3 decimals (~100 m) before storage; never blocks signing.
+ */
+export interface InspectionLocation {
+  lat: number;
+  lng: number;
+  /** Horizontal accuracy in meters, or null when the device did not report it. */
+  accuracyM: number | null;
+  capturedAt: string;
+}
+
+/** Round a coordinate to 3 decimals (~100 m precision). */
+export function roundCoordinate(value: number): number {
+  const rounded = Math.round(value * 1000) / 1000;
+  return rounded === 0 ? 0 : rounded;
+}
+
+/** Build a storable inspection location with rounded coordinates. */
+export function buildInspectionLocation(input: {
+  lat: number;
+  lng: number;
+  accuracyM: number | null | undefined;
+  capturedAt: string;
+}): InspectionLocation {
+  return {
+    lat: roundCoordinate(input.lat),
+    lng: roundCoordinate(input.lng),
+    accuracyM: typeof input.accuracyM === "number" && Number.isFinite(input.accuracyM) && input.accuracyM >= 0
+      ? input.accuracyM
+      : null,
+    capturedAt: input.capturedAt,
+  };
+}
+
+/** Validates a stored inspection location (REQ-L3). */
+export function validateInspectionLocation(
+  value: unknown,
+): ValidationResult<InspectionLocation> {
+  if (!isRecord(value)) {
+    return { ok: false, errors: ["inspection location must be an object"] };
+  }
+  const errors: string[] = [];
+  if (!hasOnlyKeys(value, new Set(["lat", "lng", "accuracyM", "capturedAt"]))) {
+    errors.push("inspection location has unknown fields");
+  }
+  if (typeof value.lat !== "number" || !Number.isFinite(value.lat) || value.lat < -90 || value.lat > 90) {
+    errors.push("inspection location lat must be a number from -90 to 90");
+  }
+  if (typeof value.lng !== "number" || !Number.isFinite(value.lng) || value.lng < -180 || value.lng > 180) {
+    errors.push("inspection location lng must be a number from -180 to 180");
+  }
+  if (
+    value.accuracyM !== null &&
+    (typeof value.accuracyM !== "number" || !Number.isFinite(value.accuracyM) || value.accuracyM < 0)
+  ) {
+    errors.push("inspection location accuracyM must be null or a non-negative number");
+  }
+  if (!isValidDateTime(value.capturedAt)) {
+    errors.push("inspection location capturedAt must be an ISO date-time");
+  }
+  if (errors.length) return { ok: false, errors };
+  return {
+    ok: true,
+    value: {
+      lat: value.lat as number,
+      lng: value.lng as number,
+      accuracyM: value.accuracyM as number | null,
+      capturedAt: value.capturedAt as string,
+    },
+  };
+}
+
 /**
  * Validates a worker-entered decision. This accepts only the evaluator
  * contract; model proposal fields are neither accepted nor copied.
@@ -843,12 +1113,23 @@ export function validateEvaluatorDecision(
   }
   const errors: string[] = [];
   if (value.status === "unreviewed") {
-    if (Object.keys(value).length !== 1) {
+    if (!hasOnlyKeys(value, new Set(["status", "priorDeficiency"]))) {
       errors.push("unreviewed decision cannot contain review data");
     }
-    return errors.length
-      ? { ok: false, errors }
-      : { ok: true, value: { status: "unreviewed" } };
+    let priorDeficiency: PriorDeficiencySnapshot | undefined;
+    if (value.priorDeficiency !== undefined) {
+      const parsedSnapshot = validatePriorDeficiencySnapshot(value.priorDeficiency);
+      if (!parsedSnapshot.ok) {
+        errors.push(...parsedSnapshot.errors.map((error) => `priorDeficiency: ${error}`));
+      } else {
+        priorDeficiency = parsedSnapshot.value;
+      }
+    }
+    if (errors.length) return { ok: false, errors };
+    return {
+      ok: true,
+      value: priorDeficiency ? { status: "unreviewed", priorDeficiency } : { status: "unreviewed" },
+    };
   }
   if (value.status === "needs-human-check") {
     if (!hasOnlyKeys(value, new Set(["status", "note", "fireSafetyAssessment"]))) {
@@ -901,8 +1182,14 @@ export function validateEvaluatorDecision(
     value.decidedAt,
   );
   if (!acknowledgment.ok) errors.push(...acknowledgment.errors);
-  if (!isNonEmptyString(value.rationale, 1000)) {
+  // Approved items never require a note: an empty rationale is valid for
+  // A. Deficient decisions must explain the deficiency.
+  if (value.status === "D" && !isNonEmptyString(value.rationale, 1000)) {
     errors.push("rationale must be 1–1000 characters");
+  }
+  if (value.status === "A" &&
+      (typeof value.rationale !== "string" || value.rationale.length > 1000)) {
+    errors.push("rationale must be 0–1000 characters");
   }
   let analysisIdentity: VideoAnalysisIdentity | null = null;
   if (value.analysisIdentity !== null) {
@@ -1102,6 +1389,41 @@ export function validateEvaluatorSignoff(
   };
 }
 
+export function validateParticipantSignoff(
+  value: unknown,
+): ValidationResult<ParticipantSignoff> {
+  if (!isRecord(value)) {
+    return { ok: false, errors: ["participant sign-off must be an object"] };
+  }
+  const errors: string[] = [];
+  if (!hasOnlyKeys(value, PARTICIPANT_SIGNOFF_KEYS)) errors.push("participant sign-off has unknown fields");
+  if (!isNonEmptyString(value.participantName, 120)) {
+    errors.push("participantName must be 1–120 characters");
+  }
+  if (!isNonEmptyString(value.typedSignature, 120)) {
+    errors.push("typedSignature must be 1–120 characters");
+  }
+  if (
+    typeof value.participantName === "string" &&
+    typeof value.typedSignature === "string" &&
+    normalizedName(value.participantName) !== normalizedName(value.typedSignature)
+  ) {
+    errors.push("typedSignature must match the participant name");
+  }
+  if (value.attested !== true) errors.push("participant attestation is required");
+  if (!isValidDateTime(value.signedAt)) errors.push("signedAt must be an ISO date-time");
+  if (errors.length) return { ok: false, errors };
+  return {
+    ok: true,
+    value: {
+      participantName: value.participantName as string,
+      typedSignature: value.typedSignature as string,
+      attested: true,
+      signedAt: value.signedAt as string,
+    },
+  };
+}
+
 export type FinalizationStatus =
   | "funding-required"
   | "hqs-branch-required"
@@ -1134,6 +1456,15 @@ export interface FinalizationInput {
  * decisions, funding track, and typed sign-off. Model proposal data is not
  * accepted by this API.
  */
+export function normalizeFundingType(value: unknown): FundingType {
+  if (value === "lahsa") return "lahsa";
+  if (value === "hud") return "hud";
+  // Treat known CoC/ESG markers or any explicit "other" as the LAHSA/Form1083
+  // route: the UI exposes a CoC/ESG label but the flow should follow LAHSA.
+  if (value === "other" || value === "coc" || value === "coc_esg" || value === "esg") return "lahsa";
+  return "unknown";
+}
+
 export function deriveFinalInspectionResult(
   input: FinalizationInput,
 ): FinalizationSummary {

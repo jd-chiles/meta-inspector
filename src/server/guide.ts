@@ -7,6 +7,7 @@ import {
   type GuideStage,
 } from "../domain/guide";
 import { getServerCatalog } from "./catalog";
+import { checkAppOrigin } from "./request-origin";
 import {
   callMetaGuide,
   isMetaCallError,
@@ -27,6 +28,7 @@ export interface GuideDeps {
   mode?: "fixture" | "live";
   metaEnv?: Record<string, string | undefined>;
   fetchImpl?: FetchImpl;
+  appPublicOrigin?: string | undefined;
 }
 
 const ACTION_PROMPTS: Record<GuideAction, string> = {
@@ -38,31 +40,6 @@ const ACTION_PROMPTS: Record<GuideAction, string> = {
 
 function failure(status: number, code: string, message: string) {
   return { status, body: { error: { code, message } } };
-}
-
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
-
-function normalizeOriginHost(hostname: string): string {
-  const host = hostname.trim().toLowerCase();
-  return host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
-}
-
-function sameOrigin(request: Request): boolean {
-  const origin = request.headers.get("origin");
-  if (origin === null || origin.trim().length === 0) return true;
-  try {
-    const originUrl = new URL(origin);
-    const targetUrl = new URL(request.url);
-    if (originUrl.origin === targetUrl.origin) return true;
-    // Local dev servers can report a different loopback alias than the page
-    // used. Keep the exception limited to the same scheme and port.
-    return originUrl.protocol === targetUrl.protocol &&
-      originUrl.port === targetUrl.port &&
-      LOOPBACK_HOSTS.has(normalizeOriginHost(originUrl.hostname)) &&
-      LOOPBACK_HOSTS.has(normalizeOriginHost(targetUrl.hostname));
-  } catch {
-    return false;
-  }
 }
 
 function parseRequest(value: unknown): GuideRequest | null {
@@ -132,7 +109,9 @@ export async function handleGuideRequest(
   request: Request,
   deps: GuideDeps = {},
 ): Promise<{ status: number; body: unknown }> {
-  if (!sameOrigin(request)) return failure(403, "ORIGIN_FORBIDDEN", "Cross-origin requests are rejected.");
+  const originCheck = checkAppOrigin(request, deps.appPublicOrigin ?? process.env.APP_PUBLIC_ORIGIN);
+  if (originCheck.configError) return failure(503, "SETUP_REQUIRED", "The server origin is misconfigured.");
+  if (!originCheck.allowed) return failure(403, "ORIGIN_FORBIDDEN", "Cross-origin requests are rejected.");
   if (!(request.headers.get("content-type") ?? "").toLowerCase().includes("application/json")) {
     return failure(400, "INVALID_REQUEST", "Send a JSON guide action.");
   }

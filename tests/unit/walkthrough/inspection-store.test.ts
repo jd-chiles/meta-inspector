@@ -84,6 +84,48 @@ function recordWithEvidence() {
 }
 
 describe("local inspection record validation", () => {
+  it("starts unsigned with visual alarms off, and defaults legacy records the same way", () => {
+    const fresh = createInitialInspectionRecord("session-participant-1", NOW);
+    expect(fresh.participantSignoff).toBeNull();
+    expect(fresh.participantVisualAlarmsRequired).toBe(false);
+
+    const legacy = { ...recordWithEvidence() } as unknown as Record<string, unknown>;
+    delete legacy.participantSignoff;
+    delete legacy.participantVisualAlarmsRequired;
+    const validated = validateInspectionRecord(legacy, "session-1");
+    expect(validated.ok).toBe(true);
+    if (validated.ok) {
+      expect(validated.record.participantSignoff).toBeNull();
+      expect(validated.record.participantVisualAlarmsRequired).toBe(false);
+    }
+  });
+
+  it("keeps a valid participant sign-off and flag, and rejects invalid ones", () => {
+    const record = recordWithEvidence();
+    record.participantSignoff = {
+      participantName: "Pat Rivera",
+      typedSignature: "Pat Rivera",
+      attested: true,
+      signedAt: NOW,
+    };
+    record.participantVisualAlarmsRequired = true;
+    const kept = validateInspectionRecord(record, "session-1");
+    expect(kept.ok).toBe(true);
+    if (kept.ok) {
+      expect(kept.record.participantSignoff?.participantName).toBe("Pat Rivera");
+      expect(kept.record.participantVisualAlarmsRequired).toBe(true);
+    }
+
+    const badSignature = {
+      ...recordWithEvidence(),
+      participantSignoff: { participantName: "Pat Rivera", typedSignature: "Someone Else", attested: true, signedAt: NOW },
+    };
+    expect(validateInspectionRecord(badSignature, "session-1").ok).toBe(false);
+
+    const badFlag = { ...recordWithEvidence(), participantVisualAlarmsRequired: "yes" };
+    expect(validateInspectionRecord(badFlag, "session-1").ok).toBe(false);
+  });
+
   it("uses bounded per-store memory for get, put, and delete when IndexedDB is unavailable", async () => {
     vi.stubGlobal("indexedDB", undefined);
     const store = createInspectionStore();
@@ -439,6 +481,22 @@ describe("local inspection record validation", () => {
 
     expect(validateInspectionRecord({ ...priorRecord, inspectionNote: "x".repeat(2001) }, "session-1").ok).toBe(false);
     expect(validateInspectionRecord({ ...priorRecord, inspectionNote: "A short staged-unit note." }, "session-1").ok).toBe(true);
+  });
+
+  it("defaults the guided-tour language to English and persists Spanish", () => {
+    const fresh = createInitialInspectionRecord("session-1", NOW);
+    expect(fresh.tourLanguage).toBe("en");
+    const legacy = { ...fresh } as unknown as Record<string, unknown>;
+    delete legacy.tourLanguage;
+    const migrated = validateInspectionRecord(legacy, "session-1");
+    expect(migrated.ok).toBe(true);
+    if (!migrated.ok) return;
+    expect(migrated.record.tourLanguage).toBe("en");
+    const spanish = validateInspectionRecord({ ...fresh, tourLanguage: "es" }, "session-1");
+    expect(spanish.ok).toBe(true);
+    if (!spanish.ok) return;
+    expect(spanish.record.tourLanguage).toBe("es");
+    expect(validateInspectionRecord({ ...fresh, tourLanguage: "fr" }, "session-1").ok).toBe(false);
   });
 
   it("rejects duplicate prompt completion and prompt IDs from another room", () => {

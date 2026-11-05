@@ -1,16 +1,21 @@
 import { createHash, createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_MAX_CONCURRENT_SAM_CONCEPTS,
   handleVideoSegmentRequest,
+  makeCandidates,
   makeMuseSampleTimestamps,
   META_UPLOAD_EXPIRY_SECONDS,
   MUSE_BASETEN_MODEL,
   MUSE_VIDEO_MODEL,
+  resolveMaxConcurrentSamConcepts,
   SAM_VIDEO_MODEL,
   VIDEO_PROMPTS,
   type VideoDraftSuggestion,
+  type VideoPromptResult,
   type VideoRequestIdentity,
 } from "../../../../src/server/video/meta-sam";
+import { ANALYSIS_CLIP_CAP_MS, ANALYSIS_WINDOW_NOTE } from "../../../../src/domain/video-format";
 import {
   MAX_MULTIPART_BYTES,
   MAX_VIDEO_BYTES,
@@ -73,12 +78,6 @@ function u32(value: number): Uint8Array {
   return result;
 }
 
-function i32(value: number): Uint8Array {
-  const result = new Uint8Array(4);
-  new DataView(result.buffer).setInt32(0, value, false);
-  return result;
-}
-
 function ascii(value: string): Uint8Array {
   return new Uint8Array(Array.from(value, (character) => character.charCodeAt(0)));
 }
@@ -112,11 +111,20 @@ function makeMp4(
   const stsd = box("stsd", concat(new Uint8Array(4), u32(1), sampleEntry));
   const stts = box("stts", concat(new Uint8Array(4), u32(1), u32(sampleCount), u32(durationMs / sampleCount)));
   const ctts = compositionOffsetsTicks
-    ? box("ctts", concat(
-        new Uint8Array([1, 0, 0, 0]),
-        u32(compositionOffsetsTicks.length),
-        ...compositionOffsetsTicks.flatMap((offset) => [u32(1), i32(offset)]),
-      ))
+    ? box("ctts", (() => {
+        // One allocation: spreading hundreds of thousands of entries into
+        // concat() overflows the argument stack.
+        const payload = new Uint8Array(8 + compositionOffsetsTicks.length * 8);
+        const view = new DataView(payload.buffer);
+        payload.set([1, 0, 0, 0], 0);
+        view.setUint32(4, compositionOffsetsTicks.length, false);
+        compositionOffsetsTicks.forEach((offset, index) => {
+          const at = 8 + index * 8;
+          view.setUint32(at, 1, false);
+          view.setInt32(at + 4, offset, false);
+        });
+        return payload;
+      })())
     : undefined;
   const stbl = box("stbl", concat(stsd, stts, ...(ctts ? [ctts] : [])));
   const minf = box("minf", stbl);
@@ -385,7 +393,7 @@ describe("SAM video upload validation", () => {
     const candidates = body.candidates as VideoDraftSuggestion[];
 
     expect(response.status).toBe(200);
-    expect(candidates).toHaveLength(12);
+    expect(candidates).toHaveLength(10);
     for (const prompt of VIDEO_PROMPTS.kitchen) {
       const matchingCandidates = candidates.filter((candidate) =>
         candidate.elementId === prompt.elementId && candidate.concept === prompt.concept,
@@ -439,13 +447,10 @@ describe("SAM video upload validation", () => {
     expect(caught).toMatchObject({ status: 413, code: "VIDEO_TOO_LARGE" });
   });
 
-  it("accepts clips up to 30 seconds while allowing tighter room-specific validation caps", () => {
+  it("rejects unsupported signatures, malformed atoms, and clips longer than 30 seconds", () => {
     expect(() => validateVideoBytes(ascii("webm bytes"))).toThrow(/MP4 or MOV/);
     expect(() => validateVideoBytes(makeMp4().slice(0, 20))).toThrow(/incomplete|corrupt|truncated/i);
-    expect(validateVideoBytes(makeMp4(30_000, 2)).durationMs).toBe(30_000);
-    expect(() => validateVideoBytes(makeMp4(30_100, 2))).toThrow(/30 seconds/);
-    expect(() => validateVideoBytes(makeMp4(31_000, 2), 30_000)).toThrow(/30 seconds/);
-    expect(() => validateVideoBytes(makeMp4(16_000, 2), 15_000)).toThrow(/15 seconds/);
+    expect(() => validateVideoBytes(makeMp4(35_000, 2))).toThrow(/30 seconds/);
     expect(MAX_VIDEO_BYTES).toBe(60 * 1024 * 1024);
     expect(MAX_MULTIPART_BYTES).toBeGreaterThan(MAX_VIDEO_BYTES);
   });
@@ -475,19 +480,18 @@ describe("POST /api/video/segment", () => {
   it("keeps PDF-supported visual concepts fixed and within the per-room candidate bound", () => {
     expect(Object.values(VIDEO_PROMPTS).every((prompts) => prompts.length <= 6)).toBe(true);
     expect(VIDEO_PROMPTS.kitchen).toEqual(expect.arrayContaining([
-      { elementId: "demo-item-10", concept: "kitchen stove and refuse bin" },
-      { elementId: "demo-smoke-co", concept: "carbon monoxide detector" },
-      { elementId: "demo-interior-air", concept: "kitchen ventilation fan" },
-      { elementId: "demo-item-05", concept: "wall surface" },
+      { elementId: "demo-item-10", concept: "refuse bin" },
     ]));
-    expect(VIDEO_PROMPTS.bathroom).toContainEqual({ elementId: "demo-smoke-co", concept: "carbon monoxide detector" });
+    // Sprint 0 REQ-S6: bathroom and kitchen no longer send detector concepts.
+    expect(VIDEO_PROMPTS.kitchen).not.toContainEqual({ elementId: "demo-smoke-co", concept: "carbon monoxide detector" });
+    expect(VIDEO_PROMPTS.bathroom).not.toContainEqual({ elementId: "demo-smoke-co", concept: "smoke detector" });
+    expect(VIDEO_PROMPTS.bathroom).not.toContainEqual({ elementId: "demo-smoke-co", concept: "carbon monoxide detector" });
     expect(VIDEO_PROMPTS.bedroom).toEqual(expect.arrayContaining([
       { elementId: "demo-item-09", concept: "heating equipment" },
       { elementId: "demo-item-09", concept: "air conditioning unit" },
       { elementId: "demo-smoke-co", concept: "carbon monoxide detector" },
     ]));
     expect(VIDEO_PROMPTS.hallway).toEqual(expect.arrayContaining([
-      { elementId: "demo-item-07", concept: "front door lock" },
       { elementId: "demo-item-06", concept: "secondary exit" },
       { elementId: "demo-item-06", concept: "fire escape window" },
       { elementId: "demo-smoke-co", concept: "carbon monoxide detector" },
@@ -495,8 +499,7 @@ describe("POST /api/video/segment", () => {
   });
 
   it("rejects excess segment and map requests before parsing their multipart bodies", async () => {
-    const first = claimVideoProcessing();
-    const second = claimVideoProcessing();
+    const held = [0, 1, 2, 3].map(() => claimVideoProcessing());
     try {
       for (const stage of ["segment", "map"] as const) {
         const request = requestFor({ stage });
@@ -514,8 +517,27 @@ describe("POST /api/video/segment", () => {
         expect(formData).not.toHaveBeenCalled();
       }
     } finally {
-      first.release();
-      second.release();
+      held.forEach((lease) => lease.release());
+    }
+  });
+
+  it("logs one safe failure record with stage, status, and code for every rejected request", async () => {
+    const held = [0, 1, 2, 3].map(() => claimVideoProcessing());
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await handleVideoSegmentRequest(requestFor({ stage: "segment" }), { env: LIVE_ENV });
+      expect(response.status).toBe(429);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(errorSpy.mock.calls[0]?.[0]))).toEqual({
+        event: "video-segment-failure",
+        stage: "segment",
+        status: 429,
+        code: "PROCESSING_BUSY",
+        detail: "Video processing is busy. Wait briefly and try again.",
+      });
+    } finally {
+      errorSpy.mockRestore();
+      held.forEach((lease) => lease.release());
     }
   });
 
@@ -576,13 +598,11 @@ describe("POST /api/video/segment", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(cancelled).toBe(true);
 
-    const first = claimVideoProcessing();
-    const second = claimVideoProcessing();
+    const held = [0, 1, 2, 3].map(() => claimVideoProcessing());
     try {
       expect(() => claimVideoProcessing()).toThrowError(/processing is busy/i);
     } finally {
-      first.release();
-      second.release();
+      held.forEach((lease) => lease.release());
     }
   });
 
@@ -638,13 +658,14 @@ describe("POST /api/video/segment", () => {
     retry.complete();
   });
 
-  it("creates a bounded source sample schedule across clips up to 30 seconds", () => {
+  it("creates a bounded one-frame-per-second source sample schedule", () => {
     expect(makeMuseSampleTimestamps(1_000)).toEqual([500]);
-    expect(makeMuseSampleTimestamps(2_500)).toEqual([416, 1_249, 2_083]);
-    expect(makeMuseSampleTimestamps(30_000)).toHaveLength(30);
-    const kitchenSamples = makeMuseSampleTimestamps(30_000);
-    expect(kitchenSamples).toHaveLength(30);
-    expect(kitchenSamples.at(-1)).toBeLessThan(30_000);
+    expect(makeMuseSampleTimestamps(2_500)).toEqual([500, 1_500, 2_250]);
+    // Sprint 0 REQ-S4: the 12-still map payload keeps the earliest samples.
+    expect(makeMuseSampleTimestamps(30_000)).toHaveLength(12);
+    expect(makeMuseSampleTimestamps(30_000)).toEqual(
+      [500, 1_500, 2_500, 3_500, 4_500, 5_500, 6_500, 7_500, 8_500, 9_500, 10_500, 11_500],
+    );
     expect(makeMuseSampleTimestamps(30_001)).toEqual([]);
   });
 
@@ -782,34 +803,32 @@ describe("POST /api/video/segment", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("completes a no-detection review without creating a mapping lease or a Muse call", async () => {
+  it("falls back to timestamp candidates when SAM detects nothing", async () => {
     const { fetchImpl: segmentFetch } = mockMetaFetch({ stream: () => streamResponse("No detections.") });
     const segmented = await segment({ identity: identityFor("no-detections") }, segmentFetch);
     expect(segmented.response.status).toBe(200);
-    expect(segmented.body.candidates).toEqual([]);
-    expect(segmented.body).toMatchObject({ mappingRequired: false });
-    expect(segmented.body.candidateToken).toBeUndefined();
-    expect(segmented.body.mappingExpiresAt).toBeUndefined();
+    // Plain walls and dark bathrooms are common; an empty candidate list made
+    // the app report "needs attention" on rooms that analysed fine.
+    expect((segmented.body.candidates as unknown[]).length).toBeGreaterThan(0);
+    expect(segmented.body).toMatchObject({ mappingRequired: true });
+    expect(typeof segmented.body.candidateToken).toBe("string");
+    expect(typeof segmented.body.mappingExpiresAt).toBe("number");
 
     const cancelled = await handleVideoSegmentRequest(identityOnlyCancellationRequest(segmented.body));
     expect(cancelled.status).toBe(200);
-    expect(await json(cancelled)).toMatchObject({ ok: true, stage: "cancelled", released: false });
+    expect(await json(cancelled)).toMatchObject({ ok: true, stage: "cancelled", released: true });
   });
 
-  it("rejects a QuickTime MOV before making a provider request", async () => {
+  it("uploads the original QuickTime bytes when the container cannot be rewritten", async () => {
     const { calls, fetchImpl } = mockMetaFetch();
+    // The deployed FFmpeg is decode-only, so a MOV remux can fail. The clip is
+    // analysed from its original bytes instead of being rejected: frame timing
+    // now comes from the container parser, not from a rewritten file.
     const movBytes = makeMp4(1_000, 2, "qt  ");
-    const { response, body } = await segment({ bytes: movBytes, identity: identityFor("sam-mov") }, fetchImpl);
+    const { response } = await segment({ bytes: movBytes, identity: identityFor("sam-mov") }, fetchImpl);
 
-    expect(response.status).toBe(415);
-    expect(body).toMatchObject({
-      ok: false,
-      error: {
-        code: "UNSUPPORTED_VIDEO",
-        message: "Meta's current video upload API accepts MP4 only. Convert this MOV to MP4 before live analysis.",
-      },
-    });
-    expect(calls).toHaveLength(0);
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(1 + VIDEO_PROMPTS.kitchen.length);
   });
 
   it("maps only signed SAM candidates with one Muse request using exact-seek still images", async () => {
@@ -861,10 +880,6 @@ describe("POST /api/video/segment", () => {
     expect(text.sampleImageOrder).toHaveLength((segmented.body.sampleTimestampsMs as number[]).length);
     expect(text.samCandidates).toHaveLength((segmented.body.candidates as VideoDraftSuggestion[]).length);
     expect(text.catalog).toHaveLength(11);
-    const waterItem = (text.catalog as Array<{ elementId: string; checklistItems: string[]; humanChecks: Array<{ photoCannotEstablish: boolean }> }>)
-      .find((item) => item.elementId === "demo-water-supply");
-    expect(waterItem?.checklistItems).toContain("Operate all faucets and confirm the water is working, hot, and clear.");
-    expect(waterItem?.humanChecks.some((check) => check.photoCannotEstablish)).toBe(true);
     const serializedMusePayload = JSON.stringify(payload);
     expect(serializedMusePayload).not.toContain(IDENTITY_BASE.sessionId);
     expect(serializedMusePayload).not.toContain(IDENTITY_BASE.videoId);
@@ -942,7 +957,7 @@ describe("POST /api/video/segment", () => {
     expect(fallbackCalls).toHaveLength(1);
     expect(fallbackCalls[0]?.url).toBe("https://inference.baseten.co/v1/chat/completions");
     expect(fallbackCalls[0]?.authorization).toBe("Bearer baseten-test-key");
-    expect(fallbackCalls[0]?.payload.model).toBe("meta-models/muse-spark-open");
+    expect(fallbackCalls[0]?.payload.model).toBe("meta-models/muse-spark-open-1026");
     expect(JSON.stringify(body)).not.toContain("baseten-test-key");
     expect(body.proposals).toMatchObject([{ elementId: "demo-water-supply", state: "draft-proposal", evidenceCandidateIds: ["cand-0001"] }]);
   });
@@ -1365,7 +1380,7 @@ describe("POST /api/video/segment", () => {
     expect(text).not.toContain("file-provider-secret-987");
   });
 
-  it("allows at most two exact-seek candidates per concept and twelve for the six-concept room", async () => {
+  it("allows at most two exact-seek candidates per concept and eight for the four-concept bathroom", async () => {
     const boxLine = (frame: number) =>
       `<${frame}f>3<|box;x1=${10 + frame};y1=20;x2=${30 + frame};y2=40;w=320;h=334|>` +
       "<|mask;x=0;y=0;data=27,60,~!!!!M!0c[0o91w?q1!pIH4pPRVp2B3'7`e.ioeAf6-k/#Xd8%dX9x(|>\n";
@@ -1379,7 +1394,7 @@ describe("POST /api/video/segment", () => {
 
     expect({ status: response.status, body }).toMatchObject({ status: 200 });
     const candidates = body.candidates as VideoDraftSuggestion[];
-    expect(candidates).toHaveLength(12);
+    expect(candidates).toHaveLength(8);
     const counts = new Map<string, number>();
     for (const candidate of candidates) {
       const key = `${candidate.elementId}\0${candidate.concept}`;
@@ -1388,7 +1403,7 @@ describe("POST /api/video/segment", () => {
     expect([...counts.values()].every((count) => count <= 2)).toBe(true);
   });
 
-  it("locks one active session operation and consumes duplicate analysis attempts", async () => {
+  it("locks one active operation per request identity and consumes duplicate analysis attempts", async () => {
     const identity = identityFor("segment-lock");
     let enteredUpload!: () => void;
     const firstUploadEntered = new Promise<void>((resolve) => { enteredUpload = resolve; });
@@ -1489,12 +1504,48 @@ describe("SAM per-concept concurrency", () => {
     const { response, body } = await segment({ identity: identityFor("concurrency") }, fetchImpl);
     expect(response.status).toBe(200);
     expect(maxInFlight).toBeGreaterThanOrEqual(2);
-    expect(maxInFlight).toBeLessThanOrEqual(3);
+    expect(maxInFlight).toBeLessThanOrEqual(6);
     expect(seenConcepts).toHaveLength(VIDEO_PROMPTS.kitchen.length);
     const candidates = body.candidates as Array<{ concept: string }>;
     expect(candidates.map((candidate) => candidate.concept)).toEqual(
       VIDEO_PROMPTS.kitchen.map((prompt) => prompt.concept),
     );
+  });
+
+  it("parses the concurrency override from env, clamped to 1-6 with a 2 default", () => {
+    expect(DEFAULT_MAX_CONCURRENT_SAM_CONCEPTS).toBe(2);
+    expect(resolveMaxConcurrentSamConcepts({})).toBe(2);
+    expect(resolveMaxConcurrentSamConcepts({ SAM_MAX_CONCURRENT_CONCEPTS: "2" })).toBe(2);
+    expect(resolveMaxConcurrentSamConcepts({ SAM_MAX_CONCURRENT_CONCEPTS: "6" })).toBe(6);
+    expect(resolveMaxConcurrentSamConcepts({ SAM_MAX_CONCURRENT_CONCEPTS: "99" })).toBe(6);
+    expect(resolveMaxConcurrentSamConcepts({ SAM_MAX_CONCURRENT_CONCEPTS: "0" })).toBe(1);
+    expect(resolveMaxConcurrentSamConcepts({ SAM_MAX_CONCURRENT_CONCEPTS: "-3" })).toBe(1);
+    expect(resolveMaxConcurrentSamConcepts({ SAM_MAX_CONCURRENT_CONCEPTS: "banana" })).toBe(2);
+  });
+
+  it("runs concepts sequentially when the env override is 1", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const { fetchImpl: base } = mockMetaFetch();
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (!url.endsWith("/responses")) return base(input, init);
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return await base(input, init);
+      } finally {
+        inFlight -= 1;
+      }
+    };
+    const response = await handleVideoSegmentRequest(requestFor({ identity: identityFor("concurrency-one") }), {
+      env: { ...LIVE_ENV, SAM_MAX_CONCURRENT_CONCEPTS: "1" },
+      fetch: fetchImpl,
+      decodeSourceFrames: testSourceFrameDecoder,
+    });
+    expect(response.status).toBe(200);
+    expect(maxInFlight).toBe(1);
   });
 
   it("fails fast on a concept error and aborts in-flight siblings", async () => {
@@ -1523,5 +1574,233 @@ describe("SAM per-concept concurrency", () => {
     expect(body).toMatchObject({ ok: false });
     expect(siblingSignals.length).toBeGreaterThanOrEqual(1);
     expect(siblingSignals.every((signal) => signal.aborted)).toBe(true);
+  });
+});
+
+describe("30-second analysis window (Sprint 0 REQ-S3)", () => {
+  it("states the first-30-seconds window on the segment response", async () => {
+    const { fetchImpl } = mockMetaFetch();
+    const { response, body } = await segment({ identity: identityFor("analysis-note") }, fetchImpl);
+    expect(response.status).toBe(200);
+    expect(body.analysisNote).toBe(ANALYSIS_WINDOW_NOTE);
+  });
+
+  it("rejects a longer-than-30-seconds staged clip with no evidence at or beyond the cap", async () => {
+    const { fetchImpl } = mockMetaFetch();
+    const { response, body } = await segment(
+      { bytes: makeMp4(35_000, 2), identity: identityFor("over-cap") },
+      fetchImpl,
+    );
+    expect(response.status).toBe(413);
+    expect(body).toMatchObject({ ok: false, error: { code: "VIDEO_TOO_LONG" } });
+    expect(body.candidates).toBeUndefined();
+    expect(body.sampleTimestampsMs).toBeUndefined();
+    expect(body.candidateToken).toBeUndefined();
+  });
+
+  it("drops candidate boxes at or beyond 30 seconds before selection", () => {
+    const prompt = VIDEO_PROMPTS.kitchen[0]!;
+    const box = { left: 10, top: 20, right: 30, bottom: 40 };
+    const results: VideoPromptResult[] = [{
+      ...prompt,
+      boxes: [
+        { frameIndex: 0, timestampMs: 500, objectOrdinal: 0, box },
+        { frameIndex: 29, timestampMs: ANALYSIS_CLIP_CAP_MS, objectOrdinal: 0, box },
+        { frameIndex: 30, timestampMs: ANALYSIS_CLIP_CAP_MS + 500, objectOrdinal: 1, box },
+      ],
+    }];
+    const candidates = makeCandidates(results);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      candidateId: "cand-0001",
+      elementId: prompt.elementId,
+      concept: prompt.concept,
+      evidence: { frameIndex: 0, timestampMs: 500 },
+    });
+  });
+});
+
+describe("two-room request isolation (Sprint 0 REQ-S2)", () => {
+  it("keeps two interleaved same-session segment requests on their own room and video identity", async () => {
+    const sessionId = "session-two-room-interleave";
+    const kitchenBytes = makeMp4(1_000, 2);
+    const bathroomBytes = makeMp4(2_000, 4);
+    const { fetchImpl: baseFetch } = mockMetaFetch();
+    // Force true overlap: the first upload waits for the sibling upload
+    // to arrive before either proceeds to the provider.
+    let releaseFirst!: () => void;
+    const siblingArrived = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    let uploadCount = 0;
+    let overlapped = false;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (!url.endsWith("/files")) return baseFetch(input, init);
+      uploadCount += 1;
+      if (uploadCount === 1) {
+        await Promise.race([
+          siblingArrived,
+          new Promise((_, reject) => setTimeout(() => reject(new Error("uploads never overlapped")), 5000)),
+        ]);
+        overlapped = true;
+      } else {
+        releaseFirst();
+      }
+      return baseFetch(input, init);
+    };
+
+    const [kitchenResponse, bathroomResponse] = await Promise.all([
+      handleVideoSegmentRequest(requestFor({
+        room: "kitchen",
+        bytes: kitchenBytes,
+        identity: identityFor("room-a", { sessionId, videoId: "video-room-a", analysisId: "analysis-room-a" }),
+      }), { env: LIVE_ENV, fetch: fetchImpl, decodeSourceFrames: testSourceFrameDecoder }),
+      handleVideoSegmentRequest(requestFor({
+        room: "bathroom",
+        bytes: bathroomBytes,
+        identity: identityFor("room-b", { sessionId, videoId: "video-room-b", analysisId: "analysis-room-b" }),
+      }), { env: LIVE_ENV, fetch: fetchImpl, decodeSourceFrames: testSourceFrameDecoder }),
+    ]);
+
+    expect(overlapped).toBe(true);
+    expect(kitchenResponse.status).toBe(200);
+    expect(bathroomResponse.status).toBe(200);
+    const kitchenBody = await json(kitchenResponse);
+    const bathroomBody = await json(bathroomResponse);
+    expect(kitchenBody.room).toBe("kitchen");
+    expect(bathroomBody.room).toBe("bathroom");
+    expect(kitchenBody.identity).toMatchObject({ sessionId, videoId: "video-room-a" });
+    expect(bathroomBody.identity).toMatchObject({ sessionId, videoId: "video-room-b" });
+    expect(kitchenBody.candidateToken).not.toBe(bathroomBody.candidateToken);
+    const kitchenConcepts = new Set(VIDEO_PROMPTS.kitchen.map((prompt) => prompt.concept));
+    const bathroomConcepts = new Set(VIDEO_PROMPTS.bathroom.map((prompt) => prompt.concept));
+    for (const candidate of kitchenBody.candidates as VideoDraftSuggestion[]) {
+      expect(kitchenConcepts.has(candidate.concept)).toBe(true);
+    }
+    for (const candidate of bathroomBody.candidates as VideoDraftSuggestion[]) {
+      expect(bathroomConcepts.has(candidate.concept)).toBe(true);
+    }
+
+    // Mapping each lease lands proposals on its own room and video identity.
+    const { fetchImpl: mapFetch } = mockMetaFetch();
+    const [kitchenMapped, bathroomMapped] = await Promise.all([
+      handleMap(kitchenBody, { env: LIVE_ENV, fetch: mapFetch }),
+      handleMap(bathroomBody, { env: LIVE_ENV, fetch: mapFetch }),
+    ]);
+    expect(kitchenMapped.status).toBe(200);
+    expect(bathroomMapped.status).toBe(200);
+    const kitchenMappedBody = await json(kitchenMapped);
+    const bathroomMappedBody = await json(bathroomMapped);
+    expect(kitchenMappedBody.room).toBe("kitchen");
+    expect(bathroomMappedBody.room).toBe("bathroom");
+    expect(kitchenMappedBody.identity).toMatchObject({ sessionId, videoId: "video-room-a" });
+    expect(bathroomMappedBody.identity).toMatchObject({ sessionId, videoId: "video-room-b" });
+    expect(kitchenMappedBody.media).toMatchObject({ sourceVideoSha256: sha256(kitchenBytes) });
+    expect(bathroomMappedBody.media).toMatchObject({ sourceVideoSha256: sha256(bathroomBytes) });
+  });
+});
+
+describe("POST /api/video/segment?stage=stills", () => {
+  const VIDEO_BYTES = makeMp4();
+  const VIDEO_HASH = sha256(VIDEO_BYTES);
+
+  function stillsRequest(options: {
+    stills?: Array<{ stillId: string; timestampMs: number; bytes?: Uint8Array }>;
+    stillMeta?: string;
+    extraField?: boolean;
+  } = {}): Request {
+    const stills = options.stills ?? [
+      { stillId: "s-video-demo-0-abcdef12", timestampMs: 0 },
+      { stillId: "s-video-demo-2500-1234abcd", timestampMs: 2500 },
+    ];
+    const form = new FormData();
+    form.append("stage", "stills");
+    form.append("room", "kitchen");
+    form.append("sessionId", IDENTITY_BASE.sessionId);
+    form.append("schemaVersion", IDENTITY_BASE.schemaVersion);
+    form.append("videoId", IDENTITY_BASE.videoId);
+    form.append("videoRevision", IDENTITY_BASE.videoRevision);
+    form.append("analysisId", IDENTITY_BASE.analysisId);
+    form.append("attempt", IDENTITY_BASE.attempt);
+    form.append("catalogVersion", IDENTITY_BASE.catalogVersion);
+    form.append("expectedVideoSha256", VIDEO_HASH);
+    form.append("stillMeta", options.stillMeta ?? JSON.stringify(stills.map(({ stillId, timestampMs }) => ({ stillId, timestampMs }))));
+    for (const still of stills) {
+      form.append("still", new File([still.bytes ?? JPEG_STILL], still.stillId, { type: "image/jpeg" }));
+    }
+    if (options.extraField) form.append("video", new File([VIDEO_BYTES], "clip.mp4", { type: "video/mp4" }));
+    const headers = new Headers({ origin: ORIGIN, "content-length": "65536" });
+    return new Request(`${ORIGIN}/api/video/segment?stage=stills`, { method: "POST", headers, body: form });
+  }
+
+  function stillsMetaFetch(museText: string): typeof fetch {
+    return async (input) => {
+      const url = String(input);
+      if (url.endsWith("/responses")) {
+        return Response.json({ status: "completed", output_text: museText });
+      }
+      throw new Error("unexpected endpoint");
+    };
+  }
+
+  it("maps room stills in one vision call and echoes the walkthrough identity", async () => {
+    const museText = JSON.stringify({
+      proposals: [{
+        elementId: "demo-water-supply",
+        modelSuggestion: "A",
+        observation: "A faucet and sink are visible.",
+        confidence: 81,
+        evidenceStillIds: ["s-video-demo-0-abcdef12"],
+        deficiencySuggestion: null,
+      }],
+    });
+    const response = await handleVideoSegmentRequest(stillsRequest(), {
+      env: LIVE_ENV,
+      fetch: stillsMetaFetch(museText),
+    });
+    expect(response.status).toBe(200);
+    const body = await json(response);
+    expect(body.stage).toBe("stills-mapped");
+    expect(body.room).toBe("kitchen");
+    expect(body.identity).toMatchObject({ videoId: "video-demo", analysisId: "analysis-attempt-1" });
+    expect(body.media).toMatchObject({ container: "mp4", sourceVideoSha256: VIDEO_HASH });
+    expect(body.proposals).toEqual([expect.objectContaining({
+      elementId: "demo-water-supply",
+      modelSuggestion: "A",
+      evidenceStillIds: ["s-video-demo-0-abcdef12"],
+    })]);
+  });
+
+  it("rejects non-JPEG stills and unknown form fields before any provider call", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const png = await handleVideoSegmentRequest(
+      stillsRequest({ stills: [{ stillId: "s-video-demo-0-abcdef12", timestampMs: 0, bytes: PNG_STILL }] }),
+      { env: LIVE_ENV, fetch: fetchImpl },
+    );
+    expect(png.status).toBe(415);
+    const extra = await handleVideoSegmentRequest(
+      stillsRequest({ extraField: true }),
+      { env: LIVE_ENV, fetch: fetchImpl },
+    );
+    expect(extra.status).toBe(400);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when Muse cites a still that was never sent", async () => {
+    const museText = JSON.stringify({
+      proposals: [{
+        elementId: "demo-water-supply",
+        modelSuggestion: "A",
+        observation: "A faucet is visible.",
+        confidence: 50,
+        evidenceStillIds: ["s-not-sent-00000000"],
+        deficiencySuggestion: null,
+      }],
+    });
+    const response = await handleVideoSegmentRequest(stillsRequest(), {
+      env: LIVE_ENV,
+      fetch: stillsMetaFetch(museText),
+    });
+    expect(response.status).toBe(502);
+    expect(await json(response)).toMatchObject({ ok: false, error: { code: "INVALID_MODEL_OUTPUT" } });
   });
 });

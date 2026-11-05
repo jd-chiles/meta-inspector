@@ -18,6 +18,7 @@ import {
   Video,
 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { primeAudio } from "./voice-conversation";
 
 import {
   isMoveInReadyRoomId,
@@ -69,6 +70,8 @@ export interface WalkthroughVideoCaptureProps {
   capturedRoomCount?: number;
   /** Room identities with a locally saved clip. */
   capturedRoomIds?: readonly string[];
+  /** Room identities awaiting analysis (REQ-L2 persisted queue). */
+  queuedRoomIds?: readonly string[];
   onRoomChange: (roomId: string) => void;
   /** Optional concise prompts; defaults are selected from the room id. */
   prompts?: readonly string[];
@@ -88,6 +91,14 @@ export interface WalkthroughVideoCaptureProps {
   detailsExpanded?: boolean;
   onDetailsExpandedChange?: (expanded: boolean) => void;
   children?: ReactNode;
+  /**
+   * Content rendered at the end of the capture section, after the saved-clip
+   * disclosure. The sticky viewport dock can only pin while its parent
+   * section spans the pinned position, so room-level content that must stay
+   * beneath the pinned dock (in-person checks) belongs here, not as a
+   * sibling after the section.
+   */
+  trailing?: ReactNode;
   /** Lets the AI guide start the same capture the Start button triggers. */
   controlRef?: { current: { startCapture: () => void } | null };
   /** Current filming cue captioned on the viewport while recording. */
@@ -139,6 +150,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
     roomId,
     capturedRoomCount = 0,
     capturedRoomIds = [],
+    queuedRoomIds = [],
     onRoomChange,
     prompts,
     completedPromptIds = [],
@@ -151,6 +163,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
     detailsExpanded,
     onDetailsExpandedChange,
     children,
+    trailing,
     controlRef,
     overlayCue = null,
   } = props;
@@ -200,6 +213,13 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [localError, setLocalError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // The file behind a failed save attempt is retained in memory so the
+  // error banner's retry/download actions work on the actual clip instead
+  // of being dead advice. Cleared on success and on every new attempt.
+  const [failedAttempt, setFailedAttempt] = useState<{
+    file: File;
+    prompts: MoveInReadyPromptId[];
+  } | null>(null);
   const [cameraIssue, setCameraIssue] = useState<string | null>(null);
   const [pendingPromptIds, setPendingPromptIds] = useState<MoveInReadyPromptId[]>([]);
   const [showAllPrompts, setShowAllPrompts] = useState(false);
@@ -273,6 +293,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
     setStoreStatus("loading");
     setLocalError(null);
     setNotice(null);
+    setFailedAttempt(null);
     const savedScope = scopeKey;
 
     void store.get(sessionId, roomId).then((saved) => {
@@ -328,6 +349,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
     setBusy(true);
     setLocalError(null);
     setNotice(null);
+    setFailedAttempt(null);
     const currentRoom = rooms.find((candidate) => makeVideoClipId(sessionId, candidate.id) === sourceScope);
     if (!currentRoom || sourceScope !== scopeKeyRef.current) {
       setBusy(false);
@@ -396,6 +418,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
       pendingPromptIdsRef.current = [];
       setPendingPromptIds([]);
       setLocalError(safeErrorMessage(error, "Could not prepare this room clip. Any earlier clip is kept."));
+      setFailedAttempt({ file, prompts: [...promptsCapturedDuringRecording] });
     } finally {
       if (filePreparationAbortRef.current === controller) filePreparationAbortRef.current = null;
       if (isCurrentOperation(operation, sourceScope)) setBusy(false);
@@ -406,7 +429,22 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
     return operation === operationRef.current && sourceScope === scopeKeyRef.current;
   }
 
+  function downloadFailedAttempt(): void {
+    if (!failedAttempt) return;
+    const url = URL.createObjectURL(failedAttempt.file);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = failedAttempt.file.name;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
   async function startCameraRecording(): Promise<void> {
+    // This tap is a user gesture: unlock narration audio for the cues
+    // that play from timers while this take records.
+    primeAudio();
     setCameraIssue(null);
     setLocalError(null);
     pendingPromptIdsRef.current = [];
@@ -741,6 +779,9 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
         </div>
         <div className={styles.roomHeaderActions}>
           <span className={styles.roomSaved}>{capturedRoomCount} of {rooms.length} clips saved</span>
+          {queuedRoomIds.includes(roomId) && (
+            <span className={styles.roomQueued} role="status" data-testid={`analysis-queued-${roomId}`}>Analysis queued</span>
+          )}
           <button
             type="button"
             className={styles.roomPickerToggle}
@@ -759,6 +800,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
         {rooms.map((option, index) => {
           const current = option.id === roomId;
           const saved = capturedRoomIds.includes(option.id);
+          const queued = queuedRoomIds.includes(option.id);
           const shortLabel = option.id === "bathroom"
             ? "Bath"
             : option.id === "bedroom-living"
@@ -775,7 +817,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
             type="button"
             className={`${styles.roomStep} ${current ? styles.roomStepCurrent : ""} ${saved ? styles.roomStepSaved : ""}`}
             data-testid={`room-step-${option.id}`}
-            aria-label={`Room ${index + 1}: ${option.label}${current ? ", selected" : ""}${saved ? ", clip saved" : ", no clip saved"}`}
+            aria-label={`Room ${index + 1}: ${option.label}${current ? ", selected" : ""}${saved ? ", clip saved" : ", no clip saved"}${queued ? ", analysis queued" : ""}`}
             aria-pressed={current}
             disabled={disabled || busy || recording}
             onClick={() => {
@@ -788,6 +830,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
           >
             <span className={styles.roomStepNumber}>{saved ? <Check aria-hidden="true" size={12} /> : index + 1}</span>
             <span className={styles.roomStepName}>{shortLabel}</span>
+            {queued && <span className={styles.roomStepQueue}>Queued</span>}
           </button>;
         })}
       </div>
@@ -940,7 +983,33 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
 
       {busy && <p className={styles.status} role="status">Checking the video and saving source frames on this device…</p>}
       {cameraIssue && <p className={styles.warning} role="status">{cameraIssue}</p>}
-      {localError && <p className={styles.error} role="alert">{localError}</p>}
+      {localError && (
+        <div className={styles.error} role="alert">
+          <p className={styles.errorText}>{localError}</p>
+          {failedAttempt && !busy && (
+            <div className={styles.errorActions}>
+              <button
+                type="button"
+                className={styles.secondaryButton}
+                data-testid="capture-retry-save"
+                onClick={() => {
+                  void processSelectedFile(failedAttempt.file, scopeKeyRef.current, failedAttempt.prompts);
+                }}
+              >
+                Retry save
+              </button>
+              <button
+                type="button"
+                className={styles.secondaryButton}
+                data-testid="capture-download-attempt"
+                onClick={downloadFailedAttempt}
+              >
+                Download this clip
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       {notice && !localError && <p className={styles.success} role="status"><Check size={17} aria-hidden="true" /> {notice}</p>}
       {storeStatus === "error" && !localError && (
         <p className={styles.error} role="alert">Local video storage is unavailable in this browser. Enable site storage or use another browser.</p>
@@ -983,6 +1052,7 @@ export default function WalkthroughVideoCapture(props: WalkthroughVideoCapturePr
           {children}
         </div>
       </details>}
+      {trailing}
     </section>
   );
 

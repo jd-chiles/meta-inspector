@@ -18,12 +18,16 @@ import {
   validateEvaluatorDecision,
   validateModelDeficiencySuggestion,
   validateEvaluatorSignoff,
+  validateParticipantSignoff,
   validateEvidenceReference,
+  validateInspectionLocation,
   validateVideoAnalysisIdentity,
   type EvaluatorDecisionSet,
   type EvaluatorSignoff,
+  type ParticipantSignoff,
   type EvidenceReference,
   type FundingType,
+  type InspectionLocation,
   type ModelElementProposal,
   type MoveInReadyElementId,
   type MoveInReadyPromptId,
@@ -31,6 +35,7 @@ import {
   type MoveInReadyUnitType,
   type ProposalState,
   type VideoAnalysisIdentity,
+  normalizeFundingType,
 } from "../../domain/move-in-ready";
 
 export const INSPECTION_SCHEMA_VERSION = MOVE_IN_READY_SCHEMA_VERSION;
@@ -54,6 +59,8 @@ export interface PendingAnalysisIntent {
   videoId: string;
   videoRevision: number;
   videoHash: string;
+  analysisId?: string;
+  attempt?: number;
   catalogVersion: string;
   requestedAt: string;
 }
@@ -65,10 +72,24 @@ export interface StoredRoomClipIdentity {
   videoId: string;
   videoRevision: number;
   videoHash: string;
+  /** Analysis attempt that produced the current durable video job. */
+  analysisId?: string;
+  attempt?: number;
+  /** Durable cloud upload job that owns this exact source revision. */
+  jobId?: string;
   capturedAt: string;
   durationSeconds: number;
   sizeBytes: number;
   evidence: EvidenceReference[];
+}
+
+/** Upload-created job ID and identity seed retained if the browser closes before completion is acknowledged. */
+export interface PendingVideoUploadIdentity {
+  jobId: string;
+  videoId: string;
+  videoRevision: number;
+  analysisId: string;
+  attempt: number;
 }
 
 /**
@@ -94,6 +115,9 @@ export interface VoiceCheckAnswer {
   recordedAt: string;
 }
 
+/** Guided-tour narration language (REQ-R2). "en" default; "es" needs FISH_VOICE_ID_ES. */
+export type TourLanguage = "en" | "es";
+
 export interface MoveInReadyInspection {
   schemaVersion: typeof INSPECTION_SCHEMA_VERSION;
   catalogVersion: string;
@@ -113,6 +137,7 @@ export interface MoveInReadyInspection {
   selectedRoomId: MoveInReadyRoomId;
   completedPromptIdsByRoom: Partial<Record<MoveInReadyRoomId, MoveInReadyPromptId[]>>;
   clipIdentities: Partial<Record<MoveInReadyRoomId, StoredRoomClipIdentity>>;
+  pendingVideoJobsByRoom?: Partial<Record<MoveInReadyRoomId, PendingVideoUploadIdentity>>;
   /** v2 per-element live clip identities, keyed by element id. */
   elementClipIdentities: Partial<Record<MoveInReadyElementId, StoredRoomClipIdentity>>;
   /** v2 live tracking proof metadata, keyed by element id. */
@@ -120,7 +145,15 @@ export interface MoveInReadyInspection {
   proposals: Partial<Record<string, ModelElementProposal>>;
   decisions: EvaluatorDecisionSet;
   pendingAnalysisIntent: PendingAnalysisIntent | null;
+  /** Persisted offline analysis queue (REQ-L2): room ids awaiting analysis, in enqueue order. */
+  analysisQueue: MoveInReadyRoomId[];
+  /** Optional GPS attestation captured at sign-off (REQ-L3); never blocks signing. */
+  inspectionLocation: InspectionLocation | null;
   signoff: EvaluatorSignoff | null;
+  /** REQ-F1 dual attestation: participant co-signature; name + typed signature only. */
+  participantSignoff: ParticipantSignoff | null;
+  /** REQ-F2: the participant needs visual (strobe) alarms; adds room checks + Fire Safety criteria. */
+  participantVisualAlarmsRequired: boolean;
   evaluatorAgencyName: string;
   landlordDiscussion: "" | "yes" | "no";
   landlordDiscussionDate: string;
@@ -129,6 +162,8 @@ export interface MoveInReadyInspection {
   leadershipSignoff: string;
   leadershipSignedAt: string;
   inspectionNote: string;
+  /** Spoken + question language for the guided tour only; review/export stay English. */
+  tourLanguage: TourLanguage;
 }
 
 interface InspectionDatabase extends DBSchema {
@@ -399,12 +434,17 @@ export function createInitialInspectionRecord(
     selectedRoomId: "kitchen",
     completedPromptIdsByRoom: {},
     clipIdentities: {},
+    pendingVideoJobsByRoom: {},
     elementClipIdentities: {},
     liveProofs: {},
     proposals: {},
     decisions: createUnreviewedEvaluatorDecisions(),
     pendingAnalysisIntent: null,
+    analysisQueue: [],
+    inspectionLocation: null,
     signoff: null,
+    participantSignoff: null,
+    participantVisualAlarmsRequired: false,
     evaluatorAgencyName: "",
     landlordDiscussion: "",
     landlordDiscussionDate: "",
@@ -413,6 +453,7 @@ export function createInitialInspectionRecord(
     leadershipSignoff: "",
     leadershipSignedAt: "",
     inspectionNote: "",
+    tourLanguage: "en",
   };
 }
 
@@ -446,6 +487,25 @@ function normalizeVoiceChecks(value: Record<string, unknown>): MoveInReadyInspec
     checks[roomId as MoveInReadyRoomId] = normalized;
   }
   return checks;
+}
+
+/**
+ * Normalize the persisted offline analysis queue (REQ-L2). Records saved
+ * before Sprint 3 have no queue and default to empty; entries dedupe in
+ * enqueue order. Non-room entries fail closed.
+ */
+function normalizeAnalysisQueue(value: unknown): MoveInReadyRoomId[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 12) return null;
+  const seen = new Set<string>();
+  const normalized: MoveInReadyRoomId[] = [];
+  for (const entry of value) {
+    if (!isMoveInReadyRoomId(entry)) return null;
+    if (seen.has(entry)) continue;
+    seen.add(entry);
+    normalized.push(entry);
+  }
+  return normalized;
 }
 
 function normalizeRoomFields(value: Record<string, unknown>): NormalizedRoomFields | null {
@@ -502,6 +562,9 @@ function validateStoredClipIdentityEntry(
     (rawIdentity.videoRevision as number) < 1 ||
     typeof rawIdentity.videoHash !== "string" ||
     !/^[0-9a-f]{64}$/.test(rawIdentity.videoHash) ||
+    (rawIdentity.jobId !== undefined && (typeof rawIdentity.jobId !== "string" || !/^[0-9a-f-]{36}$/.test(rawIdentity.jobId))) ||
+    (rawIdentity.analysisId !== undefined && (typeof rawIdentity.analysisId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(rawIdentity.analysisId))) ||
+    (rawIdentity.attempt !== undefined && (!Number.isSafeInteger(rawIdentity.attempt) || (rawIdentity.attempt as number) < 1)) ||
     typeof rawIdentity.capturedAt !== "string" ||
     !Number.isFinite(Date.parse(rawIdentity.capturedAt)) ||
     typeof rawIdentity.durationSeconds !== "number" ||
@@ -568,25 +631,33 @@ export function validateInspectionRecord(
     return { ok: false, message: "The saved inspection belongs to a different session." };
   }
   if (
-    typeof value.catalogVersion !== "string" ||
-    !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value.catalogVersion) ||
-    typeof value.createdAt !== "string" ||
-    !Number.isFinite(Date.parse(value.createdAt)) ||
-    typeof value.updatedAt !== "string" ||
-    !Number.isFinite(Date.parse(value.updatedAt)) ||
-    (value.fundingType !== "unknown" && value.fundingType !== "lahsa" && value.fundingType !== "hud") ||
+  typeof value.catalogVersion !== "string" ||
+  !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value.catalogVersion) ||
+  typeof value.createdAt !== "string" ||
+  !Number.isFinite(Date.parse(value.createdAt)) ||
+  typeof value.updatedAt !== "string" ||
+  !Number.isFinite(Date.parse(value.updatedAt)) ||
+  // Accept legacy and strict fundingType values; unknown, lahsa, hud are
+  // the canonical members. Any other value is treated as unknown so that
+  // older saved records or renamed option values do not fail validation.
+  (value.fundingType !== "unknown" && value.fundingType !== "lahsa" && value.fundingType !== "hud") ||
     typeof value.pseudonym !== "string" ||
     value.pseudonym.length > 80 ||
     (value.evaluatorName !== undefined && (typeof value.evaluatorName !== "string" || value.evaluatorName.length > 120)) ||
     !isMoveInReadyRoomId(value.selectedRoomId) ||
     (value.completedPromptIdsByRoom !== undefined && !isRecord(value.completedPromptIdsByRoom)) ||
     !isRecord(value.clipIdentities) ||
+    (value.pendingVideoJobsByRoom !== undefined && !isRecord(value.pendingVideoJobsByRoom)) ||
     (value.elementClipIdentities !== undefined && !isRecord(value.elementClipIdentities)) ||
     (value.liveProofs !== undefined && !isRecord(value.liveProofs)) ||
     !isRecord(value.proposals) ||
     !isRecord(value.decisions) ||
     !(value.pendingAnalysisIntent === null || isRecord(value.pendingAnalysisIntent)) ||
+    (value.analysisQueue !== undefined && !Array.isArray(value.analysisQueue)) ||
+    (value.inspectionLocation !== undefined && value.inspectionLocation !== null && !isRecord(value.inspectionLocation)) ||
     (value.signoff !== null && !validateEvaluatorSignoff(value.signoff).ok) ||
+    (value.participantSignoff !== undefined && value.participantSignoff !== null && !validateParticipantSignoff(value.participantSignoff).ok) ||
+    (value.participantVisualAlarmsRequired !== undefined && typeof value.participantVisualAlarmsRequired !== "boolean") ||
     typeof value.evaluatorAgencyName !== "string" ||
     value.evaluatorAgencyName.length > 120 ||
     (value.landlordDiscussion !== "" && value.landlordDiscussion !== "yes" && value.landlordDiscussion !== "no") ||
@@ -599,9 +670,25 @@ export function validateInspectionRecord(
     value.leadershipSignoff.length > 120 ||
     typeof value.leadershipSignedAt !== "string" ||
     !isValidOptionalDate(value.leadershipSignedAt) ||
-    (value.inspectionNote !== undefined && (typeof value.inspectionNote !== "string" || value.inspectionNote.length > 2000))
+    (value.inspectionNote !== undefined && (typeof value.inspectionNote !== "string" || value.inspectionNote.length > 2000)) ||
+    (value.tourLanguage !== undefined && value.tourLanguage !== "en" && value.tourLanguage !== "es")
   ) {
     return { ok: false, message: "The saved inspection fields are incomplete or invalid." };
+  }
+
+  const pendingVideoJobsByRoom: MoveInReadyInspection["pendingVideoJobsByRoom"] = {};
+  if (value.pendingVideoJobsByRoom !== undefined) {
+    for (const [roomKey, rawPending] of Object.entries(value.pendingVideoJobsByRoom as Record<string, unknown>)) {
+      if (!isMoveInReadyRoomId(roomKey) || !isRecord(rawPending) ||
+          typeof rawPending.jobId !== "string" || !/^[0-9a-f-]{36}$/.test(rawPending.jobId) ||
+          typeof rawPending.videoId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(rawPending.videoId) ||
+          !Number.isSafeInteger(rawPending.videoRevision) || (rawPending.videoRevision as number) < 1 ||
+          typeof rawPending.analysisId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(rawPending.analysisId) ||
+          !Number.isSafeInteger(rawPending.attempt) || (rawPending.attempt as number) < 1) {
+        return { ok: false, message: "The saved inspection contains an invalid pending video upload." };
+      }
+      pendingVideoJobsByRoom[roomKey] = rawPending as unknown as PendingVideoUploadIdentity;
+    }
   }
 
   const completedPromptIdsByRoom: MoveInReadyInspection["completedPromptIdsByRoom"] = {};
@@ -683,6 +770,18 @@ export function validateInspectionRecord(
   if (!voiceChecks) {
     return { ok: false, message: "The saved inspection contains invalid voice check answers." };
   }
+  const analysisQueue = normalizeAnalysisQueue(value.analysisQueue);
+  if (!analysisQueue) {
+    return { ok: false, message: "The saved inspection contains an invalid analysis queue." };
+  }
+  let inspectionLocation: InspectionLocation | null = null;
+  if (value.inspectionLocation !== undefined && value.inspectionLocation !== null) {
+    const parsedLocation = validateInspectionLocation(value.inspectionLocation);
+    if (!parsedLocation.ok) {
+      return { ok: false, message: "The saved inspection contains an invalid inspection location." };
+    }
+    inspectionLocation = parsedLocation.value;
+  }
 
   if (hasStaleVersions) {
     return {
@@ -693,7 +792,7 @@ export function validateInspectionRecord(
         sessionId: expectedSessionId,
         createdAt: value.createdAt,
         updatedAt: new Date().toISOString(),
-        fundingType: value.fundingType as FundingType,
+        fundingType: normalizeFundingType(value.fundingType),
         pseudonym: value.pseudonym,
         evaluatorName: typeof value.evaluatorName === "string" ? value.evaluatorName : "",
         voiceChecks,
@@ -703,12 +802,17 @@ export function validateInspectionRecord(
         selectedRoomId: value.selectedRoomId as MoveInReadyRoomId,
         completedPromptIdsByRoom,
         clipIdentities: value.clipIdentities as MoveInReadyInspection["clipIdentities"],
+        pendingVideoJobsByRoom: {},
         elementClipIdentities: (value.elementClipIdentities ?? {}) as MoveInReadyInspection["elementClipIdentities"],
         liveProofs: (value.liveProofs ?? {}) as MoveInReadyInspection["liveProofs"],
         proposals: {},
         decisions: createUnreviewedEvaluatorDecisions(),
         pendingAnalysisIntent: null,
+        analysisQueue: [],
+        inspectionLocation: null,
         signoff: null,
+        participantSignoff: null,
+        participantVisualAlarmsRequired: value.participantVisualAlarmsRequired === true,
         evaluatorAgencyName: value.evaluatorAgencyName,
         landlordDiscussion: value.landlordDiscussion as MoveInReadyInspection["landlordDiscussion"],
         landlordDiscussionDate: value.landlordDiscussionDate,
@@ -717,6 +821,7 @@ export function validateInspectionRecord(
         leadershipSignoff: value.leadershipSignoff,
         leadershipSignedAt: value.leadershipSignedAt,
         inspectionNote: typeof value.inspectionNote === "string" ? value.inspectionNote : "",
+        tourLanguage: value.tourLanguage === "es" ? "es" : "en",
       },
     };
   }
@@ -834,7 +939,7 @@ export function validateInspectionRecord(
       sessionId: expectedSessionId,
       createdAt: value.createdAt,
       updatedAt: value.updatedAt,
-      fundingType: value.fundingType as FundingType,
+      fundingType: normalizeFundingType(value.fundingType),
       pseudonym: value.pseudonym,
       evaluatorName,
       voiceChecks,
@@ -844,12 +949,17 @@ export function validateInspectionRecord(
       selectedRoomId: value.selectedRoomId as MoveInReadyRoomId,
       completedPromptIdsByRoom,
       clipIdentities: value.clipIdentities as MoveInReadyInspection["clipIdentities"],
+      pendingVideoJobsByRoom,
       elementClipIdentities: (value.elementClipIdentities ?? {}) as MoveInReadyInspection["elementClipIdentities"],
       liveProofs: (value.liveProofs ?? {}) as MoveInReadyInspection["liveProofs"],
       proposals,
       decisions,
       pendingAnalysisIntent: parsedPendingAnalysisIntent.value,
+      analysisQueue,
+      inspectionLocation,
       signoff: value.signoff as EvaluatorSignoff | null,
+      participantSignoff: (value.participantSignoff ?? null) as ParticipantSignoff | null,
+      participantVisualAlarmsRequired: value.participantVisualAlarmsRequired === true,
       evaluatorAgencyName: value.evaluatorAgencyName,
       landlordDiscussion: value.landlordDiscussion as MoveInReadyInspection["landlordDiscussion"],
       landlordDiscussionDate: value.landlordDiscussionDate,
@@ -858,6 +968,7 @@ export function validateInspectionRecord(
       leadershipSignoff: value.leadershipSignoff,
       leadershipSignedAt: value.leadershipSignedAt,
       inspectionNote: typeof value.inspectionNote === "string" ? value.inspectionNote : "",
+      tourLanguage: value.tourLanguage === "es" ? "es" : "en",
     },
   };
 }
@@ -881,6 +992,8 @@ export function migrateLegacyInspectionRecord(
       ...(value as unknown as MoveInReadyInspection),
       schemaVersion: INSPECTION_SCHEMA_VERSION,
       sessionId: expectedSessionId,
+      participantSignoff: null,
+      participantVisualAlarmsRequired: false,
     }, PREVIOUS_SCHEMA_VERSION_WITHOUT_IDENTITY_VERSIONS);
   }
   if (value.schemaVersion === PREVIOUS_INSPECTION_SCHEMA_VERSION) {
@@ -899,6 +1012,8 @@ export function migrateLegacyInspectionRecord(
       sessionId: expectedSessionId,
       decisions: decisions as EvaluatorDecisionSet,
       signoff: resetFireSafety ? null : value.signoff as EvaluatorSignoff | null,
+      participantSignoff: null,
+      participantVisualAlarmsRequired: false,
       evaluatorAgencyName: typeof value.evaluatorAgencyName === "string" ? value.evaluatorAgencyName : "",
       landlordDiscussion: value.landlordDiscussion === "yes" || value.landlordDiscussion === "no" ? value.landlordDiscussion : "",
       landlordDiscussionDate: typeof value.landlordDiscussionDate === "string" ? value.landlordDiscussionDate : "",
@@ -918,6 +1033,8 @@ export function migrateLegacyInspectionRecord(
       leadershipNameAndTitle: "",
       leadershipSignedAt: "",
       inspectionNote: typeof value.inspectionNote === "string" ? value.inspectionNote.slice(0, 2000) : "",
+      participantSignoff: null,
+      participantVisualAlarmsRequired: false,
     }, ACKNOWLEDGMENT_INSPECTION_SCHEMA_VERSION);
   }
   if (value.schemaVersion !== LEGACY_INSPECTION_SCHEMA_VERSION) return null;
@@ -939,7 +1056,7 @@ export function migrateLegacyInspectionRecord(
     sessionId: expectedSessionId,
     createdAt: value.createdAt as string,
     updatedAt: value.updatedAt as string,
-    fundingType: value.fundingType as FundingType,
+    fundingType: normalizeFundingType(value.fundingType),
     pseudonym: value.pseudonym as string,
     evaluatorName: typeof value.evaluatorName === "string" ? value.evaluatorName : "",
     selectedRoomId: value.selectedRoomId as MoveInReadyRoomId,
@@ -951,6 +1068,8 @@ export function migrateLegacyInspectionRecord(
     decisions: createUnreviewedEvaluatorDecisions(),
     pendingAnalysisIntent: null,
     signoff: null,
+    participantSignoff: null,
+    participantVisualAlarmsRequired: false,
     evaluatorAgencyName: "",
     landlordDiscussion: "",
     landlordDiscussionDate: "",
@@ -1052,6 +1171,8 @@ function migrateAcknowledgmentInspectionRecord(
     sessionId: expectedSessionId,
     decisions: decisions as EvaluatorDecisionSet,
     signoff: resetReview ? null : value.signoff as EvaluatorSignoff | null,
+    participantSignoff: null,
+    participantVisualAlarmsRequired: false,
   };
 }
 

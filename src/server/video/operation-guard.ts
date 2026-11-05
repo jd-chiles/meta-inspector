@@ -4,7 +4,20 @@ import { VideoSegmentError } from "./errors";
 const SESSION_DEDUPE_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_TRACKED_SESSIONS = 5_000;
 const MAX_ATTEMPTS_PER_SESSION = 64;
-const MAX_CONCURRENT_VIDEO_OPERATIONS = 2;
+// A walkthrough analyses four rooms as one batch. A cap of two turned a
+// normal batch into two provider calls plus two 429s, which the UI reported
+// as "needs attention" on every room.
+const MAX_CONCURRENT_VIDEO_OPERATIONS = 4;
+const MAX_CONCURRENT_STILLS_OPERATIONS = 4;
+/**
+ * Concurrent operations per walkthrough session (Sprint 0 REQ-S2). Two
+ * rooms analyze at once; the full request identity (session, video,
+ * analysis, attempt, versions, hash) is the isolation key, so rooms of
+ * one session can never share a lease, token, or retained stills.
+ */
+// One walkthrough analyses its four rooms together and shares a session id.
+// A cap of two admitted half the batch and rejected the rest as busy.
+const MAX_ACTIVE_OPERATIONS_PER_SESSION = 4;
 const MAX_PENDING_MAPPING_STILLS_BYTES = 64 * 1024 * 1024;
 const MAX_SINGLE_MAPPING_STILLS_BYTES = 16 * 1024 * 1024;
 
@@ -13,6 +26,8 @@ export interface PendingMappingStill {
   frameIndex: number;
   timestampMs: number;
   bytes: Uint8Array;
+  width?: number;
+  height?: number;
 }
 
 export interface PendingMappingStills {
@@ -47,7 +62,8 @@ interface ActiveOperation {
 interface SessionOperations {
   expiresAt: number;
   seenAnalysisAttempts: Set<string>;
-  active?: ActiveOperation;
+  /** Active operations keyed by full request-identity digest. */
+  active: Map<string, ActiveOperation>;
 }
 
 export interface VideoOperationLease {
@@ -70,7 +86,20 @@ export interface VideoProcessingLease {
  * unbounded number of large uploads while the provider is busy.
  */
 export function claimVideoProcessing(): VideoProcessingLease {
-  if (activeVideoOperations >= MAX_CONCURRENT_VIDEO_OPERATIONS) {
+  return claimWithCap(MAX_CONCURRENT_VIDEO_OPERATIONS);
+}
+
+/**
+ * Stills requests carry a few JPEG frames instead of a full clip, so the
+ * shared counter admits more of them at once. The cap still bounds total
+ * concurrent provider work when legacy and stills requests mix.
+ */
+export function claimStillsProcessing(): VideoProcessingLease {
+  return claimWithCap(MAX_CONCURRENT_STILLS_OPERATIONS);
+}
+
+function claimWithCap(cap: number): VideoProcessingLease {
+  if (activeVideoOperations >= cap) {
     throw new VideoSegmentError(429, "PROCESSING_BUSY", "Video processing is busy. Wait briefly and try again.");
   }
   activeVideoOperations += 1;
@@ -84,12 +113,14 @@ export function claimVideoProcessing(): VideoProcessingLease {
   };
 }
 
-function clearActive(session: SessionOperations): void {
-  if (session.active?.expiryTimer) clearTimeout(session.active.expiryTimer);
-  if (session.active?.pendingStillsBytes) {
-    pendingMappingStillsBytes = Math.max(0, pendingMappingStillsBytes - session.active.pendingStillsBytes);
+function clearOperation(session: SessionOperations, key: string): void {
+  const active = session.active.get(key);
+  if (!active) return;
+  if (active.expiryTimer) clearTimeout(active.expiryTimer);
+  if (active.pendingStillsBytes) {
+    pendingMappingStillsBytes = Math.max(0, pendingMappingStillsBytes - active.pendingStillsBytes);
   }
-  session.active = undefined;
+  session.active.delete(key);
 }
 
 function attemptKey(identity: VideoOperationIdentity): string {
@@ -133,10 +164,12 @@ function stale(): VideoSegmentError {
 
 function sweepExpired(now: number): void {
   for (const [sessionId, session] of operationsBySession) {
-    if (session.active?.phase === "awaiting-map" && (session.active.mappingExpiresAt ?? 0) <= now) {
-      clearActive(session);
+    for (const [key, active] of session.active) {
+      if (active.phase === "awaiting-map" && (active.mappingExpiresAt ?? 0) <= now) {
+        clearOperation(session, key);
+      }
     }
-    if (session.expiresAt <= now && !session.active) {
+    if (session.expiresAt <= now && session.active.size === 0) {
       operationsBySession.delete(sessionId);
     }
   }
@@ -150,6 +183,7 @@ function getOrCreateSession(sessionId: string, now: number): SessionOperations {
   const created: SessionOperations = {
     expiresAt: now + SESSION_DEDUPE_TTL_MS,
     seenAnalysisAttempts: new Set(),
+    active: new Map(),
   };
   operationsBySession.set(sessionId, created);
   return created;
@@ -160,7 +194,9 @@ function makeLease(sessionId: string, key: string, pendingStills?: PendingMappin
     ...(pendingStills ? { pendingStills } : {}),
     awaitingMap(candidateToken, expiresAt, nextPendingStills) {
       const session = operationsBySession.get(sessionId);
-      if (session?.active?.key !== key || session.active.phase !== "segmenting") return;
+      if (!session) return;
+      const segmenting = session.active.get(key);
+      if (!segmenting || segmenting.phase !== "segmenting") return;
       if (nextPendingStills) {
         const measuredBytes = [...nextPendingStills.candidates, ...nextPendingStills.samples]
           .reduce((total, still) => total + still.bytes.byteLength, 0);
@@ -183,33 +219,35 @@ function makeLease(sessionId: string, key: string, pendingStills?: PendingMappin
       };
       active.expiryTimer = setTimeout(() => {
         const current = operationsBySession.get(sessionId);
-        if (current?.active?.key === key && current.active.phase === "awaiting-map" && (current.active.mappingExpiresAt ?? 0) <= Date.now()) {
-          clearActive(current);
+        const currentOp = current?.active.get(key);
+        if (current && currentOp?.phase === "awaiting-map" && (currentOp.mappingExpiresAt ?? 0) <= Date.now()) {
+          clearOperation(current, key);
         }
       }, Math.max(0, expiresAt - Date.now()));
       active.expiryTimer.unref?.();
-      session.active = active;
+      session.active.set(key, active);
     },
     complete() {
       const session = operationsBySession.get(sessionId);
-      if (session?.active?.key === key) clearActive(session);
+      if (session) clearOperation(session, key);
     },
   };
 }
 
-/** Claim the session before the first paid SAM call and retain the attempt for replay protection. */
+/** Claim the request identity before the first paid SAM call and retain the attempt for replay protection. */
 export function claimVideoSegmentation(identity: VideoOperationIdentity): VideoOperationLease {
   const now = Date.now();
   const session = getOrCreateSession(identity.sessionId, now);
   const key = operationKey(identity);
   const attempt = attemptKey(identity);
-  if (session.active) throw busy();
+  if (session.active.has(key)) throw busy();
+  if (session.active.size >= MAX_ACTIVE_OPERATIONS_PER_SESSION) throw busy();
   if (session.seenAnalysisAttempts.has(attempt)) throw stale();
   if (session.seenAnalysisAttempts.size >= MAX_ATTEMPTS_PER_SESSION) throw busy();
 
   session.seenAnalysisAttempts.add(attempt);
   session.expiresAt = now + SESSION_DEDUPE_TTL_MS;
-  session.active = { key, phase: "segmenting" };
+  session.active.set(key, { key, phase: "segmenting" });
   return makeLease(identity.sessionId, key);
 }
 
@@ -221,10 +259,10 @@ export function claimVideoMapping(
   const now = Date.now();
   sweepExpired(now);
   const session = operationsBySession.get(identity.sessionId);
-  if (!session?.active) throw stale();
+  const active = session?.active.get(operationKey(identity));
+  if (!session || !active) throw stale();
 
-  const active = session.active;
-  if (active.key !== operationKey(identity) || active.phase === "segmenting" ||
+  if (active.phase === "segmenting" ||
       !digestMatches(active.candidateTokenDigest, tokenDigest(candidateToken))) {
     throw stale();
   }
@@ -233,6 +271,49 @@ export function claimVideoMapping(
   active.phase = "mapping";
   session.expiresAt = now + SESSION_DEDUPE_TTL_MS;
   return makeLease(identity.sessionId, active.key, active.pendingStills);
+}
+
+/** Rebuild a one-time map lease after a durable worker is restarted between SAM and Muse. */
+export function restoreAwaitingVideoMapping(
+  identity: VideoOperationIdentity,
+  candidateToken: string,
+  expiresAt: number,
+  pendingStills: PendingMappingStills,
+): void {
+  const now = Date.now();
+  const session = getOrCreateSession(identity.sessionId, now);
+  if (expiresAt <= now || expiresAt > now + 15 * 60 * 1000 + 5_000) throw stale();
+  const key = operationKey(identity);
+  const existing = session.active.get(key);
+  if (existing) {
+    if (existing.phase === "awaiting-map") {
+      if (digestMatches(existing.candidateTokenDigest, tokenDigest(candidateToken))) return;
+      // A durable worker may need to renew its private signed token after a
+      // restart. Replace only the same identity's unused mapping lease.
+      clearOperation(session, key);
+    } else {
+      throw busy();
+    }
+  }
+  if (session.active.size >= MAX_ACTIVE_OPERATIONS_PER_SESSION) throw busy();
+  const attempt = attemptKey(identity);
+  if (!session.seenAnalysisAttempts.has(attempt)) {
+    if (session.seenAnalysisAttempts.size >= MAX_ATTEMPTS_PER_SESSION) throw busy();
+    session.seenAnalysisAttempts.add(attempt);
+  }
+  session.expiresAt = now + SESSION_DEDUPE_TTL_MS;
+  session.active.set(key, { key, phase: "segmenting" });
+  const lease = makeLease(identity.sessionId, key);
+  lease.awaitingMap(candidateToken, expiresAt, pendingStills);
+  if (operationsBySession.get(identity.sessionId)?.active.get(key)?.phase !== "awaiting-map") throw stale();
+}
+
+/** Allow pg-boss to safely retry only when no SAM request was started. */
+export function releaseSafeVideoSegmentationAttempt(identity: VideoOperationIdentity): void {
+  const session = operationsBySession.get(identity.sessionId);
+  if (!session) return;
+  session.seenAnalysisAttempts.delete(attemptKey(identity));
+  if (session.active.size === 0) session.expiresAt = Math.min(session.expiresAt, Date.now() + SESSION_DEDUPE_TTL_MS);
 }
 
 /**
@@ -248,16 +329,16 @@ export function releaseAwaitingVideoMapping(
   const now = Date.now();
   sweepExpired(now);
   const session = operationsBySession.get(identity.sessionId);
-  const active = session?.active;
+  const key = operationKey(identity);
+  const active = session?.active.get(key);
   if (
     !session || !active || active.phase !== "awaiting-map" ||
-    active.key !== operationKey(identity) ||
     !digestMatches(active.candidateTokenDigest, tokenDigest(candidateToken))
   ) {
     return false;
   }
 
-  clearActive(session);
+  clearOperation(session, key);
   return true;
 }
 
@@ -266,11 +347,12 @@ export function releaseAwaitingVideoMappingByIdentity(identity: VideoOperationId
   const now = Date.now();
   sweepExpired(now);
   const session = operationsBySession.get(identity.sessionId);
-  const active = session?.active;
-  if (!session || !active || active.phase !== "awaiting-map" || active.key !== operationKey(identity)) {
+  const key = operationKey(identity);
+  const active = session?.active.get(key);
+  if (!session || !active || active.phase !== "awaiting-map") {
     return false;
   }
 
-  clearActive(session);
+  clearOperation(session, key);
   return true;
 }

@@ -19,7 +19,6 @@ export type FireSafetyDraftOutcome = "" | FireSafetyClauseOutcome;
 export interface DecisionDraft {
   choice: DecisionChoice;
   rationale: string;
-  manualCheckAcknowledged: boolean;
   issueDescription: string;
   correction: string;
   completionDate: string;
@@ -60,7 +59,6 @@ export function createDecisionDraft(decision: EvaluatorDecision): DecisionDraft 
   if (decision.status === "A" || decision.status === "D") return {
     choice: decision.status,
     rationale: decision.rationale,
-    manualCheckAcknowledged: Boolean(decision.inPersonCheckAcknowledgment),
     issueDescription: decision.status === "D" ? decision.deficiency.issueDescription : "",
     correction: decision.status === "D" ? decision.deficiency.correction : "",
     completionDate: decision.status === "D" ? decision.deficiency.completionDate : "",
@@ -71,14 +69,14 @@ export function createDecisionDraft(decision: EvaluatorDecision): DecisionDraft 
     evidenceStillIds: decision.evidence.map((reference) => reference.stillId),
     note: "",
   };
-  if (decision.status === "needs-human-check") return { choice: decision.status, rationale: "", manualCheckAcknowledged: false, issueDescription: "", correction: "", completionDate: "", reinspectionDate: "", fireSafetyUnitDetectors: fireSafetyAssessment?.unitDetectors ?? "", fireSafetyPublicAreaDetectors: fireSafetyAssessment?.publicAreaDetectors ?? "", planSuggestionReviewed: false, evidenceStillIds: [], note: decision.note };
-  return { choice: "unreviewed", rationale: "", manualCheckAcknowledged: false, issueDescription: "", correction: "", completionDate: "", reinspectionDate: "", fireSafetyUnitDetectors: "", fireSafetyPublicAreaDetectors: "", planSuggestionReviewed: false, evidenceStillIds: [], note: "" };
+  if (decision.status === "needs-human-check") return { choice: decision.status, rationale: "", issueDescription: "", correction: "", completionDate: "", reinspectionDate: "", fireSafetyUnitDetectors: fireSafetyAssessment?.unitDetectors ?? "", fireSafetyPublicAreaDetectors: fireSafetyAssessment?.publicAreaDetectors ?? "", planSuggestionReviewed: false, evidenceStillIds: [], note: decision.note };
+  return { choice: "unreviewed", rationale: "", issueDescription: "", correction: "", completionDate: "", reinspectionDate: "", fireSafetyUnitDetectors: "", fireSafetyPublicAreaDetectors: "", planSuggestionReviewed: false, evidenceStillIds: [], note: "" };
 }
 
 /**
- * Copy an unreviewed AI draft into editable draft fields. Never touches the
- * in-person acknowledgment or the plan-review confirmation: the evaluator
- * still performs both explicitly before any save.
+ * Copy an unreviewed AI draft into editable draft fields. Never clears the
+ * plan-review confirmation, which the evaluator still performs explicitly.
+ * Saving the decision records the in-person acknowledgment.
  */
 export function prefillDraftFromProposal(draft: DecisionDraft, proposal: ModelElementProposal): DecisionDraft {
   return {
@@ -99,13 +97,41 @@ export type ConfirmDraftResult =
   | { ok: true; draft: DecisionDraft }
   | { ok: false; reason: string };
 
+/** Deficiency-detail fields the evaluator completes for a D decision. */
+export interface ElementDetailsInput {
+  issueDescription: string;
+  correction: string;
+  completionDate: string;
+  reinspectionDate: string;
+}
+
+/**
+ * True when a one-tap confirm would fail for an incomplete D correction
+ * plan. The guided tour routes those elements to its in-tour detail
+ * card instead of leaving for the review detail form; every other
+ * confirm failure (no draft, stale clip, empty observation, missing
+ * stills) still needs the full review UI.
+ */
+export function confirmNeedsDetails(proposal: ModelElementProposal | undefined): boolean {
+  if (!proposal || proposal.modelSuggestion !== "D") return false;
+  const suggestion = proposal.deficiencySuggestion;
+  return !(
+    suggestion &&
+    suggestion.deficientArea.trim() &&
+    suggestion.correction.trim() &&
+    suggestion.completionDate.trim() &&
+    suggestion.reinspectionDate.trim()
+  );
+}
+
 /**
  * Build a complete decision draft for one-tap confirm. The confirm tap is
  * the evaluator's in-person acknowledgment and plan review, so the caller
  * must show the suggestion (and the D plan) next to the button. Returns a
- * blocker instead of a draft when the tap cannot honestly decide: an empty
- * observation, a D without a complete suggested plan, or a D with no still
- * evidence. Fire safety confirms both sections 11a and 11b together.
+ * blocker instead of a draft when the tap cannot honestly decide: a D
+ * with an empty observation, a D without a complete suggested plan, or a
+ * D with no still evidence. Approvals never need a note. Fire safety
+ * confirms both sections 11a and 11b together.
  */
 export function buildConfirmDraft(
   elementId: MoveInReadyElementId,
@@ -116,7 +142,10 @@ export function buildConfirmDraft(
   const rationale = voiceNote && !prefilled.rationale.includes(voiceNote)
     ? `${prefilled.rationale}\n${voiceNote}`.slice(0, 1000)
     : prefilled.rationale.slice(0, 1000);
-  if (!rationale.trim()) {
+  // Approved items never require a note: one-tap confirm of an A
+  // succeeds even with empty observation text. D decisions must carry
+  // their deficiency note through the detail form.
+  if (!rationale.trim() && proposal.modelSuggestion === "D") {
     return { ok: false, reason: "The AI draft has no observation text. Assess it in the detail form." };
   }
   if (proposal.modelSuggestion === "D") {
@@ -138,7 +167,6 @@ export function buildConfirmDraft(
     draft: {
       ...prefilled,
       rationale,
-      manualCheckAcknowledged: true,
       planSuggestionReviewed: true,
       ...(elementId === "demo-smoke-co" ? {
         fireSafetyUnitDetectors: proposal.modelSuggestion,

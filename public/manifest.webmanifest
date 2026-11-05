@@ -1,11 +1,12 @@
 {
   "name": "Walkthrough Kit",
   "short_name": "Walkthrough Kit",
-  "description": "Mobile-first LAHSA Form 1083 walkthrough companion for staged mock units. Capture room video and prompts offline, review evidence, record evaluator decisions, and export local drafts. Not an HMIS or LAHSA submission.",
+  "description": "Walkthrough Kit: mobile-first LAHSA Form 1083 walkthrough companion for staged mock units. Capture room video and prompts offline, review evidence, record evaluator decisions, and export local drafts. Not an HMIS or LAHSA submission.",
   "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait",
   "background_color": "#f2f5f9",
   "theme_color": "#0b5cad",
@@ -14,22 +15,28 @@
   "categories": ["utilities", "productivity"],
   "icons": [
     {
-      "src": "/icons/icon-192.svg",
+      "src": "/icons/icon-192.png",
       "sizes": "192x192",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-512.svg",
+      "src": "/icons/icon-512.png",
       "sizes": "512x512",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-maskable-512.svg",
+      "src": "/icons/icon-maskable-512.png",
       "sizes": "512x512",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/icons/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
     }
   ]
 }

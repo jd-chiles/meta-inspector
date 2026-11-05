@@ -163,6 +163,16 @@ export function createVideoClipStore(): VideoClipStore {
     return databasePromise;
   };
 
+  // Drop the cached connection so the next attempt reopens it. Used for
+  // one automatic retry when a write fails on a stale or closing
+  // connection; unlike close() it keeps the in-memory cache intact.
+  const resetDatabaseConnection = (): void => {
+    if (!databasePromise) return;
+    const pendingDatabase = databasePromise;
+    databasePromise = null;
+    void pendingDatabase.then((db) => db.close()).catch(() => undefined);
+  };
+
   const getFromMemory = (sessionId: string, roomId: string): StoredVideoClip | null => {
     const row = memoryClips.get(makeVideoClipId(sessionId, roomId));
     if (row === undefined) return null;
@@ -340,15 +350,28 @@ export function createVideoClipStore(): VideoClipStore {
         putInMemory(validated.clip as StoredVideoClip);
         return;
       }
-      try {
-        await (await database()).put("clips", validated.clip);
-        rememberClip(validated.clip as StoredVideoClip);
-      } catch (error) {
-        if (activateMemoryFallback(error)) {
-          putInMemory(validated.clip as StoredVideoClip);
+      // A write can fail on a stale or closing connection (notably on
+      // phones): drop the cached connection and retry once before
+      // surfacing the failure. The write is idempotent by clip id, and
+      // the surfaced cause stays the first error, not the retry's.
+      let firstError: unknown = null;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          await (await database()).put("clips", validated.clip);
+          rememberClip(validated.clip as StoredVideoClip);
           return;
+        } catch (error) {
+          if (activateMemoryFallback(error)) {
+            putInMemory(validated.clip as StoredVideoClip);
+            return;
+          }
+          if (attempt === 0) {
+            firstError = error;
+            resetDatabaseConnection();
+            continue;
+          }
+          throw normalizeStorageError(firstError);
         }
-        throw normalizeStorageError(error);
       }
     },
 
@@ -815,9 +838,17 @@ function normalizeStorageError(error: unknown): VideoStoreError {
       true,
     );
   }
+  // Surface the underlying cause: without it every storage failure is an
+  // undiagnosable dead end (notably first-save failures on phones).
+  // DOMException names/messages are generic engine text, never user data.
+  const causeName = typeof candidate?.name === "string" && candidate.name ? candidate.name : "Error";
+  const rawMessage = (error as { message?: unknown } | null)?.message;
+  const causeDetail = typeof rawMessage === "string" && rawMessage.trim()
+    ? rawMessage.trim().slice(0, 160)
+    : "no detail";
   return new VideoStoreError(
     "IO",
-    "The browser could not save this clip locally. The earlier clip is kept; retry or download a copy before leaving this page.",
+    `The browser could not save this clip locally (${causeName}: ${causeDetail}). The earlier clip is kept; retry or download a copy before leaving this page.`,
     true,
   );
 }

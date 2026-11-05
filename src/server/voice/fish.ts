@@ -51,10 +51,30 @@ export const MAX_TTS_RESPONSE_BYTES = 5 * 1024 * 1024;
 const FISH_REQUEST_TIMEOUT_MS = 60_000;
 
 export function resolveFishConfig(env: NodeJS.ProcessEnv | Record<string, string | undefined>): FishConfig {
+  return resolveFishConfigForLanguage(env, "en");
+}
+
+/**
+ * Server-only voice selection for one narration language (REQ-R2). Spanish
+ * narration uses the separate owner voice FISH_VOICE_ID_ES; when unset the
+ * caller fails closed with SETUP_REQUIRED (the client disables the Spanish
+ * toggle, so this fires only for forged or stale requests).
+ */
+export function resolveFishConfigForLanguage(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined>,
+  language: "en" | "es",
+): FishConfig {
   const apiKey = (env.FISH_API_KEY ?? "").trim();
-  const voiceId = (env.FISH_VOICE_ID ?? "").trim();
+  const voiceId = language === "es"
+    ? (env.FISH_VOICE_ID_ES ?? "").trim()
+    : (env.FISH_VOICE_ID ?? "").trim();
   if (!apiKey || !voiceId) {
-    throw new FishCallError("SETUP_REQUIRED", 503, "Voice is not configured on this server.", false);
+    throw new FishCallError(
+      "SETUP_REQUIRED",
+      503,
+      language === "es" ? "Spanish voice is not configured on this server." : "Voice is not configured on this server.",
+      false,
+    );
   }
   return {
     apiKey,

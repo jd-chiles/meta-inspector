@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  filmingScriptForRoom,
+  ASSISTANT_FILMING_SCRIPTS,
+  ASSISTANT_FILMING_SCRIPTS_ES,
   deriveAssistantNode,
+  filmingScriptForRoom,
   type AssistantScriptInput,
 } from "../../../src/features/walkthrough/assistant-script";
 
 const base: AssistantScriptInput = {
   fundingType: "unknown",
+  flowStarted: true,
   canCapture: false,
   pseudonym: "",
   evaluatorName: "",
@@ -23,22 +26,23 @@ const base: AssistantScriptInput = {
 };
 
 describe("deriveAssistantNode", () => {
-  it("guides the entry lock in the hallway capture rather than the kitchen", () => {
-    expect(filmingScriptForRoom("kitchen").join(" ")).not.toMatch(/entry door|lock/i);
-    expect(filmingScriptForRoom("hallway").join(" ")).toMatch(/front door.*lock/i);
+  it("points at the single entrance before the flow starts", () => {
+    const node = deriveAssistantNode({ ...base, flowStarted: false });
+    expect(node.key).toBe("prestart");
+    expect(node.message).toContain("Start inspection");
   });
 
-  it("starts with unit setup", () => {
+  it("starts with unit setup once the flow has evidence", () => {
     const node = deriveAssistantNode(base);
     expect(node.key).toBe("setup");
-    expect(node.actions).toMatchObject([{ id: "setup" }]);
+    expect(node).not.toHaveProperty("actions");
     expect(node.speak.length).toBeGreaterThan(0);
   });
 
   it("walks rooms in order after setup", () => {
     const node = deriveAssistantNode({ ...base, fundingType: "lahsa", canCapture: true });
     expect(node.key).toBe("film-kitchen");
-    expect(node.actions[0]).toMatchObject({ id: "film-room", roomId: "kitchen" });
+    expect(node.title).toContain("film the Kitchen");
     const next = deriveAssistantNode({
       ...base,
       fundingType: "lahsa",
@@ -55,7 +59,7 @@ describe("deriveAssistantNode", () => {
     expect(last.key).toBe("film-hallway");
   });
 
-  it("offers one-tap analysis once every room is filmed", () => {
+  it("points at the batch panel once every room is filmed", () => {
     const node = deriveAssistantNode({
       ...base,
       fundingType: "lahsa",
@@ -64,7 +68,7 @@ describe("deriveAssistantNode", () => {
       analyzedTotal: 1,
     });
     expect(node.key).toBe("analyze");
-    expect(node.actions[0]?.id).toBe("analyze-all");
+    expect(node.message).toContain("batch analysis panel");
   });
 
   it("moves requirement by requirement after analysis", () => {
@@ -77,9 +81,7 @@ describe("deriveAssistantNode", () => {
       analyzedTotal: 5,
     });
     expect(node.key).toBe("review");
-    expect(node.actions.map((action) => action.id as string)).not.toContain("confirm-all");
-    expect(node.actions).toHaveLength(1);
-    expect(node.actions[0]).toMatchObject({ id: "open-requirement", elementId: "demo-item-05", primary: true });
+    expect(node.message).toContain("record your own decision");
   });
 
   it("ends at sign-off and completion", () => {
@@ -107,5 +109,27 @@ describe("deriveAssistantNode", () => {
   it("has no walkthrough on the HUD route", () => {
     const node = deriveAssistantNode({ ...base, fundingType: "hud" });
     expect(node.key).toBe("hud");
+  });
+});
+
+describe("filmingScriptForRoom", () => {
+  it("resolves every room id to its room-type shot list", () => {
+    expect(filmingScriptForRoom("kitchen")[0]).toContain("kitchen faucet");
+    expect(filmingScriptForRoom("bathroom-2")[0]).toContain("bathroom faucet");
+    expect(filmingScriptForRoom("bedroom")[0]).toContain("bedroom");
+    expect(filmingScriptForRoom("living-room")[0]).toContain("living room");
+    expect(filmingScriptForRoom("hallway")[0]).toContain("hallway");
+  });
+
+  it("keeps cues short for spoken readout with ES parity per room type", () => {
+    for (const cues of Object.values(ASSISTANT_FILMING_SCRIPTS)) {
+      expect(cues.length).toBeGreaterThan(0);
+      for (const cue of cues) {
+        expect(cue.length).toBeLessThan(160);
+      }
+    }
+    expect(Object.keys(ASSISTANT_FILMING_SCRIPTS_ES).sort()).toEqual(
+      Object.keys(ASSISTANT_FILMING_SCRIPTS).sort(),
+    );
   });
 });

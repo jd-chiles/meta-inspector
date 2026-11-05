@@ -1,0 +1,77 @@
+.bar {
+  position: fixed;
+  z-index: 60;
+  right: 0;
+  bottom: calc(80px + env(safe-area-inset-bottom));
+  left: 0;
+  border-top: 1px solid #c9d8ec;
+  border-bottom: 1px solid #c9d8ec;
+  background: #fbfdff;
+  box-shadow: 0 -8px 24px rgb(18 63 115 / 14%);
+}
+
+.inner { max-width: 1000px; margin: 0 auto; }
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+}
+
+.avatar {
+  display: grid;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  background: #123f73;
+  color: #fff;
+}
+
+.headerCopy { min-width: 0; flex: 1; }
+.headerCopy strong { display: block; font-size: 0.85rem; }
+.headerCopy small {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #637183;
+  font-size: 0.7rem;
+}
+
+.headerActions { display: flex; gap: 2px; }
+
+.iconButton {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #33506e;
+  cursor: pointer;
+}
+
+.iconButton:hover { background: #e8f0fa; }
+
+.body { display: grid; gap: 8px; border-top: 1px solid #e1e9f3; padding: 11px 12px 12px; }
+
+.message { margin: 0; color: #2c3c4f; font-size: 0.85rem; line-height: 1.45; }
+
+@media (max-width: 719px) {
+  /* In-flow footer stack: the viewport-locked grid docks [bar][review
+     actions?][nav] with zero overlap. Nothing floats over tap targets. */
+  .bar { position: static; border-bottom: 0; box-shadow: none; }
+  .body { max-height: 38vh; overflow-y: auto; }
+}
+
+@media (min-width: 960px) {
+  .bar { right: 28px; bottom: 28px; left: auto; width: 380px; border: 1px solid #c9d8ec; border-radius: 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar { box-shadow: 0 -2px 8px rgb(18 63 115 / 18%); }
+}

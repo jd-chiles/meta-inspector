@@ -61,6 +61,9 @@ describe("bounded Form 1083 guide", () => {
 
   it("accepts same-machine loopback aliases only on the same scheme and port", async () => {
     const body = { itemId: "demo-water-supply", action: "next", stage: "start" };
+    const viaIngress = request(body, { origin: "https://walkthrough.test" }, "http://10.0.0.5:3000/api/guide");
+    expect((await handleGuideRequest(viaIngress, { mode: "fixture", appPublicOrigin: "https://walkthrough.test" })).status).toBe(200);
+    expect((await handleGuideRequest(viaIngress, { mode: "fixture", appPublicOrigin: "not-a-url" })).status).toBe(503);
     const alias = request(body, { origin: "http://localhost:3101" }, "http://127.0.0.1:3101/api/guide");
     const wrongPort = request(body, { origin: "http://localhost:3100" }, "http://127.0.0.1:3101/api/guide");
     expect((await handleGuideRequest(alias, { mode: "fixture" })).status).toBe(200);

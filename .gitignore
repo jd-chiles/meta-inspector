@@ -15,3 +15,9 @@ test-results/
 
 # Local-only working notes and handoffs; never publish these files.
 .private-project-notes/
+.agents/
+.muse/
+.hermes/
+executor-contract*.md
+data/
+

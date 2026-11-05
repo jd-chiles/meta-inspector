@@ -11,13 +11,18 @@ export interface VoiceClipManifest {
   clips: Record<string, { chars: number }>;
 }
 
-const MANIFEST_URL = "/voice/manifest.json";
+const MANIFEST_URLS = {
+  en: "/voice/manifest.json",
+  es: "/voice/es/manifest.json",
+} as const;
 
-let manifestPromise: Promise<VoiceClipManifest | null> | null = null;
+export type VoiceManifestLanguage = keyof typeof MANIFEST_URLS;
+
+const manifestPromises = new Map<VoiceManifestLanguage, Promise<VoiceClipManifest | null>>();
 
 /** Test-only reset for the memoized manifest fetch. */
 export function __resetVoiceManifestForTests(): void {
-  manifestPromise = null;
+  manifestPromises.clear();
 }
 
 function parseManifest(value: unknown): VoiceClipManifest | null {
@@ -27,19 +32,20 @@ function parseManifest(value: unknown): VoiceClipManifest | null {
   return { version: 1, clips: record.clips as Record<string, { chars: number }> };
 }
 
-function loadManifest(fetchImpl: typeof fetch): Promise<VoiceClipManifest | null> {
-  if (!manifestPromise) {
-    manifestPromise = (async () => {
-      try {
-        const response = await fetchImpl(MANIFEST_URL, { cache: "force-cache" });
-        if (!response.ok) return null;
-        return parseManifest(await response.json());
-      } catch {
-        return null;
-      }
-    })();
-  }
-  return manifestPromise;
+function loadManifest(fetchImpl: typeof fetch, language: VoiceManifestLanguage): Promise<VoiceClipManifest | null> {
+  const cached = manifestPromises.get(language);
+  if (cached) return cached;
+  const pending = (async () => {
+    try {
+      const response = await fetchImpl(MANIFEST_URLS[language], { cache: "no-store" });
+      if (!response.ok) return null;
+      return parseManifest(await response.json());
+    } catch {
+      return null;
+    }
+  })();
+  manifestPromises.set(language, pending);
+  return pending;
 }
 
 /**
@@ -61,8 +67,12 @@ export async function voiceClipIdForText(text: string): Promise<string | null> {
 }
 
 /** Static clip URL for exact text, or null to speak it live instead. */
-export async function staticVoiceUrl(text: string, fetchImpl: typeof fetch = fetch): Promise<string | null> {
-  const [manifest, id] = await Promise.all([loadManifest(fetchImpl), voiceClipIdForText(text)]);
+export async function staticVoiceUrl(
+  text: string,
+  fetchImpl: typeof fetch = fetch,
+  language: VoiceManifestLanguage = "en",
+): Promise<string | null> {
+  const [manifest, id] = await Promise.all([loadManifest(fetchImpl, language), voiceClipIdForText(text)]);
   if (!manifest || !id || !manifest.clips[id]) return null;
-  return `/voice/${id}.mp3`;
+  return language === "es" ? `/voice/es/${id}.mp3` : `/voice/${id}.mp3`;
 }

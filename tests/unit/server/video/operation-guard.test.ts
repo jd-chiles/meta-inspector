@@ -191,10 +191,44 @@ describe("video operation cancellation", () => {
   });
 });
 
+describe("same-session concurrent operations (Sprint 0 REQ-S2)", () => {
+  it("isolates two concurrent same-session operations by full request identity", () => {
+    const first = identity();
+    const second = { ...identity(), sessionId: first.sessionId };
+    const firstLease = claimVideoSegmentation(first);
+    const secondLease = claimVideoSegmentation(second);
+    firstLease.awaitingMap("token-first", Date.now() + 60_000);
+    secondLease.awaitingMap("token-second", Date.now() + 60_000);
+
+    // A cross-lease mapping is stale; each lease maps only with its own identity and token.
+    expectVideoError(() => claimVideoMapping(first, "token-second"), "STALE_REQUEST");
+    expectVideoError(() => claimVideoMapping(second, "token-first"), "STALE_REQUEST");
+    const firstMapping = claimVideoMapping(first, "token-first");
+    const secondMapping = claimVideoMapping(second, "token-second");
+    firstMapping.complete();
+    secondMapping.complete();
+  });
+
+  // A walkthrough analyses its four rooms at once, so a session admits four.
+  it("admits at most four concurrent operations per session", () => {
+    const base = identity();
+    const sessionId = base.sessionId;
+    const leases = [0, 1, 2, 3].map(() => claimVideoSegmentation({ ...identity(), sessionId }));
+    expectVideoError(
+      () => claimVideoSegmentation({ ...identity(), sessionId }),
+      "OPERATION_BUSY",
+    );
+    leases[0]!.complete();
+    // Releasing one slot admits the next identity.
+    const nextLease = claimVideoSegmentation({ ...identity(), sessionId });
+    leases.slice(1).forEach((lease) => lease.complete());
+    nextLease.complete();
+  });
+});
+
 describe("process-wide video operation admission", () => {
-  it("rejects a third concurrent operation and admits it after capacity is released", () => {
-    const first = claimVideoProcessing();
-    const second = claimVideoProcessing();
+  it("rejects a fifth concurrent operation and admits it after capacity is released", () => {
+    const held = [0, 1, 2, 3].map(() => claimVideoProcessing());
 
     let caught: unknown;
     try {
@@ -209,10 +243,10 @@ describe("process-wide video operation admission", () => {
       message: "Video processing is busy. Wait briefly and try again.",
     });
 
-    first.release();
-    first.release();
+    held[0]!.release();
+    held[0]!.release();
     const replacement = claimVideoProcessing();
-    second.release();
+    held.slice(1).forEach((lease) => lease.release());
     replacement.release();
   });
 });

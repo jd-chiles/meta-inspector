@@ -3,14 +3,14 @@ import path from "node:path";
 
 import { test, expect } from "@playwright/test";
 
-import { goToCapture } from "./navigation";
+import { goToCapture, setupProfile } from "./navigation";
 
 test.use({
   storageState: { cookies: [], origins: [] },
   viewport: { width: 1365, height: 900 },
 });
 
-test("desktop Capture uses five-tab navigation and places prompts beside the video", async ({ page }) => {
+test("desktop Capture uses four-tab navigation and places prompts beside the video", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
   await expect(page.getByText("Walkthrough Kit", { exact: true })).toBeVisible();
@@ -18,18 +18,14 @@ test("desktop Capture uses five-tab navigation and places prompts beside the vid
   await expect(page.getByRole("heading", { level: 1, name: "Inspection home" })).toBeVisible();
 
   const navigation = page.getByRole("navigation", { name: "Main navigation" });
-  await expect(navigation.getByRole("button")).toHaveCount(5);
-  for (const label of ["Home", "Guide", "Review", "Sign-Off", "Profile"]) {
+  await expect(navigation.getByRole("button")).toHaveCount(4);
+  for (const label of ["Home", "Review", "Sign-Off", "Profile"]) {
     await expect(navigation.getByRole("button", { name: label, exact: true })).toBeVisible();
   }
   await expect(navigation).toHaveCSS("position", "sticky");
 
+  await setupProfile(page, { pseudonym: "Staged Desktop Layout Unit", funding: "lahsa", unitType: "studio" });
   await goToCapture(page);
-  const captureSetup = page.getByRole("button", { name: /Inspection setup/ });
-  if (await captureSetup.getAttribute("aria-expanded") !== "true") await captureSetup.click();
-  await page.getByLabel("Unit pseudonym").fill("Staged Desktop Layout Unit");
-  await page.getByLabel("Funding type").selectOption("lahsa");
-  await page.getByLabel("Unit type").selectOption("studio");
 
   const capture = page.getByTestId("walkthrough-video-capture");
   await expect(page.getByRole("heading", { level: 1, name: "Film the unit" })).toBeVisible();

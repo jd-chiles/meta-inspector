@@ -1,7 +1,7 @@
-/** Static shell asset checks for the current Walkthrough Kit app. */
+/** Static shell asset checks for the current Move-in Ready app. */
 import { test, expect } from "@playwright/test";
 
-test("manifest identifies the installable Walkthrough Kit app and serves its icons", async ({ page }) => {
+test("manifest identifies the installable Move-in Ready app and serves its icons", async ({ page }) => {
   const response = await page.request.get("/");
   expect(response.ok()).toBe(true);
   expect(await response.text()).toContain('rel="manifest"');
@@ -14,8 +14,8 @@ test("manifest identifies the installable Walkthrough Kit app and serves its ico
     display?: string;
     icons?: Array<{ src?: string; sizes?: string }>;
   };
-  expect(manifest.name).toBe("Walkthrough Kit");
-  expect(manifest.description).toContain("Mobile-first LAHSA Form 1083 walkthrough companion");
+  expect(manifest.name).toBe("Meta Inspect — Move-in Ready");
+  expect(manifest.description).toContain("mobile-first LAHSA Form 1083 walkthrough companion");
   expect(manifest.display).toBe("standalone");
   expect(manifest.icons?.some((icon) => icon.sizes === "192x192")).toBe(true);
   expect(manifest.icons?.some((icon) => icon.sizes === "512x512")).toBe(true);

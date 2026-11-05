@@ -15,6 +15,8 @@ import {
   validateEvidenceReference,
   validateEvaluatorDecision,
   validateEvaluatorSignoff,
+  validateParticipantSignoff,
+  PARTICIPANT_ATTESTATION_TEXT,
   validateVideoAnalysisIdentity,
   validateModelProposalSet,
   type EvidenceReference,
@@ -536,6 +538,38 @@ describe("Walkthrough Kit inspection domain", () => {
     }
   });
 
+  it("accepts an Approved decision with no note but still requires a D rationale", () => {
+    const approved = validateEvaluatorDecision({
+      status: "A",
+      evaluatorName: "Alex Morgan",
+      decidedAt: TIMESTAMP,
+      inPersonCheckAcknowledgment: IN_PERSON_ACKNOWLEDGMENT,
+      rationale: "",
+      evidence: [],
+      analysisIdentity: null,
+    });
+    expect(approved.ok).toBe(true);
+    const deficient = validateEvaluatorDecision({
+      status: "D",
+      evaluatorName: "Alex Morgan",
+      decidedAt: TIMESTAMP,
+      inPersonCheckAcknowledgment: IN_PERSON_ACKNOWLEDGMENT,
+      rationale: "   ",
+      evidence: [],
+      analysisIdentity: null,
+      deficiency: {
+        issueDescription: "Leak",
+        correction: "Fix",
+        completionDate: "2026-11-10",
+        reinspectionDate: "2026-11-11",
+      },
+    });
+    expect(deficient.ok).toBe(false);
+    if (!deficient.ok) {
+      expect(deficient.errors.join(" ")).toContain("rationale must be 1–1000 characters");
+    }
+  });
+
   it("rejects an AI-like evaluator decision with an extra model suggestion field", () => {
     const result = validateEvaluatorDecision({
       status: "A",
@@ -559,6 +593,26 @@ describe("Walkthrough Kit inspection domain", () => {
     ).toBe(false);
     expect(validateEvaluatorSignoff({ ...SIGNOFF, attested: false }).ok).toBe(false);
     expect(validateEvaluatorSignoff({ ...SIGNOFF, signedAt: "yesterday" }).ok).toBe(false);
+  });
+
+  it("requires a participant co-signature that matches the participant and explicit attestation", () => {
+    expect(PARTICIPANT_ATTESTATION_TEXT).toBe(
+      "I walked through this unit with the evaluator. The findings above match what I saw.",
+    );
+    const participant = {
+      participantName: "Pat Rivera",
+      typedSignature: "Pat Rivera",
+      attested: true,
+      signedAt: TIMESTAMP,
+    };
+    expect(validateParticipantSignoff(participant).ok).toBe(true);
+    expect(
+      validateParticipantSignoff({ ...participant, typedSignature: "Someone Else" }).ok,
+    ).toBe(false);
+    expect(validateParticipantSignoff({ ...participant, attested: false }).ok).toBe(false);
+    expect(validateParticipantSignoff({ ...participant, signedAt: "yesterday" }).ok).toBe(false);
+    expect(validateParticipantSignoff({ ...participant, participantName: "" }).ok).toBe(false);
+    expect(validateParticipantSignoff({ ...participant, ssn: "000-00-0000" }).ok).toBe(false);
   });
 
   it("does not derive an inspection outcome from model proposals or unreviewed elements", () => {

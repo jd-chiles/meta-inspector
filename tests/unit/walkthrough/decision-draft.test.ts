@@ -51,8 +51,15 @@ describe("buildConfirmDraft", () => {
     if (!result.ok) return;
     expect(result.draft.choice).toBe("A");
     expect(result.draft.rationale).toBe("The faucet runs clear with steady pressure.");
-    expect(result.draft.manualCheckAcknowledged).toBe(true);
     expect(result.draft.evidenceStillIds).toEqual(["still-1"]);
+  });
+
+  it("confirms an Approved draft with no observation text and no note", () => {
+    const result = buildConfirmDraft("demo-water-supply", approvedProposal({ observation: "  " }), null);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.draft.choice).toBe("A");
+    expect(result.draft.rationale.trim()).toBe("");
   });
 
   it("quotes the voice answers in the confirmed rationale", () => {
@@ -88,7 +95,6 @@ describe("buildConfirmDraft", () => {
     expect(result.draft.issueDescription).toBe("Kitchen faucet");
     expect(result.draft.correction).toBe("Replace the faucet cartridge.");
     expect(result.draft.planSuggestionReviewed).toBe(true);
-    expect(result.draft.manualCheckAcknowledged).toBe(true);
   });
 
   it("sends a Deficient draft without a correction plan to the detail form", () => {
@@ -125,8 +131,17 @@ describe("buildConfirmDraft", () => {
     expect(result.draft.fireSafetyPublicAreaDetectors).toBe("A");
   });
 
-  it("sends an empty draft to the detail form instead of saving silence", () => {
-    const result = buildConfirmDraft("demo-water-supply", approvedProposal({ observation: "  " }), null);
+  it("sends a Deficient draft with no observation text to the detail form", () => {
+    const result = buildConfirmDraft("demo-water-supply", approvedProposal({
+      observation: "  ",
+      modelSuggestion: "D",
+      deficiencySuggestion: {
+        deficientArea: "Sink",
+        correction: "Fix",
+        completionDate: "2026-11-10",
+        reinspectionDate: "2026-11-11",
+      },
+    }), null);
     expect(result.ok).toBe(false);
   });
 });

@@ -24,13 +24,28 @@ export const metadata: Metadata = {
     template: "%s · Walkthrough Kit",
   },
   description:
-    "A mobile-first LAHSA Form 1083 room-video walkthrough for staged mock units, with human-reviewed evidence and local/manual exports. Not an HMIS submission.",
+    "Walkthrough Kit: mobile-first LAHSA Form 1083 room-video walkthrough for staged mock units, with human-reviewed evidence and local/manual exports. Not an HMIS submission.",
   manifest: "/manifest.webmanifest",
+  applicationName: "Walkthrough Kit",
+  appleWebApp: {
+    capable: true,
+    title: "Walkthrough Kit",
+    statusBarStyle: "default",
+  },
+  icons: {
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  formatDetection: { telephone: false },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  viewportFit: "cover",
   themeColor: "#0b5cad",
 };
 
@@ -38,6 +53,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <head>
+        <meta name="apple-mobile-web-app-capable" content="yes" />
         <link
           rel="preload"
           href="/fonts/public-sans-latin-400-normal.woff2"
@@ -65,8 +81,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <rect x="15" y="3" width="10" height="6" rx="2" fill="#176b5b" />
               <path d="M14 20l5 5 7-9" fill="none" stroke="#176b5b" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <p className="app-splash-title">Habitability Walkthrough</p>
-            <p className="app-splash-sub">Mock-unit pilot</p>
+            <p className="app-splash-title">Walkthrough Kit</p>
+            <p className="app-splash-sub">Staged mock-unit pilot</p>
             <div className="app-splash-spinner" aria-hidden="true" />
             <p className="app-splash-status" id="app-splash-status">Loading…</p>
           </div>

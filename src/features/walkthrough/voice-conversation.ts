@@ -29,52 +29,177 @@ function speakWithDeviceVoice(text: string): Promise<void> {
         return;
       }
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.onend = () => resolve();
-      utterance.onerror = () => resolve();
+      utterance.rate = DEVICE_SPEECH_RATE;
+      const done = () => {
+        window.clearInterval(keepalive);
+        resolve();
+      };
+      utterance.onend = done;
+      utterance.onerror = done;
       window.speechSynthesis.cancel();
       window.speechSynthesis.speak(utterance);
+      // iOS/macOS randomly suspend long utterances; a resume pulse keeps
+      // narration alive until it ends. Cleared the moment speech settles.
+      const keepalive = window.setInterval(() => {
+        try {
+          if (window.speechSynthesis.speaking && window.speechSynthesis.paused) window.speechSynthesis.resume();
+        } catch {
+          // Best-effort only.
+        }
+      }, 3000);
       // Never hang the conversation on a stuck voice engine.
-      window.setTimeout(resolve, Math.min(30_000, 3000 + text.length * 120));
+      window.setTimeout(done, Math.min(45_000, 3000 + text.length * 175));
     } catch {
       resolve();
     }
   });
 }
 
-function playAudioUrl(url: string, signal?: AbortSignal): Promise<void> {
+/**
+ * Shared playback element. iOS only lets an element play later (from
+ * timers) if it was played inside a user gesture first, so recording
+ * start primes it; every guided clip then plays through it.
+ */
+let sharedAudio: HTMLAudioElement | null = null;
+
+function silentWavUrl(): string {
+  const sampleRate = 8000;
+  const samples = 400;
+  const buffer = new ArrayBuffer(44 + samples * 2);
+  const view = new DataView(buffer);
+  const write = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i));
+  };
+  write(0, "RIFF");
+  view.setUint32(4, 36 + samples * 2, true);
+  write(8, "WAVEfmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  write(36, "data");
+  view.setUint32(40, samples * 2, true);
+  return URL.createObjectURL(new Blob([buffer], { type: "audio/wav" }));
+}
+
+function ensureSharedAudio(): HTMLAudioElement | null {
+  try {
+    if (typeof Audio === "undefined") return null;
+    if (!sharedAudio) sharedAudio = new Audio();
+    return sharedAudio;
+  } catch {
+    return null;
+  }
+}
+
+/** Play near-silence inside a user gesture so later guided clips play. */
+export function primeAudio(): void {
+  try {
+    const audio = ensureSharedAudio();
+    if (!audio) return;
+    audio.src = silentWavUrl();
+    void audio.play().catch(() => undefined);
+  } catch {
+    // Autoplay policy stays silent; speech retries on the next tap.
+  }
+}
+
+export const PLAYBACK_TIMEOUT_MESSAGE = "voice playback timed out";
+
+/** Hard cap for one clip: speech runs ~15 chars/s, floor 12s, cap 45s. */
+/**
+ * Narration pace for every voice surface: static clips, live synthesis, and
+ * the device fallback all speak ~30% slower than conversational so filming
+ * keeps up. Timeout budgets assume this rate (roughly 10 chars/second).
+ */
+export const SPEECH_PLAYBACK_RATE = 0.6;
+export const DEVICE_SPEECH_RATE = 0.65;
+
+export function playbackTimeoutMs(text: string): number {
+  // Slower narration needs a longer ceiling, or clips get cut mid-sentence.
+  return Math.max(20_000, Math.min(75_000, text.length * 200));
+}
+
+function playAudioUrl(url: string, signal?: AbortSignal, timeoutMs: number = 12_000): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    const audio = new Audio(url);
+    const audio = ensureSharedAudio() ?? new Audio(url);
+    try {
+      audio.playbackRate = SPEECH_PLAYBACK_RATE;
+    } catch {
+      // Older engines ignore playback rate; the clip still plays.
+    }
+    audio.src = url;
+    const timer = setTimeout(() => {
+      cleanup();
+      audio.pause();
+      reject(new Error(PLAYBACK_TIMEOUT_MESSAGE));
+    }, timeoutMs);
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    };
     const onAbort = () => {
+      cleanup();
       audio.pause();
       reject(new DOMException("aborted", "AbortError"));
     };
     signal?.addEventListener("abort", onAbort, { once: true });
     audio.onended = () => {
-      signal?.removeEventListener("abort", onAbort);
+      cleanup();
       resolve();
     };
     audio.onerror = () => {
-      signal?.removeEventListener("abort", onAbort);
+      cleanup();
       reject(new Error("voice playback failed"));
     };
-    void audio.play().catch(reject);
+    void audio.play().catch((error: unknown) => {
+      cleanup();
+      reject(error instanceof Error ? error : new Error("voice playback failed"));
+    });
   });
 }
 
+function isPlaybackTimeout(error: unknown): boolean {
+  return error instanceof Error && error.message === PLAYBACK_TIMEOUT_MESSAGE;
+}
+
+/**
+ * Autoplay policy, not a broken clip. Falling through to live synthesis here
+ * would bill a provider call that is equally unable to play, and the device
+ * voice would then read the line in a different voice. Stay silent instead:
+ * the next user gesture unlocks playback and the same static clip plays.
+ */
+function isAutoplayBlocked(error: unknown): boolean {
+  return (error as { name?: unknown } | null)?.name === "NotAllowedError";
+}
+
+export interface SpeakPromptOptions {
+  /** Tour narration language; "es" uses the Spanish owner voice (REQ-R2). */
+  language?: "en" | "es";
+}
+
 /** Speak one prompt; resolves with the engine that spoke. Aborted on signal. */
-export async function speakPrompt(text: string, signal?: AbortSignal): Promise<SpeakResult> {
+export async function speakPrompt(text: string, signal?: AbortSignal, options: SpeakPromptOptions = {}): Promise<SpeakResult> {
+  const language = options.language ?? "en";
   if (signal?.aborted) return { engine: "none" };
   // Static-first: pre-generated clips for the fixed script play instantly
   // with zero provider latency. They are the same Fish voice, so a static
   // hit reports "fish"; anything missing falls through to live speech.
   try {
-    const clip = await staticVoiceUrl(text);
+    const clip = await staticVoiceUrl(text, fetch, language);
     if (clip && !signal?.aborted) {
-      await playAudioUrl(clip, signal);
+      await playAudioUrl(clip, signal, playbackTimeoutMs(text));
       return { engine: "fish" };
     }
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
+    // Autoplay-blocked: the clip is fine, the browser is waiting for a gesture.
+    if (isAutoplayBlocked(error)) return { engine: "none" };
+    // A stuck clip counts as spoken: never freeze the walkthrough on it.
+    if (isPlaybackTimeout(error)) return { engine: "fish" };
     // A missing or unplayable clip falls through to live speech below.
   }
   if (signal?.aborted) return { engine: "none" };
@@ -85,7 +210,7 @@ export async function speakPrompt(text: string, signal?: AbortSignal): Promise<S
         "content-type": "application/json",
         [WALKTHROUGH_CLIENT_HEADER]: WALKTHROUGH_CLIENT_ID,
       },
-      body: JSON.stringify({ text: text.slice(0, 500) }),
+      body: JSON.stringify(language === "es" ? { text: text.slice(0, 500), language: "es" } : { text: text.slice(0, 500) }),
       signal,
     });
     if (!response.ok) throw new Error(`voice speak ${response.status}`);
@@ -93,7 +218,7 @@ export async function speakPrompt(text: string, signal?: AbortSignal): Promise<S
     if (blob.size === 0) throw new Error("voice speak empty");
     const url = URL.createObjectURL(blob);
     try {
-      await playAudioUrl(url, signal);
+      await playAudioUrl(url, signal, playbackTimeoutMs(text));
       return { engine: "fish" };
     } finally {
       URL.revokeObjectURL(url);
@@ -101,6 +226,8 @@ export async function speakPrompt(text: string, signal?: AbortSignal): Promise<S
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     if (signal?.aborted) return { engine: "none" };
+    if (isPlaybackTimeout(error)) return { engine: "fish" };
+    if (isAutoplayBlocked(error)) return { engine: "none" };
     stopDeviceSpeech();
     await speakWithDeviceVoice(text);
     if (signal?.aborted) return { engine: "none" };
@@ -110,6 +237,63 @@ export async function speakPrompt(text: string, signal?: AbortSignal): Promise<S
 
 export interface ListenResult {
   blob: Blob;
+}
+
+type CueSpeaker = (text: string, signal: AbortSignal) => Promise<unknown>;
+
+/**
+ * Speak cues strictly in turn: the next cue waits for the current one to
+ * finish instead of racing fixed timers. A failed cue never blocks the
+ * rest; aborting the signal stops the chain silently.
+ */
+export async function speakCueChain(
+  texts: readonly string[],
+  speak: CueSpeaker,
+  signal: AbortSignal,
+  onCue?: (index: number) => void,
+): Promise<void> {
+  for (let index = 0; index < texts.length; index++) {
+    if (signal.aborted) return;
+    onCue?.(index);
+    // One cue gets a hard ceiling (speech time + fetch slack): a stalled
+    // clip, fetch, or device voice can never freeze the walkthrough.
+    // A failed cue retries once before moving on: a network blip must
+    // not silently drop the walkthrough's voice mid-take.
+    const ceilingMs = playbackTimeoutMs(texts[index]!) + 8_000;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (signal.aborted) return;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          speak(texts[index]!, signal),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => reject(new Error("cue timed out")), ceilingMs);
+          }),
+        ]);
+        break;
+      } catch {
+        if (signal.aborted) return;
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    }
+    if (signal.aborted) return;
+    await new Promise((resolveGap) => setTimeout(resolveGap, 1000));
+  }
+}
+
+/** Guided narration: speak the shot list step by step through the Fish pipeline. */
+export function speakSequentially(
+  texts: readonly string[],
+  signal: AbortSignal,
+  options: SpeakPromptOptions & { onCue?: (index: number) => void } = {},
+): Promise<void> {
+  return speakCueChain(
+    texts,
+    (text, chainSignal) => speakPrompt(text, chainSignal, { language: options.language }),
+    signal,
+    options.onCue,
+  );
 }
 
 function pickMimeType(): string {
@@ -180,8 +364,16 @@ export function listenOnce(options: { maxMs?: number } = {}): {
   return { done, stop: () => stopRecording() };
 }
 
-/** Transcribe one mic clip; returns raw text (possibly empty). */
-export async function transcribeClip(blob: Blob, signal?: AbortSignal): Promise<string> {
+/** Which ASR engine answered: Muse (primary), Fish (flagged backup), or unknown (older stub). */
+export type TranscribeProvider = "muse" | "fish" | "unknown";
+
+export interface TranscribeResult {
+  text: string;
+  providerUsed: TranscribeProvider;
+}
+
+/** Transcribe one mic clip; returns raw text (possibly empty) plus which engine answered. */
+export async function transcribeClip(blob: Blob, signal?: AbortSignal): Promise<TranscribeResult> {
   const form = new FormData();
   form.append("audio", blob, "mic.webm");
   const response = await fetch("/api/voice/transcribe", {
@@ -193,5 +385,9 @@ export async function transcribeClip(blob: Blob, signal?: AbortSignal): Promise<
   if (!response.ok) throw new Error(`voice transcribe ${response.status}`);
   const body: unknown = await response.json().catch(() => null);
   const text = typeof body === "object" && body !== null ? (body as { text?: unknown }).text : undefined;
-  return typeof text === "string" ? text : "";
+  const providerUsed = typeof body === "object" && body !== null ? (body as { providerUsed?: unknown }).providerUsed : undefined;
+  return {
+    text: typeof text === "string" ? text : "",
+    providerUsed: providerUsed === "muse" || providerUsed === "fish" ? providerUsed : "unknown",
+  };
 }

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __setGuideSpeakerForTests,
   cancelSpeech,
+  speakCueSequence,
   speakText,
 } from "../../../src/features/walkthrough/voice-guide";
 
@@ -38,6 +39,24 @@ describe("guide voice unification", () => {
     expect(seen.current?.aborted).toBe(true);
   });
 
+  it("walks cues one at a time, in order", async () => {
+    const order: string[] = [];
+    const heard: string[] = [];
+    const speaker = vi.fn().mockImplementation(async (text: string) => {
+      order.push(`start:${text}`);
+      heard.push(text);
+      await Promise.resolve();
+      order.push(`end:${text}`);
+      return { engine: "fish" };
+    });
+    __setGuideSpeakerForTests(speaker);
+    const sequence = speakCueSequence(["First shot.", "Second shot."], (index) => order.push(`cue:${index}`));
+    await sequence.done;
+    expect(heard).toEqual(["First shot.", "Second shot."]);
+    expect(order.indexOf("end:First shot.")).toBeLessThan(order.indexOf("start:Second shot."));
+    expect(order).toContain("cue:1");
+  }, 10_000);
+
   it("cancelSpeech aborts in-flight guidance", async () => {
     const seen: { current: AbortSignal | null } = { current: null };
     const speaker = vi.fn().mockImplementation(
@@ -50,5 +69,20 @@ describe("guide voice unification", () => {
     speakText("A long cue.");
     cancelSpeech();
     expect(seen.current?.aborted).toBe(true);
+  });
+
+  it("stopping the sequence stops later cues", async () => {
+    const heard: string[] = [];
+    const speaker = vi.fn().mockImplementation((text: string, signal?: AbortSignal) => {
+      heard.push(text);
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+      });
+    });
+    __setGuideSpeakerForTests(speaker);
+    const sequence = speakCueSequence(["First shot.", "Second shot.", "Third shot."]);
+    sequence.cancel();
+    await sequence.done;
+    expect(heard).toEqual(["First shot."]);
   });
 });
