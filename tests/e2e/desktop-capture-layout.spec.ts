@@ -12,8 +12,9 @@ test.use({
 
 test("desktop Capture uses four-tab navigation and places prompts beside the video", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByTestId("move-in-ready-app")).toBeVisible();
-  await expect(page.getByText("Walkthrough Kit", { exact: true })).toBeVisible();
+  const app = page.getByTestId("move-in-ready-app");
+  await expect(app).toBeVisible();
+  await expect(app.getByText("Walkthrough Kit", { exact: true })).toBeVisible();
   await expect(page.getByTestId("analysis-mode")).toHaveText("Sample only");
   await expect(page.getByRole("heading", { level: 1, name: "Inspection home" })).toBeVisible();
 

@@ -5,7 +5,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { goToCapture, openProfilePanel, selectRoom } from "./navigation";
 
-const APP_SHELL_CACHE = "habitability-walkthrough-shell-v6";
+const APP_SHELL_CACHE_PREFIX = "habitability-walkthrough-shell-";
 
 test.use({
   serviceWorkers: "allow",
@@ -57,8 +57,12 @@ async function readCachedShellState(page: Page): Promise<{
   staticResourceCount: number;
   missingStaticResources: string[];
 }> {
-  return page.evaluate(async (cacheName) => {
-    const cache = await caches.open(cacheName);
+  return page.evaluate(async (cachePrefix) => {
+    const shellCaches = (await caches.keys()).filter((name) => name.startsWith(cachePrefix));
+    if (shellCaches.length !== 1) {
+      throw new Error(`Expected one installed app-shell cache, found ${shellCaches.length}.`);
+    }
+    const cache = await caches.open(shellCaches[0]);
     const hasShell = Boolean(await cache.match(new URL("/", location.origin).href));
     const hasManifest = Boolean(await cache.match(new URL("/manifest.webmanifest", location.origin).href));
     const staticUrls = [...new Set(performance.getEntriesByType("resource")
@@ -76,7 +80,7 @@ async function readCachedShellState(page: Page): Promise<{
       if (!await cache.match(url)) missingStaticResources.push(url);
     }
     return { hasShell, hasManifest, staticResourceCount: staticUrls.length, missingStaticResources };
-  }, APP_SHELL_CACHE);
+  }, APP_SHELL_CACHE_PREFIX);
 }
 
 test("the hydrated walkthrough saves and restores real local progress offline", async ({ page }) => {

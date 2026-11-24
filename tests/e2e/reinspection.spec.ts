@@ -111,12 +111,19 @@ async function driveTourToReviewItem(page: Page): Promise<string> {
     }
     const start = tour.getByTestId("tour-start");
     if (await start.isVisible()) { await start.click(); continue; }
-    const options = tour.getByTestId("tour-options").getByRole("button");
-    if (await options.first().isVisible()) { await options.first().click(); continue; }
+    if (node === "ask-baths") {
+      await tour.getByRole("button", { name: "1", exact: true }).click();
+      await expect(tour).not.toHaveAttribute("data-node", node);
+      continue;
+    }
     const consent = tour.getByTestId("tour-consent-confirm");
     if (await consent.isVisible()) { await consent.click(); continue; }
     const yes = tour.getByTestId("tour-check-yes");
-    if (await yes.isVisible()) { await yes.click(); continue; }
+    if (await yes.isVisible()) {
+      await yes.click();
+      await expect(tour).not.toHaveAttribute("data-node", node);
+      continue;
+    }
     const analyzeContinue = tour.getByTestId("tour-analyze-continue");
     if (await analyzeContinue.isVisible()) { await analyzeContinue.click(); continue; }
     throw new Error(`The guided tour stalled at unexpected node "${node}".`);

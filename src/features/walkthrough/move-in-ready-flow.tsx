@@ -2993,11 +2993,13 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
   }
 
   /** Reset every per-inspection UI state after the record ref and id change. Clips reload from the session id. */
-  function resetSessionUi(next: MoveInReadyInspection): void {
+  function resetSessionUi(next: MoveInReadyInspection, sessionChanged = true): void {
     setSetupExpanded(shouldExpandCaptureSetup(next));
-    setClips({});
-    setClipsReadySessionId(null);
-    setUnreadableClipRooms([]);
+    if (sessionChanged) {
+      setClips({});
+      setClipsReadySessionId(null);
+      setUnreadableClipRooms([]);
+    }
     setSelectedRoomId(next.selectedRoomId);
     setAnalysisStatus("idle");
     setAnalysisError("");
@@ -3044,6 +3046,9 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
   }
 
   async function activateInspection(next: MoveInReadyInspection): Promise<void> {
+    // Clip verification reloads only when the session ID changes. Preserve
+    // the verified clips when reopening the active inspection for re-inspection.
+    const sessionChanged = recordRef.current?.sessionId !== next.sessionId;
     recordRef.current = next;
     setSessionId(next.sessionId);
     setRecord(next);
@@ -3052,7 +3057,7 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
     } catch {
       // Active id stays in memory for this page.
     }
-    resetSessionUi(next);
+    resetSessionUi(next, sessionChanged);
     setStep("home");
     await refreshInspectionList();
   }
