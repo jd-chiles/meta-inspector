@@ -14,7 +14,7 @@ test("manifest identifies the installable Move-in Ready app and serves its icons
     display?: string;
     icons?: Array<{ src?: string; sizes?: string }>;
   };
-  expect(manifest.name).toBe("Meta Inspect — Move-in Ready");
+  expect(manifest.name).toBe("Walkthrough Kit");
   expect(manifest.description).toContain("mobile-first LAHSA Form 1083 walkthrough companion");
   expect(manifest.display).toBe("standalone");
   expect(manifest.icons?.some((icon) => icon.sizes === "192x192")).toBe(true);

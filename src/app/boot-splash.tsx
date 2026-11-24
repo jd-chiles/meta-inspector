@@ -58,10 +58,10 @@ export default function BootSplash(): null {
       dismissed = true;
       window.clearInterval(ticker);
       observer.disconnect();
-      node.setAttribute("aria-hidden", "true");
-      node.style.pointerEvents = "none";
-      node.classList.add("app-splash-hide");
-      window.setTimeout(() => node.remove(), 400);
+      // Remove synchronously: a delayed removal leaves a duplicate brand
+      // node beside the rendered app, which breaks exact-text lookups and
+      // keeps a stale loading card in the tree after boot.
+      node.remove();
     };
     const tick = () => {
       // Compare before writing: the observer watches this subtree, so an

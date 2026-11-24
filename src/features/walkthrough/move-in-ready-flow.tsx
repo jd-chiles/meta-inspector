@@ -2995,9 +2995,17 @@ export default function MoveInReadyFlow({ analysisMode, esVoiceConfigured }: Mov
   /** Reset every per-inspection UI state after the record ref and id change. Clips reload from the session id. */
   function resetSessionUi(next: MoveInReadyInspection): void {
     setSetupExpanded(shouldExpandCaptureSetup(next));
-    setClips({});
-    setClipsReadySessionId(null);
-    setUnreadableClipRooms([]);
+    // Clips are session-scoped bytes: keep them when re-activating the same
+    // session (deficiency re-inspection), where the stored videos are
+    // untouched. Only a session switch needs a wipe; the clips loader effect
+    // re-clears and reloads on session change. Wiping here strands the tour
+    // on film-room nodes for already-filmed rooms, because nothing reloads
+    // clips for the unchanged session.
+    if (sessionId !== next.sessionId) {
+      setClips({});
+      setClipsReadySessionId(null);
+      setUnreadableClipRooms([]);
+    }
     setSelectedRoomId(next.selectedRoomId);
     setAnalysisStatus("idle");
     setAnalysisError("");
