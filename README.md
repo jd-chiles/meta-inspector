@@ -1,63 +1,50 @@
 # Walkthrough Kit
 
-**A human-led, AI-assisted habitability walkthrough for housing navigators.**
+**A mobile walkthrough tool that helps housing navigators turn room video into an inspection packet they can review and sign.** Built for the Meta Muse hackathon and developed in the `meta-inspector` repository.
 
-Walkthrough Kit is a mobile-first prototype for capturing a staged housing-unit walkthrough, organizing video evidence, and preparing a local inspection packet. It explores how an AI companion can help overextended case managers and navigators document a walkthrough while leaving every inspection decision with a human evaluator.
+[Watch the hackathon demo](https://youtube.com/shorts/Hd3KRB_YYC4) · [Read the case study](docs/CASE_STUDY.md) · [Run it locally](#try-it-locally)
 
-## The problem
+Housing navigators need to capture what they saw, record checks that require an in-person visit, and assemble the supporting paperwork. Walkthrough Kit puts those steps in one mobile workflow.
 
-People can wait a long time for housing assistance, then spend scarce time searching for a home that meets program requirements. A visit to an unsuitable unit can add avoidable work for both the household and the case manager. Staff may also be carrying heavy caseloads or have limited experience with habitability walkthroughs.
-
-Walkthrough Kit focuses on the documentation and review step: guide the worker through the rooms, connect AI suggestions to source video, and make it clear what still needs human review. These are product motivations, not measured impact claims; the project has not established reduced visits, time savings, or improved housing outcomes.
-
-## What the prototype does
-
-- Guides capture for the kitchen, bathroom, bedroom/living area, and hallway. The front door and lock are covered in the hallway.
-- Uses Meta SAM 3.1 to find candidate moments and Meta Muse Spark to draft evidence-linked observations from video stills.
-- Keeps AI suggestions separate from evaluator decisions, required in-person checks, and sign-off.
-- Creates local PDFs and JSON for manual handling, including a copy of the LAHSA FY 2022–23 Form 1083 and supporting evidence pages.
-
-The modeled flow is a staged demonstration. Participant/HMIS identity and unit address are blank, and the exports are not case-ready. This app does not conduct an HQS inspection, submit to HMIS, deliver documents to landlords, or decide voucher eligibility. Pre-visit address screening and SAM.gov lookups are ideas for future exploration and are not implemented.
+| Step | What the navigator does |
+|---|---|
+| **Capture** | Record or upload short clips for the kitchen, bathroom, bedroom or living area, and hallway. |
+| **Review** | In live mode, Meta SAM 3.1 finds candidate moments in the footage and Muse Spark drafts observations linked to stills. The evaluator reviews the evidence, records decisions, and completes physical checks. |
+| **Sign and export** | After review, the evaluator signs and can export a draft packet with PDF and JSON files for manual handling. The modeled checklist uses LAHSA Form 1083, FY 2022–23. |
 
 ## Screens
 
-These captures show the empty/staged interface; they do not show completed inspections or provider-generated results.
+The screenshots show the staged interface. The video shows the hackathon walkthrough.
 
 | Capture | Review | Sign-off |
 |---|---|---|
 | ![Mobile capture screen](artifacts/design-qa/capture-final-390.png) | ![Mobile review screen](artifacts/design-qa/review-final-390.png) | ![Mobile sign-off screen](artifacts/design-qa/signoff-final-390.png) |
 
-## Run locally
+## Try it locally
 
-**Requirements:** Node.js 22 and npm.
+Use **Node.js 22** and npm. Run these commands from the repository root in PowerShell on Windows.
 
-```sh
-npm ci
-cp .env.example .env.local
-npm run dev
+```powershell
+npm.cmd ci
+$env:APP_ANALYSIS_MODE = 'fixture'
+npm.cmd run dev
 ```
 
-Use `APP_ANALYSIS_MODE=fixture` for local development. Fixture output is synthetic. Live analysis requires server-side provider credentials, can incur provider charges, and sends selected media to configured providers. Use only rights-cleared staged/mock-unit media. See [development setup](docs/DEVELOPMENT.md) and [privacy and safety](docs/PRIVACY_AND_SAFETY.md).
+In Bash or Zsh, run `npm ci`, then `APP_ANALYSIS_MODE=fixture npm run dev`.
 
-## Project status and limits
+1. Open [http://localhost:3000](http://localhost:3000) to start the walkthrough.
+2. Select **Start inspection** and **Start guided inspection**. Follow the setup prompts to the first filming screen, then use the home icon to exit the guided tour.
+3. From the home screen, select **Kitchen** and upload the [bundled MP4 test pattern](tests/fixtures/synthetic-h264-test-pattern.mp4) to try clip capture and playback.
+4. In **Profile → Evaluator**, enter a mock name such as **Demo Evaluator**. Then open **Review → Structure and materials**, select **Needs check**, add a mock note, and choose **Save evaluator decision**. The **Sign-off** flow follows the required checklist decisions.
 
-The repository includes the guided capture, review, sign-off, provider routes, and local export flow. Automated checks cover the code paths they execute; fixture and CI success do not establish live model quality, physical-device compatibility, recipient acceptance, or field effectiveness. No measured staff-time savings, avoided visits, or inspection accuracy are claimed.
+This setup runs without model credentials. The test-pattern video is synthetic, and fixture mode does not run SAM or Muse Spark inference on it. See [development setup](docs/DEVELOPMENT.md) for live configuration and [privacy and safety](docs/PRIVACY_AND_SAFETY.md) for media requirements.
 
-Room capture limits are 30 seconds for the kitchen, bathroom, and bedroom/living area, and 15 seconds for the hallway. See [scope and limitations](docs/PROJECT_OVERVIEW.md) for the product boundaries and [evaluation protocol](docs/evaluation/protocol.md) for how future evidence should be reported.
+## What the project demonstrates
 
-## Documentation
+In documented live tests, the staged kitchen and bathroom runs returned evidence-linked drafts. Review found an overstated observation and some loose labels, and the broader lock and detector coverage remained unverified. The evaluator controls every checklist decision and sign-off. See the [staged-video evaluation record](docs/evaluation/video-clip-gate.md) for the method and findings.
 
-- [Project overview](docs/PROJECT_OVERVIEW.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Development setup](docs/DEVELOPMENT.md)
-- [Privacy, safety, and limitations](docs/PRIVACY_AND_SAFETY.md)
-- [Hackathon and portfolio narrative](docs/HACKATHON.md)
-- [Evaluation protocol](docs/evaluation/protocol.md)
-- [Form 1083 mapping contract](docs/integration/FORM_1083_MAPPING.md)
-- [Analysis API contract](docs/integration/ANALYZE_CONTRACT.md)
-- [Third-party notices](THIRD_PARTY_NOTICES.md)
-- [Contributing](CONTRIBUTING.md)
+The prototype is for staged walkthroughs and manual exports. Field accuracy, staff time savings, and recipient acceptance remain unmeasured. See the [project scope](docs/PROJECT_OVERVIEW.md) and [documentation index](docs/README.md) for the implementation and evaluation details.
 
-## Project identity and license
+## License
 
-The product is named **Walkthrough Kit**. The GitHub repository currently uses the `meta-inspector` URL slug. Project-authored code is licensed under MIT. Bundled forms, fonts, generated audio, and dependencies have separate terms; see [third-party notices](THIRD_PARTY_NOTICES.md).
+Project-authored code is licensed under MIT. See [third-party notices](THIRD_PARTY_NOTICES.md) for bundled forms, fonts, audio, and dependencies.

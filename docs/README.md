@@ -4,6 +4,7 @@ This documentation describes the current prototype and its evidence boundaries. 
 
 ## Product and portfolio
 
+- [Portfolio case study](CASE_STUDY.md)
 - [Project overview](PROJECT_OVERVIEW.md): problem, intended users, product scope, and limitations.
 - [Hackathon narrative](HACKATHON.md): problem framing, technical approach, demo guidance, and claims boundaries.
 - [Privacy and safety](PRIVACY_AND_SAFETY.md): media handling, human review, and data limitations.

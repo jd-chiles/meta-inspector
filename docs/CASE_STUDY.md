@@ -74,4 +74,4 @@ For any future evaluation, use the [evaluation protocol](evaluation/protocol.md)
 
 ## How to explore the repo
 
-Start with [the demo walkthrough](DEMO.md), then read [development setup](DEVELOPMENT.md) to run fixture mode. The [documentation index](README.md) maps the remaining product, architecture, API, privacy, and evaluation guides.
+Start with the [hackathon video](https://youtube.com/shorts/Hd3KRB_YYC4), then [try the local walkthrough](../README.md#try-it-locally). The [preview and evaluation notes](DEMO.md) give the supporting test history. The [documentation index](README.md) maps the remaining product, architecture, API, privacy, and evaluation guides.
