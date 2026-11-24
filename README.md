@@ -32,7 +32,7 @@ npm.cmd run dev
 
 In Bash or Zsh, run `npm ci`, then `APP_ANALYSIS_MODE=fixture npm run dev`.
 
-1. Open [http://localhost:3000](http://localhost:3000) and look for **Sample only**.
+1. Open [http://localhost:3000](http://localhost:3000) to start the walkthrough.
 2. Select **Start inspection** and **Start guided inspection**. Follow the setup prompts to the first filming screen, then use the home icon to exit the guided tour.
 3. From the home screen, select **Kitchen** and upload the [bundled MP4 test pattern](tests/fixtures/synthetic-h264-test-pattern.mp4) to try clip capture and playback.
 4. Open **Review**, select a checklist item, and save a staged evaluator decision. The **Sign-off** flow follows the required checklist decisions.

@@ -24,7 +24,7 @@ npm ci
 APP_ANALYSIS_MODE=fixture npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and confirm the **Sample only** label. This mode lets you try the capture and manual review workflow without provider credentials. See the [quick walkthrough](../README.md#try-it-locally) for a bundled clip and steps. The test-pattern clip exercises the local video controls. It does not produce a live AI result.
+Open [http://localhost:3000](http://localhost:3000) to start the walkthrough. This mode lets you try the capture and manual review workflow without provider credentials. See the [quick walkthrough](../README.md#try-it-locally) for a bundled clip and steps. The test-pattern clip exercises the local video controls. It does not produce a live AI result.
 
 ## Live provider mode
 
