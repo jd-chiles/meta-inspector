@@ -45,6 +45,9 @@ jobs:
       - name: Typecheck
         if: steps.app.outputs.enabled == 'true'
         run: npm run typecheck
+      - name: Install FFmpeg for media tests
+        if: steps.app.outputs.enabled == 'true'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Unit and API boundary checks
         if: steps.app.outputs.enabled == 'true'
         run: npm run test:unit
