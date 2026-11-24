@@ -35,7 +35,7 @@ In Bash or Zsh, run `npm ci`, then `APP_ANALYSIS_MODE=fixture npm run dev`.
 1. Open [http://localhost:3000](http://localhost:3000) to start the walkthrough.
 2. Select **Start inspection** and **Start guided inspection**. Follow the setup prompts to the first filming screen, then use the home icon to exit the guided tour.
 3. From the home screen, select **Kitchen** and upload the [bundled MP4 test pattern](tests/fixtures/synthetic-h264-test-pattern.mp4) to try clip capture and playback.
-4. Open **Review**, select a checklist item, and save a staged evaluator decision. The **Sign-off** flow follows the required checklist decisions.
+4. In **Profile → Evaluator**, enter a mock name such as **Demo Evaluator**. Then open **Review → Structure and materials**, select **Needs check**, add a mock note, and choose **Save evaluator decision**. The **Sign-off** flow follows the required checklist decisions.
 
 This setup runs without model credentials. The test-pattern video is synthetic, and fixture mode does not run SAM or Muse Spark inference on it. See [development setup](docs/DEVELOPMENT.md) for live configuration and [privacy and safety](docs/PRIVACY_AND_SAFETY.md) for media requirements.
 
